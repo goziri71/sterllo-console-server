@@ -1,6 +1,6 @@
-export const tryCatchFunction = (constroller) => async (req, res, next) => {
+export const tryCatchFunction = (controller) => async (req, res, next) => {
     try {
-        await constroller(req, res, next);
+        await controller(req, res, next);
     } catch (error) {
         next(error);
     }
