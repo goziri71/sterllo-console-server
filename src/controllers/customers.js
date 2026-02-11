@@ -14,7 +14,9 @@ export const getAllCustomers = tryCatchFunction(async (req, res) => {
   const data = await customerService.getAll({ limit, offset, filters });
 
   res.status(200).json({
+    code: 200,
     success: true,
+    message: "Customers fetched successfully",
     ...paginatedResponse(data, page, limit),
   });
 });
@@ -23,7 +25,9 @@ export const getCustomer = tryCatchFunction(async (req, res) => {
   const customer = await customerService.getByIdentifier(req.params.identifier);
 
   res.status(200).json({
+    code: 200,
     success: true,
+    message: "Customer fetched successfully",
     data: customer,
   });
 });
@@ -43,7 +47,9 @@ export const getCustomerWallets = tryCatchFunction(async (req, res) => {
   const data = await customerService.getWallets(req.params.identifier, { limit, offset });
 
   res.status(200).json({
+    code: 200,
     success: true,
+    message: "Customer wallets fetched successfully",
     ...paginatedResponse(data, page, limit),
   });
 });
@@ -53,7 +59,9 @@ export const getMerchantCustomers = tryCatchFunction(async (req, res) => {
   const data = await customerService.getByMerchant(req.params.account_key, { limit, offset });
 
   res.status(200).json({
+    code: 200,
     success: true,
+    message: "Merchant customers fetched successfully",
     ...paginatedResponse(data, page, limit),
   });
 });
