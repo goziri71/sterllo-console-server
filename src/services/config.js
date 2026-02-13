@@ -1,43 +1,42 @@
-import Currency from "../models/currencies/currency.js";
-import VAT from "../models/vats/vat.js";
-import CustomerTier from "../models/customerTiers/customerTier.js";
-import WhitelistedIP from "../models/whitelistedIPs/whitelistedIP.js";
+import { eq, and, asc, desc, count } from "drizzle-orm";
+import { db } from "../db/index.js";
+import { currencies, vats, customerTiers, whitelistedIPs } from "../db/schema/config.js";
 
 export default class ConfigService {
   async getCurrencies({ limit, offset }) {
-    return Currency.findAndCountAll({
-      limit,
-      offset,
-      order: [["name", "ASC"]],
-    });
+    const [rows, [{ total }]] = await Promise.all([
+      db.select().from(currencies).limit(limit).offset(offset).orderBy(asc(currencies.name)),
+      db.select({ total: count() }).from(currencies),
+    ]);
+    return { count: Number(total), rows };
   }
 
   async getVATs({ limit, offset }) {
-    return VAT.findAndCountAll({
-      limit,
-      offset,
-      order: [["country_code", "ASC"]],
-    });
+    const [rows, [{ total }]] = await Promise.all([
+      db.select().from(vats).limit(limit).offset(offset).orderBy(asc(vats.country_code)),
+      db.select({ total: count() }).from(vats),
+    ]);
+    return { count: Number(total), rows };
   }
 
   async getCustomerTiers({ limit, offset }) {
-    return CustomerTier.findAndCountAll({
-      limit,
-      offset,
-      order: [["tier", "ASC"]],
-    });
+    const [rows, [{ total }]] = await Promise.all([
+      db.select().from(customerTiers).limit(limit).offset(offset).orderBy(asc(customerTiers.tier)),
+      db.select({ total: count() }).from(customerTiers),
+    ]);
+    return { count: Number(total), rows };
   }
 
   async getWhitelistedIPs({ limit, offset, filters }) {
-    const where = {};
-    if (filters.account_key) where.account_key = filters.account_key;
-    if (filters.is_enabled) where.is_enabled = filters.is_enabled;
+    const conditions = [];
+    if (filters.account_key) conditions.push(eq(whitelistedIPs.account_key, filters.account_key));
+    if (filters.is_enabled) conditions.push(eq(whitelistedIPs.is_enabled, filters.is_enabled));
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
 
-    return WhitelistedIP.findAndCountAll({
-      where,
-      limit,
-      offset,
-      order: [["date_created", "DESC"]],
-    });
+    const [rows, [{ total }]] = await Promise.all([
+      db.select().from(whitelistedIPs).where(where).limit(limit).offset(offset).orderBy(desc(whitelistedIPs.date_created)),
+      db.select({ total: count() }).from(whitelistedIPs).where(where),
+    ]);
+    return { count: Number(total), rows };
   }
 }

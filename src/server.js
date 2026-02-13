@@ -1,11 +1,12 @@
 import app from "../app.js";
 import { env } from "./config/env.js";
-import sequelize from "./config/database.js";
+import { db, pool } from "./db/index.js";
+import { sql } from "drizzle-orm";
 import { setApp } from "./utils/jwt/index.js";
 
 const startServer = async () => {
   try {
-    await sequelize.authenticate();
+    await db.execute(sql`SELECT 1`);
     console.log("Database connection established successfully");
 
     // Make Fastify instance available to JWT utility after plugins are loaded
@@ -18,6 +19,7 @@ const startServer = async () => {
     process.on("SIGTERM", () => {
       console.log("SIGTERM signal received: shutting down gracefully");
       app.close().then(() => {
+        pool.end();
         process.exit(0);
       });
     });

@@ -1,6 +1,8 @@
+import { eq } from "drizzle-orm";
 import { ErrorClass } from "../utils/errorClass/index.js";
 import { verifyToken } from "../utils/jwt/index.js";
-import User from "../models/users/user.js";
+import { db } from "../db/index.js";
+import { users } from "../db/schema/users.js";
 
 /**
  * In-memory user cache
@@ -67,14 +69,19 @@ export const authenticate = async (request, reply) => {
   let user = getCachedUser(decoded.user_key);
 
   if (!user) {
-    user = await User.findOne({
-      where: { user_key: decoded.user_key },
-      attributes: { exclude: ["password"] },
-    });
+    const [row] = await db
+      .select()
+      .from(users)
+      .where(eq(users.user_key, decoded.user_key))
+      .limit(1);
 
-    if (!user) {
+    if (!row) {
       throw new ErrorClass("User no longer exists", 401);
     }
+
+    // Exclude password from cached/returned user
+    const { password, ...safeUser } = row;
+    user = safeUser;
 
     setCachedUser(decoded.user_key, user);
   }

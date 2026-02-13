@@ -1,6 +1,8 @@
 import bcrypt from "bcrypt";
 import crypto from "crypto";
-import User from "../models/users/user.js";
+import { eq } from "drizzle-orm";
+import { db } from "../db/index.js";
+import { users } from "../db/schema/users.js";
 import { ErrorClass } from "../utils/errorClass/index.js";
 import { generateToken } from "../utils/jwt/index.js";
 import { clearUserCache } from "../middleware/auth.js";
@@ -8,28 +10,29 @@ import { clearUserCache } from "../middleware/auth.js";
 const SALT_ROUNDS = 6;
 
 export default class AuthService {
-  constructor() {
-    this.user = User;
-  }
-
   _generateUserKey() {
     return crypto.randomBytes(32).toString("hex");
   }
 
   _sanitizeUser(user) {
-    const { password, ...safeUser } = user.toJSON();
+    const { password, ...safeUser } = user;
     return safeUser;
   }
 
   async register({ email, password, first_name, last_name, role }) {
-    const existingUser = await this.user.findOne({ where: { email } });
+    const [existingUser] = await db
+      .select()
+      .from(users)
+      .where(eq(users.email, email))
+      .limit(1);
+
     if (existingUser) {
       throw new ErrorClass("Email already registered", 409);
     }
 
     const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
 
-    const newUser = await this.user.create({
+    const userValues = {
       user_key: this._generateUserKey(),
       email,
       password: hashedPassword,
@@ -37,7 +40,16 @@ export default class AuthService {
       last_name,
       role: role || "user",
       date_created: new Date(),
-    });
+    };
+
+    const result = await db.insert(users).values(userValues);
+    const insertId = result[0].insertId;
+
+    const [newUser] = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, insertId))
+      .limit(1);
 
     const token = generateToken({
       id: newUser.id,
@@ -57,7 +69,12 @@ export default class AuthService {
   async login({ email, password }) {
     const invalidFields = [];
 
-    const user = await this.user.findOne({ where: { email } });
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(eq(users.email, email))
+      .limit(1);
+
     if (!user) {
       invalidFields.push("email");
     }
@@ -70,14 +87,17 @@ export default class AuthService {
     }
 
     if (invalidFields.length > 0) {
-      throw new ErrorClass(`Invalid credentials: ${invalidFields.join(", ")}`, 401);
+      throw new ErrorClass(
+        `Invalid credentials: ${invalidFields.join(", ")}`,
+        401
+      );
     }
 
-    // 3. Update last_login
-    await user.update({
-      last_login: new Date(),
-      date_modified: new Date(),
-    });
+    // Update last_login
+    await db
+      .update(users)
+      .set({ last_login: new Date(), date_modified: new Date() })
+      .where(eq(users.id, user.id));
 
     const token = generateToken({
       id: user.id,
@@ -95,26 +115,37 @@ export default class AuthService {
    * Change password (requires current password)
    */
   async changePassword({ userKey, currentPassword, newPassword }) {
-    const user = await this.user.findOne({ where: { user_key: userKey } });
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(eq(users.user_key, userKey))
+      .limit(1);
+
     if (!user) {
       throw new ErrorClass("User not found", 404);
     }
 
-    const isPasswordValid = await bcrypt.compare(currentPassword, user.password);
+    const isPasswordValid = await bcrypt.compare(
+      currentPassword,
+      user.password
+    );
     if (!isPasswordValid) {
       throw new ErrorClass("Current password is incorrect", 401);
     }
 
     const isSamePassword = await bcrypt.compare(newPassword, user.password);
     if (isSamePassword) {
-      throw new ErrorClass("New password must be different from current password", 400);
+      throw new ErrorClass(
+        "New password must be different from current password",
+        400
+      );
     }
 
     const hashedPassword = await bcrypt.hash(newPassword, SALT_ROUNDS);
-    await user.update({
-      password: hashedPassword,
-      date_modified: new Date(),
-    });
+    await db
+      .update(users)
+      .set({ password: hashedPassword, date_modified: new Date() })
+      .where(eq(users.id, user.id));
 
     // Invalidate cached user so fresh data is fetched on next request
     clearUserCache(user.user_key);
@@ -126,7 +157,12 @@ export default class AuthService {
    * Get current user profile
    */
   async getProfile(userId) {
-    const user = await this.user.findByPk(userId);
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+
     if (!user) {
       throw new ErrorClass("User not found", 404);
     }

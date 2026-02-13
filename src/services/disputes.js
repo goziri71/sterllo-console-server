@@ -1,29 +1,30 @@
-import TransactionDispute from "../models/disputes/dispute.js";
+import { eq, and, desc, count } from "drizzle-orm";
+import { db } from "../db/index.js";
+import { transactionDisputes } from "../db/schema/disputes.js";
 import { ErrorClass } from "../utils/errorClass/index.js";
 
 export default class DisputeService {
-  constructor() {
-    this.dispute = TransactionDispute;
-  }
-
   async getAll({ limit, offset, filters }) {
-    const where = {};
-    if (filters.status) where.status = filters.status;
-    if (filters.account_key) where.account_key = filters.account_key;
-    if (filters.settlement_status) where.settlement_status = filters.settlement_status;
+    const conditions = [];
+    if (filters.status) conditions.push(eq(transactionDisputes.status, filters.status));
+    if (filters.account_key) conditions.push(eq(transactionDisputes.account_key, filters.account_key));
+    if (filters.settlement_status) conditions.push(eq(transactionDisputes.settlement_status, filters.settlement_status));
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
 
-    return this.dispute.findAndCountAll({
-      where,
-      limit,
-      offset,
-      order: [["date_created", "DESC"]],
-    });
+    const [rows, [{ total }]] = await Promise.all([
+      db.select().from(transactionDisputes).where(where).limit(limit).offset(offset).orderBy(desc(transactionDisputes.date_created)),
+      db.select({ total: count() }).from(transactionDisputes).where(where),
+    ]);
+    return { count: Number(total), rows };
   }
 
   async getByReference(disputeReference) {
-    const dispute = await this.dispute.findOne({
-      where: { dispute_reference: disputeReference },
-    });
+    const [dispute] = await db
+      .select()
+      .from(transactionDisputes)
+      .where(eq(transactionDisputes.dispute_reference, disputeReference))
+      .limit(1);
+
     if (!dispute) {
       throw new ErrorClass("Dispute not found", 404);
     }
@@ -31,9 +32,12 @@ export default class DisputeService {
   }
 
   async update(disputeReference, data) {
-    const dispute = await this.dispute.findOne({
-      where: { dispute_reference: disputeReference },
-    });
+    const [dispute] = await db
+      .select()
+      .from(transactionDisputes)
+      .where(eq(transactionDisputes.dispute_reference, disputeReference))
+      .limit(1);
+
     if (!dispute) {
       throw new ErrorClass("Dispute not found", 404);
     }
@@ -51,7 +55,17 @@ export default class DisputeService {
     }
 
     updateData.date_modified = new Date();
-    await dispute.update(updateData);
-    return dispute;
+    await db
+      .update(transactionDisputes)
+      .set(updateData)
+      .where(eq(transactionDisputes.dispute_reference, disputeReference));
+
+    const [updated] = await db
+      .select()
+      .from(transactionDisputes)
+      .where(eq(transactionDisputes.dispute_reference, disputeReference))
+      .limit(1);
+
+    return updated;
   }
 }

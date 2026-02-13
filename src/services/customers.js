@@ -1,33 +1,32 @@
-import Customer from "../models/customers/customer.js";
-import CustomerWallet from "../models/customerWallets/customerWallet.js";
-import Merchant from "../models/merchants/merchant.js";
+import { eq, and, desc, count } from "drizzle-orm";
+import { db } from "../db/index.js";
+import { customers } from "../db/schema/customers.js";
+import { customerWallets } from "../db/schema/customers.js";
+import { merchants } from "../db/schema/merchants.js";
 import { ErrorClass } from "../utils/errorClass/index.js";
 
 export default class CustomerService {
-  constructor() {
-    this.customer = Customer;
-    this.customerWallet = CustomerWallet;
-    this.merchant = Merchant;
-  }
-
   async getAll({ limit, offset, filters }) {
-    const where = {};
-    if (filters.status) where.status = filters.status;
-    if (filters.account_key) where.account_key = filters.account_key;
-    if (filters.environment) where.environment = filters.environment;
+    const conditions = [];
+    if (filters.status) conditions.push(eq(customers.status, filters.status));
+    if (filters.account_key) conditions.push(eq(customers.account_key, filters.account_key));
+    if (filters.environment) conditions.push(eq(customers.environment, filters.environment));
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
 
-    return this.customer.findAndCountAll({
-      where,
-      limit,
-      offset,
-      order: [["date_created", "DESC"]],
-    });
+    const [rows, [{ total }]] = await Promise.all([
+      db.select().from(customers).where(where).limit(limit).offset(offset).orderBy(desc(customers.date_created)),
+      db.select({ total: count() }).from(customers).where(where),
+    ]);
+    return { count: Number(total), rows };
   }
 
   async getByIdentifier(identifier) {
-    const customer = await this.customer.findOne({
-      where: { identifier },
-    });
+    const [customer] = await db
+      .select()
+      .from(customers)
+      .where(eq(customers.identifier, identifier))
+      .limit(1);
+
     if (!customer) {
       throw new ErrorClass("Customer not found", 404);
     }
@@ -35,25 +34,31 @@ export default class CustomerService {
   }
 
   async getByMerchant(accountKey, { limit, offset }) {
-    const merchant = await this.merchant.findOne({
-      where: { account_key: accountKey },
-    });
+    const [merchant] = await db
+      .select()
+      .from(merchants)
+      .where(eq(merchants.account_key, accountKey))
+      .limit(1);
+
     if (!merchant) {
       throw new ErrorClass("Merchant not found", 404);
     }
 
-    return this.customer.findAndCountAll({
-      where: { account_key: accountKey },
-      limit,
-      offset,
-      order: [["date_created", "DESC"]],
-    });
+    const where = eq(customers.account_key, accountKey);
+    const [rows, [{ total }]] = await Promise.all([
+      db.select().from(customers).where(where).limit(limit).offset(offset).orderBy(desc(customers.date_created)),
+      db.select({ total: count() }).from(customers).where(where),
+    ]);
+    return { count: Number(total), rows };
   }
 
   async update(identifier, data) {
-    const customer = await this.customer.findOne({
-      where: { identifier },
-    });
+    const [customer] = await db
+      .select()
+      .from(customers)
+      .where(eq(customers.identifier, identifier))
+      .limit(1);
+
     if (!customer) {
       throw new ErrorClass("Customer not found", 404);
     }
@@ -78,23 +83,36 @@ export default class CustomerService {
     }
 
     updateData.date_modified = new Date();
-    await customer.update(updateData);
-    return customer;
+    await db
+      .update(customers)
+      .set(updateData)
+      .where(eq(customers.identifier, identifier));
+
+    const [updated] = await db
+      .select()
+      .from(customers)
+      .where(eq(customers.identifier, identifier))
+      .limit(1);
+
+    return updated;
   }
 
   async getWallets(identifier, { limit, offset }) {
-    const customer = await this.customer.findOne({
-      where: { identifier },
-    });
+    const [customer] = await db
+      .select()
+      .from(customers)
+      .where(eq(customers.identifier, identifier))
+      .limit(1);
+
     if (!customer) {
       throw new ErrorClass("Customer not found", 404);
     }
 
-    return this.customerWallet.findAndCountAll({
-      where: { identifier },
-      limit,
-      offset,
-      order: [["date_created", "DESC"]],
-    });
+    const where = eq(customerWallets.identifier, identifier);
+    const [rows, [{ total }]] = await Promise.all([
+      db.select().from(customerWallets).where(where).limit(limit).offset(offset).orderBy(desc(customerWallets.date_created)),
+      db.select({ total: count() }).from(customerWallets).where(where),
+    ]);
+    return { count: Number(total), rows };
   }
 }

@@ -1,138 +1,123 @@
-import { Op } from "sequelize";
-import Deposit from "../models/deposits/deposit.js";
-import Withdrawal from "../models/withdrawals/withdrawal.js";
-import Transfer from "../models/transfers/transfer.js";
-import Swap from "../models/swaps/swap.js";
-import NGNDeposit from "../models/ngnDeposits/ngnDeposit.js";
-import NGNPayout from "../models/ngnPayouts/ngnPayout.js";
-import CryptoDeposit from "../models/cryptoDeposits/cryptoDeposit.js";
-import CryptoPayout from "../models/cryptoPayouts/cryptoPayout.js";
+import { eq, and, between, gte, lte, desc, count } from "drizzle-orm";
+import { db } from "../db/index.js";
+import { deposits, withdrawals, transfers, swaps } from "../db/schema/transactions.js";
+import { ngnDeposits, ngnPayouts } from "../db/schema/fiat.js";
+import { cryptoDeposits, cryptoPayouts } from "../db/schema/crypto.js";
 
 /**
- * Build a where clause from common transaction filters.
- * Different tables have different columns, so we check which filters apply.
+ * Build an array of Drizzle conditions from common transaction filters.
  */
-function buildWhere(filters, hasAccountKey = true) {
-  const where = {};
+function buildConditions(table, filters, hasAccountKey = true) {
+  const conditions = [];
 
   if (hasAccountKey && filters.account_key) {
-    where.account_key = filters.account_key;
+    conditions.push(eq(table.account_key, filters.account_key));
   }
   if (filters.wallet_key) {
-    where.source_wallet_key = filters.wallet_key;
+    conditions.push(eq(table.source_wallet_key, filters.wallet_key));
   }
   if (filters.status) {
-    where.status = filters.status;
+    conditions.push(eq(table.status, filters.status));
   }
   if (filters.from_date && filters.to_date) {
-    where.date_created = {
-      [Op.between]: [new Date(filters.from_date), new Date(filters.to_date)],
-    };
+    conditions.push(
+      between(table.date_created, new Date(filters.from_date), new Date(filters.to_date))
+    );
   } else if (filters.from_date) {
-    where.date_created = { [Op.gte]: new Date(filters.from_date) };
+    conditions.push(gte(table.date_created, new Date(filters.from_date)));
   } else if (filters.to_date) {
-    where.date_created = { [Op.lte]: new Date(filters.to_date) };
+    conditions.push(lte(table.date_created, new Date(filters.to_date)));
   }
 
-  return where;
+  return conditions.length > 0 ? and(...conditions) : undefined;
+}
+
+async function paginated(table, { where, limit, offset }) {
+  const [rows, [{ total }]] = await Promise.all([
+    db.select().from(table).where(where).limit(limit).offset(offset).orderBy(desc(table.date_created)),
+    db.select({ total: count() }).from(table).where(where),
+  ]);
+  return { count: Number(total), rows };
 }
 
 export default class TransactionService {
   async getDeposits({ limit, offset, filters }) {
-    return Deposit.findAndCountAll({
-      where: buildWhere(filters),
+    return paginated(deposits, {
+      where: buildConditions(deposits, filters),
       limit,
       offset,
-      order: [["date_created", "DESC"]],
     });
   }
 
   async getWithdrawals({ limit, offset, filters }) {
-    return Withdrawal.findAndCountAll({
-      where: buildWhere(filters),
+    return paginated(withdrawals, {
+      where: buildConditions(withdrawals, filters),
       limit,
       offset,
-      order: [["date_created", "DESC"]],
     });
   }
 
   async getTransfers({ limit, offset, filters }) {
-    return Transfer.findAndCountAll({
-      where: buildWhere(filters),
+    return paginated(transfers, {
+      where: buildConditions(transfers, filters),
       limit,
       offset,
-      order: [["date_created", "DESC"]],
     });
   }
 
   async getSwaps({ limit, offset, filters }) {
-    return Swap.findAndCountAll({
-      where: buildWhere(filters),
+    return paginated(swaps, {
+      where: buildConditions(swaps, filters),
       limit,
       offset,
-      order: [["date_created", "DESC"]],
     });
   }
 
   async getNGNDeposits({ limit, offset, filters }) {
-    const where = {};
-    if (filters.wallet_key) where.wallet_key = filters.wallet_key;
-    if (filters.status) where.credit_status = filters.status;
+    const conditions = [];
+    if (filters.wallet_key) conditions.push(eq(ngnDeposits.wallet_key, filters.wallet_key));
+    if (filters.status) conditions.push(eq(ngnDeposits.credit_status, filters.status));
     if (filters.from_date && filters.to_date) {
-      where.date_created = {
-        [Op.between]: [new Date(filters.from_date), new Date(filters.to_date)],
-      };
+      conditions.push(between(ngnDeposits.date_created, new Date(filters.from_date), new Date(filters.to_date)));
     } else if (filters.from_date) {
-      where.date_created = { [Op.gte]: new Date(filters.from_date) };
+      conditions.push(gte(ngnDeposits.date_created, new Date(filters.from_date)));
     } else if (filters.to_date) {
-      where.date_created = { [Op.lte]: new Date(filters.to_date) };
+      conditions.push(lte(ngnDeposits.date_created, new Date(filters.to_date)));
     }
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
 
-    return NGNDeposit.findAndCountAll({
-      where,
-      limit,
-      offset,
-      order: [["date_created", "DESC"]],
-    });
+    return paginated(ngnDeposits, { where, limit, offset });
   }
 
   async getNGNPayouts({ limit, offset, filters }) {
-    return NGNPayout.findAndCountAll({
-      where: buildWhere(filters),
+    return paginated(ngnPayouts, {
+      where: buildConditions(ngnPayouts, filters),
       limit,
       offset,
-      order: [["date_created", "DESC"]],
     });
   }
 
   async getCryptoDeposits({ limit, offset, filters }) {
-    const where = {};
-    if (filters.wallet_key) where.wallet_key = filters.wallet_key;
-    if (filters.status) where.credit_status = filters.status;
+    const conditions = [];
+    if (filters.wallet_key) conditions.push(eq(cryptoDeposits.wallet_key, filters.wallet_key));
+    if (filters.status) conditions.push(eq(cryptoDeposits.credit_status, filters.status));
     if (filters.from_date && filters.to_date) {
-      where.date_created = {
-        [Op.between]: [new Date(filters.from_date), new Date(filters.to_date)],
-      };
+      conditions.push(between(cryptoDeposits.date_created, new Date(filters.from_date), new Date(filters.to_date)));
     } else if (filters.from_date) {
-      where.date_created = { [Op.gte]: new Date(filters.from_date) };
+      conditions.push(gte(cryptoDeposits.date_created, new Date(filters.from_date)));
     } else if (filters.to_date) {
-      where.date_created = { [Op.lte]: new Date(filters.to_date) };
+      conditions.push(lte(cryptoDeposits.date_created, new Date(filters.to_date)));
     }
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
 
-    return CryptoDeposit.findAndCountAll({
-      where,
-      limit,
-      offset,
-      order: [["date_created", "DESC"]],
-    });
+    return paginated(cryptoDeposits, { where, limit, offset });
   }
 
   async getCryptoPayouts({ limit, offset, filters }) {
-    return CryptoPayout.findAndCountAll({
-      where: buildWhere(filters),
+    return paginated(cryptoPayouts, {
+      where: buildConditions(cryptoPayouts, filters),
       limit,
       offset,
-      order: [["date_created", "DESC"]],
     });
   }
 }

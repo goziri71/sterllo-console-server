@@ -1,14 +1,15 @@
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import sequelize from "./config/database.js";
+import { db, pool } from "./db/index.js";
+import { sql as rawSql } from "drizzle-orm";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 async function runSqlDump() {
   try {
-    await sequelize.authenticate();
+    await db.execute(rawSql`SELECT 1`);
     console.log("Database connection established.\n");
 
     // Read the SQL dump file
@@ -52,7 +53,7 @@ async function runSqlDump() {
       if (stripped === ";" || stripped === "") continue;
 
       try {
-        await sequelize.query(stmt, { raw: true });
+        await pool.query(stmt);
         successCount++;
 
         // Log progress for CREATE TABLE and INSERT statements
@@ -93,7 +94,7 @@ async function runSqlDump() {
     console.error("Failed to run SQL dump:", error.message);
     process.exit(1);
   } finally {
-    await sequelize.close();
+    await pool.end();
   }
 }
 

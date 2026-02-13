@@ -1,27 +1,25 @@
-import Merchant from "../models/merchants/merchant.js";
-import MerchantLedger from "../models/merchantLedgers/merchantLedger.js";
-import SettlementLedger from "../models/settlementLedgers/settlementLedger.js";
+import { eq, desc, count } from "drizzle-orm";
+import { db } from "../db/index.js";
+import { merchants } from "../db/schema/merchants.js";
+import { merchantLedgers, settlementLedgers } from "../db/schema/merchants.js";
 import { ErrorClass } from "../utils/errorClass/index.js";
 
 export default class MerchantService {
-  constructor() {
-    this.merchant = Merchant;
-    this.merchantLedger = MerchantLedger;
-    this.settlementLedger = SettlementLedger;
-  }
-
   async getAll({ limit, offset }) {
-    return this.merchant.findAndCountAll({
-      limit,
-      offset,
-      order: [["date_created", "DESC"]],
-    });
+    const [rows, [{ total }]] = await Promise.all([
+      db.select().from(merchants).limit(limit).offset(offset).orderBy(desc(merchants.date_created)),
+      db.select({ total: count() }).from(merchants),
+    ]);
+    return { count: Number(total), rows };
   }
 
   async getByAccountKey(accountKey) {
-    const merchant = await this.merchant.findOne({
-      where: { account_key: accountKey },
-    });
+    const [merchant] = await db
+      .select()
+      .from(merchants)
+      .where(eq(merchants.account_key, accountKey))
+      .limit(1);
+
     if (!merchant) {
       throw new ErrorClass("Merchant not found", 404);
     }
@@ -29,9 +27,12 @@ export default class MerchantService {
   }
 
   async update(accountKey, data) {
-    const merchant = await this.merchant.findOne({
-      where: { account_key: accountKey },
-    });
+    const [merchant] = await db
+      .select()
+      .from(merchants)
+      .where(eq(merchants.account_key, accountKey))
+      .limit(1);
+
     if (!merchant) {
       throw new ErrorClass("Merchant not found", 404);
     }
@@ -49,39 +50,55 @@ export default class MerchantService {
     }
 
     updateData.date_modified = new Date();
-    await merchant.update(updateData);
-    return merchant;
+    await db
+      .update(merchants)
+      .set(updateData)
+      .where(eq(merchants.account_key, accountKey));
+
+    const [updated] = await db
+      .select()
+      .from(merchants)
+      .where(eq(merchants.account_key, accountKey))
+      .limit(1);
+
+    return updated;
   }
 
   async getLedgers(accountKey, { limit, offset }) {
-    const merchant = await this.merchant.findOne({
-      where: { account_key: accountKey },
-    });
+    const [merchant] = await db
+      .select()
+      .from(merchants)
+      .where(eq(merchants.account_key, accountKey))
+      .limit(1);
+
     if (!merchant) {
       throw new ErrorClass("Merchant not found", 404);
     }
 
-    return this.merchantLedger.findAndCountAll({
-      where: { account_key: accountKey },
-      limit,
-      offset,
-      order: [["date_created", "DESC"]],
-    });
+    const where = eq(merchantLedgers.account_key, accountKey);
+    const [rows, [{ total }]] = await Promise.all([
+      db.select().from(merchantLedgers).where(where).limit(limit).offset(offset).orderBy(desc(merchantLedgers.date_created)),
+      db.select({ total: count() }).from(merchantLedgers).where(where),
+    ]);
+    return { count: Number(total), rows };
   }
 
   async getSettlements(accountKey, { limit, offset }) {
-    const merchant = await this.merchant.findOne({
-      where: { account_key: accountKey },
-    });
+    const [merchant] = await db
+      .select()
+      .from(merchants)
+      .where(eq(merchants.account_key, accountKey))
+      .limit(1);
+
     if (!merchant) {
       throw new ErrorClass("Merchant not found", 404);
     }
 
-    return this.settlementLedger.findAndCountAll({
-      where: { account_key: accountKey },
-      limit,
-      offset,
-      order: [["date_created", "DESC"]],
-    });
+    const where = eq(settlementLedgers.account_key, accountKey);
+    const [rows, [{ total }]] = await Promise.all([
+      db.select().from(settlementLedgers).where(where).limit(limit).offset(offset).orderBy(desc(settlementLedgers.date_created)),
+      db.select({ total: count() }).from(settlementLedgers).where(where),
+    ]);
+    return { count: Number(total), rows };
   }
 }

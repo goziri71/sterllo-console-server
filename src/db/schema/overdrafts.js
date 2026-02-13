@@ -1,0 +1,28 @@
+import { mysqlTable, int, char, varchar, datetime } from "drizzle-orm/mysql-core";
+
+export const overdraftRequests = mysqlTable("OverdraftRequests", {
+  id: int("id").primaryKey().autoincrement(),
+  user_key: char("user_key", { length: 30 }),
+  account_key: char("account_key", { length: 30 }),
+  source_wallet_key: char("source_wallet_key", { length: 30 }),
+  target_wallet_key: char("target_wallet_key", { length: 30 }),
+  amount: varchar("amount", { length: 250 }),
+  charge_type: char("charge_type", { length: 50 }),
+  charge_value: varchar("charge_value", { length: 250 }),
+  charge_cap: varchar("charge_cap", { length: 250 }),
+  contract_code: char("contract_code", { length: 20 }).unique(),
+  start_date: datetime("start_date"),
+  end_date: datetime("end_date"),
+  reference: char("reference", { length: 250 }).unique(),
+  ip_address: char("ip_address", { length: 39 }),
+  session_id: char("session_id", { length: 30 }),
+  processing_fee_amount: varchar("processing_fee_amount", { length: 250 }),
+  processing_vat_amount: varchar("processing_vat_amount", { length: 250 }),
+  processing_fee_reference: char("processing_fee_reference", { length: 250 }).unique(),
+  processing_fee_status: char("processing_fee_status", { length: 20 }),
+  processing_fee_date: datetime("processing_fee_date"),
+  status: char("status", { length: 20 }),
+  source: char("source", { length: 50 }),
+  date_created: datetime("date_created"),
+  date_modified: datetime("date_modified"),
+});
