@@ -1,8 +1,9 @@
-import express from "express";
-import cors from "cors";
-import helmet from "helmet";
-import morgan from "morgan";
-import rateLimit from "express-rate-limit";
+import Fastify from "fastify";
+import fjwt from "@fastify/jwt";
+import cors from "@fastify/cors";
+import helmet from "@fastify/helmet";
+import rateLimit from "@fastify/rate-limit";
+import { env } from "./src/config/env.js";
 
 import healthRoutes from "./src/routes/health/routes.js";
 import authRoutes from "./src/routes/auth/routes.js";
@@ -13,51 +14,53 @@ import transactionRoutes from "./src/routes/transactions/routes.js";
 import disputeRoutes from "./src/routes/disputes/routes.js";
 import overdraftRoutes from "./src/routes/overdrafts/routes.js";
 import configRoutes from "./src/routes/config/routes.js";
-import errorHandler from "./src/middleware/errorHandler.js";
+import { errorHandler } from "./src/middleware/errorHandler.js";
 
-const app = express();
+const isProduction = process.env.NODE_ENV === "production";
 
+const app = Fastify({
+  logger: isProduction
+    ? true
+    : {
+        transport: {
+          target: "pino-pretty",
+        },
+      },
+  trustProxy: true,
+});
 
-app.disable("x-powered-by");
-app.set("trust proxy", 1);
+// Global error handler (must be set before route registration)
+app.setErrorHandler(errorHandler);
 
-app.use(helmet());
-app.use(cors());
-app.use(express.json());
-
-app.use(
-  rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 100,
-  })
-);
-
-app.use(morgan("dev"));
-
-app.use("/api/v1/health", healthRoutes);
-app.use("/api/v1/auth", authRoutes);
-app.use("/api/v1/merchants", merchantRoutes);
-app.use("/api/v1/customers", customerRoutes);
-app.use("/api/v1/kycs", kycRoutes);
-app.use("/api/v1/transactions", transactionRoutes);
-app.use("/api/v1/disputes", disputeRoutes);
-app.use("/api/v1/overdrafts", overdraftRoutes);
-app.use("/api/v1/config", configRoutes);
-
-
-app.use((req, res) => {
-  res.status(404).json({
+// 404 handler
+app.setNotFoundHandler((request, reply) => {
+  reply.code(404).send({
     success: false,
     message: "Route not found",
   });
 });
 
+// Plugins
+app.register(fjwt, {
+  secret: env.JWT_SECRET,
+  sign: { expiresIn: env.JWT_EXPIRES_IN },
+});
+app.register(helmet);
+app.register(cors);
+app.register(rateLimit, {
+  max: 100,
+  timeWindow: "15 minutes",
+});
 
-app.use(errorHandler);
-
-
-
-
-
+// Routes
+app.register(healthRoutes, { prefix: "/api/v1/health" });
+app.register(authRoutes, { prefix: "/api/v1/auth" });
+app.register(merchantRoutes, { prefix: "/api/v1/merchants" });
+app.register(customerRoutes, { prefix: "/api/v1/customers" });
+app.register(kycRoutes, { prefix: "/api/v1/kycs" });
+app.register(transactionRoutes, { prefix: "/api/v1/transactions" });
+app.register(disputeRoutes, { prefix: "/api/v1/disputes" });
+app.register(overdraftRoutes, { prefix: "/api/v1/overdrafts" });
+app.register(configRoutes, { prefix: "/api/v1/config" });
 
 export default app;

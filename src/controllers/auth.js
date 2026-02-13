@@ -1,14 +1,13 @@
 import AuthService from "../services/auth.js";
-import { tryCatchFunction } from "../utils/tryCatch/index.js";
 import { ErrorClass } from "../utils/errorClass/index.js";
 
 const authService = new AuthService();
 
-export const register = tryCatchFunction(async (req, res) => {
-  if (!req.body || Object.keys(req.body).length === 0) {
+export const register = async (request, reply) => {
+  if (!request.body || Object.keys(request.body).length === 0) {
     throw new ErrorClass("Request body is required", 400);
   }
-  const { email, password, first_name, last_name, role } = req.body;
+  const { email, password, first_name, last_name, role } = request.body;
 
   // Validation
   const missingFields = [];
@@ -33,22 +32,20 @@ export const register = tryCatchFunction(async (req, res) => {
     role,
   });
 
-  res.status(201).json({
+  return reply.code(201).send({
     code: 201,
     success: true,
     message: "User registered successfully",
     data: result,
   });
-});
+};
 
-
-
-export const login = tryCatchFunction(async (req, res) => {
-  if(!req.body || Object.keys(req.body).length === 0){
+export const login = async (request, reply) => {
+  if (!request.body || Object.keys(request.body).length === 0) {
     throw new ErrorClass("Login request body is required", 400);
   }
 
-  const { email, password } = req.body;
+  const { email, password } = request.body;
 
   const missingFields = [];
   if (!email) missingFields.push("email");
@@ -59,21 +56,19 @@ export const login = tryCatchFunction(async (req, res) => {
 
   const result = await authService.login({ email, password });
 
-  res.status(200).json({
+  return reply.code(200).send({
     code: 200,
     success: true,
     message: "Login successful",
     data: result,
   });
-});
+};
 
-
-
-export const changePassword = tryCatchFunction(async (req, res) => {
-  if (!req.body || Object.keys(req.body).length === 0) {
+export const changePassword = async (request, reply) => {
+  if (!request.body || Object.keys(request.body).length === 0) {
     throw new ErrorClass("Request body is required", 400);
   }
-  const { current_password, new_password } = req.body;
+  const { current_password, new_password } = request.body;
 
   const missingFields = [];
   if (!current_password) missingFields.push("current_password");
@@ -88,25 +83,24 @@ export const changePassword = tryCatchFunction(async (req, res) => {
   }
 
   const result = await authService.changePassword({
-    userId: req.user.id,
+    userId: request.user.id,
     currentPassword: current_password,
     newPassword: new_password,
   });
 
-  res.status(200).json({
+  return reply.code(200).send({
     code: 200,
     success: true,
     message: result.message,
   });
-});
+};
 
+export const getProfile = async (request, reply) => {
+  const user = await authService.getProfile(request.user.id);
 
-export const getProfile = tryCatchFunction(async (req, res) => {
-  const user = await authService.getProfile(req.user.id);
-
-  res.status(200).json({
+  return reply.code(200).send({
     code: 200,
     success: true,
     data: user,
   });
-});
+};

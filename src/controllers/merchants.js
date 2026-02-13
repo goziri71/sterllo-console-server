@@ -1,54 +1,62 @@
 import MerchantService from "../services/merchants.js";
-import { tryCatchFunction } from "../utils/tryCatch/index.js";
 import { parsePagination, paginatedResponse } from "../utils/pagination/index.js";
 
 const merchantService = new MerchantService();
 
-export const getAllMerchants = tryCatchFunction(async (req, res) => {
-  const { page, limit, offset } = parsePagination(req.query);
+export const getAllMerchants = async (request, reply) => {
+  const { page, limit, offset } = parsePagination(request.query);
   const data = await merchantService.getAll({ limit, offset });
 
-  res.status(200).json({
+  return reply.code(200).send({
+    code: 200,
     success: true,
+    message: "Merchants fetched successfully",
     ...paginatedResponse(data, page, limit),
   });
-});
+};
 
-export const getMerchant = tryCatchFunction(async (req, res) => {
-  const merchant = await merchantService.getByAccountKey(req.params.account_key);
+export const getMerchant = async (request, reply) => {
+  const merchant = await merchantService.getByAccountKey(request.params.account_key);
 
-  res.status(200).json({
+  return reply.code(200).send({
+    code: 200,
     success: true,
+    message: "Merchant fetched successfully",
     data: merchant,
   });
-});
+};
 
-export const updateMerchant = tryCatchFunction(async (req, res) => {
-  const merchant = await merchantService.update(req.params.account_key, req.body);
+export const updateMerchant = async (request, reply) => {
+  const merchant = await merchantService.update(request.params.account_key, request.body);
 
-  res.status(200).json({
+  return reply.code(200).send({
+    code: 200,
     success: true,
     message: "Merchant updated successfully",
     data: merchant,
   });
-});
+};
 
-export const getMerchantLedgers = tryCatchFunction(async (req, res) => {
-  const { page, limit, offset } = parsePagination(req.query);
-  const data = await merchantService.getLedgers(req.params.account_key, { limit, offset });
+export const getMerchantLedgers = async (request, reply) => {
+  const { page, limit, offset } = parsePagination(request.query);
+  const data = await merchantService.getLedgers(request.params.account_key, { limit, offset });
 
-  res.status(200).json({
+  return reply.code(200).send({
+    code: 200,
+    message: "Merchant ledgers fetched successfully",
     success: true,
     ...paginatedResponse(data, page, limit),
   });
-});
+};
 
-export const getMerchantSettlements = tryCatchFunction(async (req, res) => {
-  const { page, limit, offset } = parsePagination(req.query);
-  const data = await merchantService.getSettlements(req.params.account_key, { limit, offset });
+export const getMerchantSettlements = async (request, reply) => {
+  const { page, limit, offset } = parsePagination(request.query);
+  const data = await merchantService.getSettlements(request.params.account_key, { limit, offset });
 
-  res.status(200).json({
+  return reply.code(200).send({
+    code: 200,
+    message: "Merchant settlements fetched successfully",
     success: true,
     ...paginatedResponse(data, page, limit),
   });
-});
+};

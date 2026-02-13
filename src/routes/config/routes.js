@@ -1,22 +1,19 @@
-import express from "express";
 import { getCurrencies, getVATs, getCustomerTiers, getWhitelistedIPs } from "../../controllers/config.js";
 import { authenticate, authorize } from "../../middleware/auth.js";
 import { ALL_ROLES, ROLES } from "../../config/roles.js";
 
-const router = express.Router();
+export default async function configRoutes(fastify) {
+  fastify.addHook("preHandler", authenticate);
 
-router.use(authenticate);
+  // Read-only config routes (all roles)
+  fastify.get("/currencies", { preHandler: authorize(...ALL_ROLES) }, getCurrencies);
+  fastify.get("/vats", { preHandler: authorize(...ALL_ROLES) }, getVATs);
+  fastify.get("/customer-tiers", { preHandler: authorize(...ALL_ROLES) }, getCustomerTiers);
 
-// Read-only config routes (all roles)
-router.get("/currencies", authorize(...ALL_ROLES), getCurrencies);
-router.get("/vats", authorize(...ALL_ROLES), getVATs);
-router.get("/customer-tiers", authorize(...ALL_ROLES), getCustomerTiers);
-
-// Whitelisted IPs (operations + compliance only)
-router.get(
-  "/whitelisted-ips",
-  authorize(ROLES.OPERATIONS, ROLES.COMPLIANCE),
-  getWhitelistedIPs
-);
-
-export default router;
+  // Whitelisted IPs (operations + compliance only)
+  fastify.get(
+    "/whitelisted-ips",
+    { preHandler: authorize(ROLES.OPERATIONS, ROLES.COMPLIANCE) },
+    getWhitelistedIPs
+  );
+}

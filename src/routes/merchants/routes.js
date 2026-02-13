@@ -1,4 +1,3 @@
-import express from "express";
 import {
   getAllMerchants,
   getMerchant,
@@ -10,19 +9,17 @@ import { getMerchantCustomers } from "../../controllers/customers.js";
 import { authenticate, authorize } from "../../middleware/auth.js";
 import { ALL_ROLES, MERCHANT_UPDATE_ROLES } from "../../config/roles.js";
 
-const router = express.Router();
+export default async function merchantRoutes(fastify) {
+  // All routes require authentication
+  fastify.addHook("preHandler", authenticate);
 
-// All routes require authentication
-router.use(authenticate);
+  // Read routes (all roles)
+  fastify.get("/", { preHandler: authorize(...ALL_ROLES) }, getAllMerchants);
+  fastify.get("/:account_key", { preHandler: authorize(...ALL_ROLES) }, getMerchant);
+  fastify.get("/:account_key/customers", { preHandler: authorize(...ALL_ROLES) }, getMerchantCustomers);
+  fastify.get("/:account_key/ledgers", { preHandler: authorize(...ALL_ROLES) }, getMerchantLedgers);
+  fastify.get("/:account_key/settlements", { preHandler: authorize(...ALL_ROLES) }, getMerchantSettlements);
 
-// Read routes (all roles)
-router.get("/", authorize(...ALL_ROLES), getAllMerchants);
-router.get("/:account_key", authorize(...ALL_ROLES), getMerchant);
-router.get("/:account_key/customers", authorize(...ALL_ROLES), getMerchantCustomers);
-router.get("/:account_key/ledgers", authorize(...ALL_ROLES), getMerchantLedgers);
-router.get("/:account_key/settlements", authorize(...ALL_ROLES), getMerchantSettlements);
-
-// Update routes (operations + compliance only)
-router.patch("/:account_key", authorize(...MERCHANT_UPDATE_ROLES), updateMerchant);
-
-export default router;
+  // Update routes (operations + compliance only)
+  fastify.patch("/:account_key", { preHandler: authorize(...MERCHANT_UPDATE_ROLES) }, updateMerchant);
+}

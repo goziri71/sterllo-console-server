@@ -1,4 +1,3 @@
-import express from "express";
 import {
   getDeposits,
   getWithdrawals,
@@ -12,18 +11,16 @@ import {
 import { authenticate, authorize } from "../../middleware/auth.js";
 import { ALL_ROLES } from "../../config/roles.js";
 
-const router = express.Router();
+export default async function transactionRoutes(fastify) {
+  fastify.addHook("preHandler", authenticate);
 
-router.use(authenticate);
-
-// All transaction routes are read-only (all roles)
-router.get("/deposits", authorize(...ALL_ROLES), getDeposits);
-router.get("/withdrawals", authorize(...ALL_ROLES), getWithdrawals);
-router.get("/transfers", authorize(...ALL_ROLES), getTransfers);
-router.get("/swaps", authorize(...ALL_ROLES), getSwaps);
-router.get("/ngn-deposits", authorize(...ALL_ROLES), getNGNDeposits);
-router.get("/ngn-payouts", authorize(...ALL_ROLES), getNGNPayouts);
-router.get("/crypto-deposits", authorize(...ALL_ROLES), getCryptoDeposits);
-router.get("/crypto-payouts", authorize(...ALL_ROLES), getCryptoPayouts);
-
-export default router;
+  // All transaction routes are read-only (all roles)
+  fastify.get("/deposits", { preHandler: authorize(...ALL_ROLES) }, getDeposits);
+  fastify.get("/withdrawals", { preHandler: authorize(...ALL_ROLES) }, getWithdrawals);
+  fastify.get("/transfers", { preHandler: authorize(...ALL_ROLES) }, getTransfers);
+  fastify.get("/swaps", { preHandler: authorize(...ALL_ROLES) }, getSwaps);
+  fastify.get("/ngn-deposits", { preHandler: authorize(...ALL_ROLES) }, getNGNDeposits);
+  fastify.get("/ngn-payouts", { preHandler: authorize(...ALL_ROLES) }, getNGNPayouts);
+  fastify.get("/crypto-deposits", { preHandler: authorize(...ALL_ROLES) }, getCryptoDeposits);
+  fastify.get("/crypto-payouts", { preHandler: authorize(...ALL_ROLES) }, getCryptoPayouts);
+}

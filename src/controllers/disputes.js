@@ -1,33 +1,32 @@
 import DisputeService from "../services/disputes.js";
-import { tryCatchFunction } from "../utils/tryCatch/index.js";
 import { parsePagination, paginatedResponse } from "../utils/pagination/index.js";
 
 const disputeService = new DisputeService();
 
-export const getAllDisputes = tryCatchFunction(async (req, res) => {
-  const { page, limit, offset } = parsePagination(req.query);
+export const getAllDisputes = async (request, reply) => {
+  const { page, limit, offset } = parsePagination(request.query);
   const filters = {
-    status: req.query.status,
-    account_key: req.query.account_key,
-    settlement_status: req.query.settlement_status,
+    status: request.query.status,
+    account_key: request.query.account_key,
+    settlement_status: request.query.settlement_status,
   };
   const data = await disputeService.getAll({ limit, offset, filters });
 
-  res.status(200).json({ success: true, ...paginatedResponse(data, page, limit) });
-});
+  return reply.code(200).send({ success: true, ...paginatedResponse(data, page, limit) });
+};
 
-export const getDispute = tryCatchFunction(async (req, res) => {
-  const dispute = await disputeService.getByReference(req.params.dispute_reference);
+export const getDispute = async (request, reply) => {
+  const dispute = await disputeService.getByReference(request.params.dispute_reference);
 
-  res.status(200).json({ success: true, data: dispute });
-});
+  return reply.code(200).send({ success: true, data: dispute });
+};
 
-export const updateDispute = tryCatchFunction(async (req, res) => {
-  const dispute = await disputeService.update(req.params.dispute_reference, req.body);
+export const updateDispute = async (request, reply) => {
+  const dispute = await disputeService.update(request.params.dispute_reference, request.body);
 
-  res.status(200).json({
+  return reply.code(200).send({
     success: true,
     message: "Dispute updated successfully",
     data: dispute,
   });
-});
+};

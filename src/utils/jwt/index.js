@@ -1,10 +1,13 @@
-import jwt from "jsonwebtoken";
-import { env } from "../../config/env.js";
+let _app = null;
+
+export const setApp = (app) => {
+  _app = app;
+};
 
 export const generateToken = (payload) => {
-  return jwt.sign(payload, env.JWT_SECRET, { expiresIn: env.JWT_EXPIRES_IN });
+  return _app.jwt.sign(payload);
 };
 
 export const verifyToken = (token) => {
-  return jwt.verify(token, env.JWT_SECRET);
+  return _app.jwt.verify(token);
 };

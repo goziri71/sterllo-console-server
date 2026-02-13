@@ -1,5 +1,4 @@
 import TransactionService from "../services/transactions.js";
-import { tryCatchFunction } from "../utils/tryCatch/index.js";
 import { parsePagination, paginatedResponse } from "../utils/pagination/index.js";
 
 const txService = new TransactionService();
@@ -14,58 +13,58 @@ function extractFilters(query) {
   };
 }
 
-export const getDeposits = tryCatchFunction(async (req, res) => {
-  const { page, limit, offset } = parsePagination(req.query);
-  const data = await txService.getDeposits({ limit, offset, filters: extractFilters(req.query) });
+export const getDeposits = async (request, reply) => {
+  const { page, limit, offset } = parsePagination(request.query);
+  const data = await txService.getDeposits({ limit, offset, filters: extractFilters(request.query) });
 
-  res.status(200).json({ success: true, ...paginatedResponse(data, page, limit) });
-});
+  return reply.code(200).send({ success: true, ...paginatedResponse(data, page, limit) });
+};
 
-export const getWithdrawals = tryCatchFunction(async (req, res) => {
-  const { page, limit, offset } = parsePagination(req.query);
-  const data = await txService.getWithdrawals({ limit, offset, filters: extractFilters(req.query) });
+export const getWithdrawals = async (request, reply) => {
+  const { page, limit, offset } = parsePagination(request.query);
+  const data = await txService.getWithdrawals({ limit, offset, filters: extractFilters(request.query) });
 
-  res.status(200).json({ success: true, ...paginatedResponse(data, page, limit) });
-});
+  return reply.code(200).send({ success: true, ...paginatedResponse(data, page, limit) });
+};
 
-export const getTransfers = tryCatchFunction(async (req, res) => {
-  const { page, limit, offset } = parsePagination(req.query);
-  const data = await txService.getTransfers({ limit, offset, filters: extractFilters(req.query) });
+export const getTransfers = async (request, reply) => {
+  const { page, limit, offset } = parsePagination(request.query);
+  const data = await txService.getTransfers({ limit, offset, filters: extractFilters(request.query) });
 
-  res.status(200).json({ success: true, ...paginatedResponse(data, page, limit) });
-});
+  return reply.code(200).send({ success: true, ...paginatedResponse(data, page, limit) });
+};
 
-export const getSwaps = tryCatchFunction(async (req, res) => {
-  const { page, limit, offset } = parsePagination(req.query);
-  const data = await txService.getSwaps({ limit, offset, filters: extractFilters(req.query) });
+export const getSwaps = async (request, reply) => {
+  const { page, limit, offset } = parsePagination(request.query);
+  const data = await txService.getSwaps({ limit, offset, filters: extractFilters(request.query) });
 
-  res.status(200).json({ success: true, ...paginatedResponse(data, page, limit) });
-});
+  return reply.code(200).send({ success: true, ...paginatedResponse(data, page, limit) });
+};
 
-export const getNGNDeposits = tryCatchFunction(async (req, res) => {
-  const { page, limit, offset } = parsePagination(req.query);
-  const data = await txService.getNGNDeposits({ limit, offset, filters: extractFilters(req.query) });
+export const getNGNDeposits = async (request, reply) => {
+  const { page, limit, offset } = parsePagination(request.query);
+  const data = await txService.getNGNDeposits({ limit, offset, filters: extractFilters(request.query) });
 
-  res.status(200).json({ success: true, ...paginatedResponse(data, page, limit) });
-});
+  return reply.code(200).send({ success: true, ...paginatedResponse(data, page, limit) });
+};
 
-export const getNGNPayouts = tryCatchFunction(async (req, res) => {
-  const { page, limit, offset } = parsePagination(req.query);
-  const data = await txService.getNGNPayouts({ limit, offset, filters: extractFilters(req.query) });
+export const getNGNPayouts = async (request, reply) => {
+  const { page, limit, offset } = parsePagination(request.query);
+  const data = await txService.getNGNPayouts({ limit, offset, filters: extractFilters(request.query) });
 
-  res.status(200).json({ success: true, ...paginatedResponse(data, page, limit) });
-});
+  return reply.code(200).send({ success: true, ...paginatedResponse(data, page, limit) });
+};
 
-export const getCryptoDeposits = tryCatchFunction(async (req, res) => {
-  const { page, limit, offset } = parsePagination(req.query);
-  const data = await txService.getCryptoDeposits({ limit, offset, filters: extractFilters(req.query) });
+export const getCryptoDeposits = async (request, reply) => {
+  const { page, limit, offset } = parsePagination(request.query);
+  const data = await txService.getCryptoDeposits({ limit, offset, filters: extractFilters(request.query) });
 
-  res.status(200).json({ success: true, ...paginatedResponse(data, page, limit) });
-});
+  return reply.code(200).send({ success: true, ...paginatedResponse(data, page, limit) });
+};
 
-export const getCryptoPayouts = tryCatchFunction(async (req, res) => {
-  const { page, limit, offset } = parsePagination(req.query);
-  const data = await txService.getCryptoPayouts({ limit, offset, filters: extractFilters(req.query) });
+export const getCryptoPayouts = async (request, reply) => {
+  const { page, limit, offset } = parsePagination(request.query);
+  const data = await txService.getCryptoPayouts({ limit, offset, filters: extractFilters(request.query) });
 
-  res.status(200).json({ success: true, ...paginatedResponse(data, page, limit) });
-});
+  return reply.code(200).send({ success: true, ...paginatedResponse(data, page, limit) });
+};

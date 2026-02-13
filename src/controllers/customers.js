@@ -1,67 +1,66 @@
 import CustomerService from "../services/customers.js";
-import { tryCatchFunction } from "../utils/tryCatch/index.js";
 import { parsePagination, paginatedResponse } from "../utils/pagination/index.js";
 
 const customerService = new CustomerService();
 
-export const getAllCustomers = tryCatchFunction(async (req, res) => {
-  const { page, limit, offset } = parsePagination(req.query);
+export const getAllCustomers = async (request, reply) => {
+  const { page, limit, offset } = parsePagination(request.query);
   const filters = {
-    status: req.query.status,
-    account_key: req.query.account_key,
-    environment: req.query.environment,
+    status: request.query.status,
+    account_key: request.query.account_key,
+    environment: request.query.environment,
   };
   const data = await customerService.getAll({ limit, offset, filters });
 
-  res.status(200).json({
+  return reply.code(200).send({
     code: 200,
     success: true,
     message: "Customers fetched successfully",
     ...paginatedResponse(data, page, limit),
   });
-});
+};
 
-export const getCustomer = tryCatchFunction(async (req, res) => {
-  const customer = await customerService.getByIdentifier(req.params.identifier);
+export const getCustomer = async (request, reply) => {
+  const customer = await customerService.getByIdentifier(request.params.identifier);
 
-  res.status(200).json({
+  return reply.code(200).send({
     code: 200,
     success: true,
     message: "Customer fetched successfully",
     data: customer,
   });
-});
+};
 
-export const updateCustomer = tryCatchFunction(async (req, res) => {
-  const customer = await customerService.update(req.params.identifier, req.body);
+export const updateCustomer = async (request, reply) => {
+  const customer = await customerService.update(request.params.identifier, request.body);
 
-  res.status(200).json({
+  return reply.code(200).send({
     success: true,
     message: "Customer updated successfully",
     data: customer,
   });
-});
+};
 
-export const getCustomerWallets = tryCatchFunction(async (req, res) => {
-  const { page, limit, offset } = parsePagination(req.query);
-  const data = await customerService.getWallets(req.params.identifier, { limit, offset });
+export const getCustomerWallets = async (request, reply) => {
+  const { page, limit, offset } = parsePagination(request.query);
+  const data = await customerService.getWallets(request.params.identifier, { limit, offset });
 
-  res.status(200).json({
+  return reply.code(200).send({
     code: 200,
     success: true,
     message: "Customer wallets fetched successfully",
     ...paginatedResponse(data, page, limit),
   });
-});
+};
 
-export const getMerchantCustomers = tryCatchFunction(async (req, res) => {
-  const { page, limit, offset } = parsePagination(req.query);
-  const data = await customerService.getByMerchant(req.params.account_key, { limit, offset });
+export const getMerchantCustomers = async (request, reply) => {
+  const { page, limit, offset } = parsePagination(request.query);
+  const data = await customerService.getByMerchant(request.params.account_key, { limit, offset });
 
-  res.status(200).json({
+  return reply.code(200).send({
     code: 200,
     success: true,
     message: "Merchant customers fetched successfully",
     ...paginatedResponse(data, page, limit),
   });
-});
+};

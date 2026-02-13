@@ -1,10 +1,8 @@
-export const errorHandler = (err, req, res, next) => {
-    console.error(err);
-  
-    res.status(err.statusCode || 500).json({
-      success: false,
-      message: err.message || "Server error",
-    });
-  };
+export const errorHandler = (error, request, reply) => {
+  request.log.error(error);
 
-export default errorHandler;
+  reply.code(error.statusCode || 500).send({
+    success: false,
+    message: error.message || "Server error",
+  });
+};

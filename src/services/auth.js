@@ -3,6 +3,7 @@ import crypto from "crypto";
 import User from "../models/users/user.js";
 import { ErrorClass } from "../utils/errorClass/index.js";
 import { generateToken } from "../utils/jwt/index.js";
+import { clearUserCache } from "../middleware/auth.js";
 
 const SALT_ROUNDS = 6;
 
@@ -114,6 +115,9 @@ export default class AuthService {
       password: hashedPassword,
       date_modified: new Date(),
     });
+
+    // Invalidate cached user so fresh data is fetched on next request
+    clearUserCache(user.user_key);
 
     return { message: "Password changed successfully" };
   }

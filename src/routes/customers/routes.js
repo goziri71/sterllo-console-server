@@ -1,4 +1,3 @@
-import express from "express";
 import {
   getAllCustomers,
   getCustomer,
@@ -9,17 +8,15 @@ import { getCustomerKYCs } from "../../controllers/kycs.js";
 import { authenticate, authorize } from "../../middleware/auth.js";
 import { ALL_ROLES, CUSTOMER_UPDATE_ROLES } from "../../config/roles.js";
 
-const router = express.Router();
+export default async function customerRoutes(fastify) {
+  fastify.addHook("preHandler", authenticate);
 
-router.use(authenticate);
+  // Read routes (all roles)
+  fastify.get("/", { preHandler: authorize(...ALL_ROLES) }, getAllCustomers);
+  fastify.get("/:identifier", { preHandler: authorize(...ALL_ROLES) }, getCustomer);
+  fastify.get("/:identifier/wallets", { preHandler: authorize(...ALL_ROLES) }, getCustomerWallets);
+  fastify.get("/:identifier/kycs", { preHandler: authorize(...ALL_ROLES) }, getCustomerKYCs);
 
-// Read routes (all roles)
-router.get("/", authorize(...ALL_ROLES), getAllCustomers);
-router.get("/:identifier", authorize(...ALL_ROLES), getCustomer);
-router.get("/:identifier/wallets", authorize(...ALL_ROLES), getCustomerWallets);
-router.get("/:identifier/kycs", authorize(...ALL_ROLES), getCustomerKYCs);
-
-// Update routes (operations + compliance only)
-router.patch("/:identifier", authorize(...CUSTOMER_UPDATE_ROLES), updateCustomer);
-
-export default router;
+  // Update routes (operations + compliance only)
+  fastify.patch("/:identifier", { preHandler: authorize(...CUSTOMER_UPDATE_ROLES) }, updateCustomer);
+}

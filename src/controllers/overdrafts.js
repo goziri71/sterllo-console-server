@@ -1,32 +1,31 @@
 import OverdraftService from "../services/overdrafts.js";
-import { tryCatchFunction } from "../utils/tryCatch/index.js";
 import { parsePagination, paginatedResponse } from "../utils/pagination/index.js";
 
 const overdraftService = new OverdraftService();
 
-export const getAllOverdrafts = tryCatchFunction(async (req, res) => {
-  const { page, limit, offset } = parsePagination(req.query);
+export const getAllOverdrafts = async (request, reply) => {
+  const { page, limit, offset } = parsePagination(request.query);
   const filters = {
-    status: req.query.status,
-    account_key: req.query.account_key,
+    status: request.query.status,
+    account_key: request.query.account_key,
   };
   const data = await overdraftService.getAll({ limit, offset, filters });
 
-  res.status(200).json({ success: true, ...paginatedResponse(data, page, limit) });
-});
+  return reply.code(200).send({ success: true, ...paginatedResponse(data, page, limit) });
+};
 
-export const getOverdraft = tryCatchFunction(async (req, res) => {
-  const overdraft = await overdraftService.getByReference(req.params.reference);
+export const getOverdraft = async (request, reply) => {
+  const overdraft = await overdraftService.getByReference(request.params.reference);
 
-  res.status(200).json({ success: true, data: overdraft });
-});
+  return reply.code(200).send({ success: true, data: overdraft });
+};
 
-export const updateOverdraft = tryCatchFunction(async (req, res) => {
-  const overdraft = await overdraftService.update(req.params.reference, req.body);
+export const updateOverdraft = async (request, reply) => {
+  const overdraft = await overdraftService.update(request.params.reference, request.body);
 
-  res.status(200).json({
+  return reply.code(200).send({
     success: true,
     message: "Overdraft request updated successfully",
     data: overdraft,
   });
-});
+};
