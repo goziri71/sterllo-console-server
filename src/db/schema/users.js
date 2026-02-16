@@ -16,6 +16,8 @@ export const users = mysqlTable("Users", {
 
   role: varchar("role", { length: 100 }),
 
+  token_version: int("token_version").notNull().default(0),
+
   last_login: datetime("last_login"),
 
   date_created: datetime("date_created"),

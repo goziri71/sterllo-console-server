@@ -26,6 +26,7 @@ Roles: `finance`, `operations`, `ops_support`, `compliance`, `growth`
 |--------|----------|------|-------------|
 | POST | `/api/v1/auth/register` | None | Register a new user |
 | POST | `/api/v1/auth/login` | None | Login and get JWT token |
+| POST | `/api/v1/auth/logout` | JWT | Logout (invalidates current token) |
 | GET | `/api/v1/auth/profile` | JWT | Get current user profile |
 | PATCH | `/api/v1/auth/change-password` | JWT | Change password |
 

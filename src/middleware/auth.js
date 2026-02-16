@@ -86,6 +86,11 @@ export const authenticate = async (request, reply) => {
     setCachedUser(decoded.user_key, user);
   }
 
+  // Reject tokens from before the latest login/password change
+  if (decoded.token_version !== undefined && user.token_version !== decoded.token_version) {
+    throw new ErrorClass("Token has been revoked. Please login again", 401);
+  }
+
   request.user = user;
 };
 

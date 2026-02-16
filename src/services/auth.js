@@ -55,6 +55,7 @@ export default class AuthService {
       id: newUser.id,
       user_key: newUser.user_key,
       role: newUser.role,
+      token_version: newUser.token_version,
     });
 
     return {
@@ -93,20 +94,24 @@ export default class AuthService {
       );
     }
 
-    // Update last_login
+    const newTokenVersion = (user.token_version || 0) + 1;
+
     await db
       .update(users)
-      .set({ last_login: new Date(), date_modified: new Date() })
+      .set({ last_login: new Date(), date_modified: new Date(), token_version: newTokenVersion })
       .where(eq(users.id, user.id));
+
+    clearUserCache(user.user_key);
 
     const token = generateToken({
       id: user.id,
       user_key: user.user_key,
       role: user.role,
+      token_version: newTokenVersion,
     });
 
     return {
-      user: this._sanitizeUser(user),
+      user: this._sanitizeUser({ ...user, token_version: newTokenVersion }),
       token,
     };
   }
@@ -142,15 +147,40 @@ export default class AuthService {
     }
 
     const hashedPassword = await bcrypt.hash(newPassword, SALT_ROUNDS);
+    const newTokenVersion = (user.token_version || 0) + 1;
+
     await db
       .update(users)
-      .set({ password: hashedPassword, date_modified: new Date() })
+      .set({ password: hashedPassword, date_modified: new Date(), token_version: newTokenVersion })
       .where(eq(users.id, user.id));
 
-    // Invalidate cached user so fresh data is fetched on next request
     clearUserCache(user.user_key);
 
     return { message: "Password changed successfully" };
+  }
+
+  /**
+   * Logout - invalidates the current token by incrementing token_version
+   */
+  async logout(userKey) {
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(eq(users.user_key, userKey))
+      .limit(1);
+
+    if (!user) {
+      throw new ErrorClass("User not found", 404);
+    }
+
+    await db
+      .update(users)
+      .set({ token_version: (user.token_version || 0) + 1, date_modified: new Date() })
+      .where(eq(users.id, user.id));
+
+    clearUserCache(user.user_key);
+
+    return { message: "Logged out successfully" };
   }
 
   /**

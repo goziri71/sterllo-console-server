@@ -95,6 +95,16 @@ export const changePassword = async (request, reply) => {
   });
 };
 
+export const logout = async (request, reply) => {
+  const result = await authService.logout(request.user.user_key);
+
+  return reply.code(200).send({
+    code: 200,
+    success: true,
+    message: result.message,
+  });
+};
+
 export const getProfile = async (request, reply) => {
   const user = await authService.getProfile(request.user.id);
 
