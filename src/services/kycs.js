@@ -20,11 +20,21 @@ export default class KYCService {
   }
 
   async getByReference(reference) {
-    const [kyc] = await db
+    // Try by KYC reference first
+    let [kyc] = await db
       .select()
       .from(kycs)
       .where(eq(kycs.reference, reference))
       .limit(1);
+
+    // Fall back to customer identifier
+    if (!kyc) {
+      [kyc] = await db
+        .select()
+        .from(kycs)
+        .where(eq(kycs.identifier, reference))
+        .limit(1);
+    }
 
     if (!kyc) {
       throw new ErrorClass("KYC not found", 404);

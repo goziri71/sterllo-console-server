@@ -64,6 +64,8 @@ export default class MerchantService {
     return updated;
   }
 
+  
+
   async getLedgers(accountKey, { limit, offset }) {
     const [merchant] = await db
       .select()
