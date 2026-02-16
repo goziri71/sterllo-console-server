@@ -72,6 +72,9 @@ All routes require JWT + any role.
 | GET | `/api/v1/merchants/:account_key/customers` | All | Get merchant's customers |
 | GET | `/api/v1/merchants/:account_key/ledgers` | All | Get merchant's ledgers |
 | GET | `/api/v1/merchants/:account_key/settlements` | All | Get merchant's settlements |
+| GET | `/api/v1/merchants/:account_key/wallets` | All | Get merchant's wallets (enriched with NGN accounts + crypto addresses) |
+| GET | `/api/v1/merchants/:account_key/wallets/:wallet_key` | All | Get single merchant wallet (enriched) |
+| GET | `/api/v1/merchants/:account_key/fees` | All | Get merchant's BaaS fee schedule (custom + defaults) |
 | PATCH | `/api/v1/merchants/:account_key` | operations, compliance | Update merchant |
 
 ### PATCH `/api/v1/merchants/:account_key`
@@ -101,7 +104,9 @@ All routes require JWT + any role.
 |--------|----------|-------|-------------|
 | GET | `/api/v1/customers` | All | List all customers |
 | GET | `/api/v1/customers/:identifier` | All | Get single customer |
-| GET | `/api/v1/customers/:identifier/wallets` | All | Get customer's wallets |
+| GET | `/api/v1/customers/:identifier/wallets` | All | Get customer's wallets (enriched with NGN accounts + crypto addresses) |
+| GET | `/api/v1/customers/:identifier/wallets/:wallet_key` | All | Get single customer wallet (enriched) |
+| GET | `/api/v1/customers/:identifier/fees` | All | Get customer's SaaS fee schedule |
 | GET | `/api/v1/customers/:identifier/kycs` | All | Get customer's KYCs |
 | PATCH | `/api/v1/customers/:identifier` | operations, compliance | Update customer |
 
@@ -258,6 +263,9 @@ All routes require JWT + any role (except whitelisted IPs).
 | GET | `/api/v1/config/currencies` | All | List currencies |
 | GET | `/api/v1/config/vats` | All | List VAT rates |
 | GET | `/api/v1/config/customer-tiers` | All | List customer tiers |
+| GET | `/api/v1/config/financial-institutions` | All | List Nigerian financial institutions |
+| GET | `/api/v1/config/crypto-assets` | All | List supported crypto assets |
+| GET | `/api/v1/config/deposit-methods` | All | List deposit methods |
 | GET | `/api/v1/config/whitelisted-ips` | operations, compliance | List whitelisted IPs |
 
 ### Query params
@@ -267,12 +275,149 @@ All routes require JWT + any role (except whitelisted IPs).
 | `page` | Page number (default: 1) |
 | `limit` | Items per page (default: 20) |
 
+Financial institutions also supports:
+
+| Param | Description |
+|-------|-------------|
+| `is_deleted` | Filter by deleted status (`Y`/`N`) |
+
 Whitelisted IPs also supports:
 
 | Param | Description |
 |-------|-------------|
 | `account_key` | Filter by merchant account key |
 | `is_enabled` | Filter by enabled status |
+
+---
+
+## Fees
+
+All routes require JWT + any role.
+
+| Method | Endpoint | Roles | Description |
+|--------|----------|-------|-------------|
+| GET | `/api/v1/fees/defaults` | All | Get all default (platform-wide) fee schedules |
+
+### Response structure for fee endpoints
+
+Fee responses are grouped by type:
+
+```json
+{
+  "success": true,
+  "data": {
+    "deposit": [...],
+    "payout": [...],
+    "swap": [...],
+    "transfer": [...],
+    "withdrawal": [...],
+    "overdraft_processing": [...],
+    "wallet_maintenance": [...]
+  }
+}
+```
+
+### Merchant fees (`GET /api/v1/merchants/:account_key/fees`)
+
+Returns both custom (merchant-specific) BaaS fees and platform defaults:
+
+```json
+{
+  "success": true,
+  "data": {
+    "custom": {
+      "deposit": [...],
+      "payout": [...],
+      "swap": [...],
+      "transfer": [...],
+      "withdrawal": [...],
+      "overdraft_processing": [...],
+      "wallet_maintenance": [...]
+    },
+    "defaults": {
+      "deposit": [...],
+      "payout": [...],
+      "swap": [...],
+      "transfer": [...],
+      "withdrawal": [...],
+      "overdraft_processing": [...],
+      "wallet_maintenance": [...]
+    }
+  }
+}
+```
+
+### Customer fees (`GET /api/v1/customers/:identifier/fees`)
+
+Returns the SaaS fee schedule set by the customer's parent merchant:
+
+```json
+{
+  "success": true,
+  "data": {
+    "deposit": [...],
+    "payout": [...],
+    "swap": [...],
+    "transfer": [...],
+    "withdrawal": [...]
+  }
+}
+```
+
+---
+
+## Wallets (Enriched)
+
+Wallet endpoints return the base wallet/ledger data enriched with linked NGN deposit accounts and crypto deposit addresses.
+
+### Merchant wallets (`GET /api/v1/merchants/:account_key/wallets`)
+
+Paginated. Each wallet includes:
+
+```json
+{
+  "wallet_key": "...",
+  "currency_code": "NGN",
+  "ngn_deposit_accounts": [
+    {
+      "bank_name": "BEAMER MICROFINANCE BANK",
+      "bank_code": "090591",
+      "bank_slug": "BEAMER",
+      "account_name": "JOHN DOE",
+      "account_number": "9000001662",
+      "type": "STATIC",
+      "service": "WALLET",
+      "is_pnd": "N",
+      "is_pnc": "N",
+      "is_deactivated": "N",
+      "vendor": "BEAMER",
+      "reference": "...",
+      "date_created": "2025-07-02T03:55:09.000Z"
+    }
+  ],
+  "crypto_deposit_addresses": [
+    {
+      "asset": "USDT",
+      "network": "TRC20",
+      "address_name": "Deposit Address",
+      "address": "TXyz...",
+      "type": "STATIC",
+      "service": "WALLET",
+      "vendor": "BLOCKRADAR",
+      "vendor_wallet_id": "...",
+      "reference": "...",
+      "date_created": "2025-10-03T12:00:00.000Z"
+    }
+  ]
+}
+```
+
+### Query params (wallet list endpoints)
+
+| Param | Description |
+|-------|-------------|
+| `page` | Page number (default: 1) |
+| `limit` | Items per page (default: 20) |
 
 ---
 

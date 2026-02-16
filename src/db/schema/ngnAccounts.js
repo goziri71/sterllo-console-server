@@ -1,0 +1,42 @@
+import { mysqlTable, int, char, varchar, text, datetime } from "drizzle-orm/mysql-core";
+
+export const ngnDepositAccountNumbers = mysqlTable("NGNDepositAccountNumbers", {
+  id: int("id").primaryKey().autoincrement(),
+  user_key: char("user_key", { length: 30 }).notNull(),
+  account_key: char("account_key", { length: 30 }).notNull(),
+  identifier: char("identifier", { length: 250 }),
+  wallet_key: char("wallet_key", { length: 30 }).notNull(),
+  type: char("type", { length: 10 }).notNull(),
+  service: char("service", { length: 20 }).notNull(),
+  u_id: char("u_id", { length: 250 }).notNull(),
+  amount: varchar("amount", { length: 250 }),
+  lifespan: int("lifespan").notNull(),
+  bank_name: char("bank_name", { length: 100 }).notNull(),
+  bank_code: char("bank_code", { length: 10 }).notNull(),
+  institution_identifier: char("institution_identifier", { length: 250 }),
+  bank_slug: char("bank_slug", { length: 20 }).notNull(),
+  account_name: char("account_name", { length: 100 }).notNull(),
+  account_number: char("account_number", { length: 10 }),
+  is_pnd: char("is_pnd", { length: 1 }).notNull().default("N"),
+  is_pnc: char("is_pnc", { length: 1 }).notNull().default("N"),
+  is_deactivated: char("is_deactivated", { length: 1 }).notNull().default("N"),
+  reference: char("reference", { length: 250 }).notNull().unique(),
+  vendor: char("vendor", { length: 50 }).notNull(),
+  source: char("source", { length: 50 }),
+  ip_address: char("ip_address", { length: 39 }),
+  date_created: datetime("date_created").notNull(),
+  date_modified: datetime("date_modified"),
+});
+
+export const ngFinancialInstitutions = mysqlTable("NGFinancialInstitutions", {
+  id: int("id").primaryKey().autoincrement(),
+  identifier: char("identifier", { length: 250 }).notNull().unique(),
+  name: char("name", { length: 100 }),
+  nip_code: char("nip_code", { length: 10 }),
+  udara360_code: char("udara360_code", { length: 10 }).unique(),
+  url: text("url"),
+  is_deleted: char("is_deleted", { length: 1 }).notNull().default("N"),
+  ip_address: char("ip_address", { length: 39 }),
+  date_created: datetime("date_created").notNull(),
+  date_modified: datetime("date_modified"),
+});

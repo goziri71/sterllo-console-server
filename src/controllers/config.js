@@ -34,3 +34,42 @@ export const getWhitelistedIPs = async (request, reply) => {
 
   return reply.code(200).send({ success: true, ...paginatedResponse(data, page, limit) });
 };
+
+export const getFinancialInstitutions = async (request, reply) => {
+  const { page, limit, offset } = parsePagination(request.query);
+  const filters = {
+    is_deleted: request.query.is_deleted,
+  };
+  const data = await configService.getFinancialInstitutions({ limit, offset, filters });
+
+  return reply.code(200).send({
+    code: 200,
+    success: true,
+    message: "Financial institutions fetched successfully",
+    ...paginatedResponse(data, page, limit),
+  });
+};
+
+export const getCryptoAssets = async (request, reply) => {
+  const { page, limit, offset } = parsePagination(request.query);
+  const data = await configService.getCryptoAssets({ limit, offset });
+
+  return reply.code(200).send({
+    code: 200,
+    success: true,
+    message: "Crypto assets fetched successfully",
+    ...paginatedResponse(data, page, limit),
+  });
+};
+
+export const getDepositMethods = async (request, reply) => {
+  const { page, limit, offset } = parsePagination(request.query);
+  const data = await configService.getDepositMethods({ limit, offset });
+
+  return reply.code(200).send({
+    code: 200,
+    success: true,
+    message: "Deposit methods fetched successfully",
+    ...paginatedResponse(data, page, limit),
+  });
+};
