@@ -15,6 +15,7 @@ import disputeRoutes from "./src/routes/disputes/routes.js";
 import overdraftRoutes from "./src/routes/overdrafts/routes.js";
 import configRoutes from "./src/routes/config/routes.js";
 import feeRoutes from "./src/routes/fees/routes.js";
+import dashboardRoutes from "./src/routes/dashboard/routes.js";
 import { errorHandler } from "./src/middleware/errorHandler.js";
 
 const isProduction = process.env.NODE_ENV === "production";
@@ -64,5 +65,6 @@ app.register(disputeRoutes, { prefix: "/api/v1/disputes" });
 app.register(overdraftRoutes, { prefix: "/api/v1/overdrafts" });
 app.register(configRoutes, { prefix: "/api/v1/config" });
 app.register(feeRoutes, { prefix: "/api/v1/fees" });
+app.register(dashboardRoutes, { prefix: "/api/v1/dashboard" });
 
 export default app;

@@ -422,6 +422,170 @@ Paginated. Each wallet includes:
 
 ---
 
+## Dashboard (Role-Aware)
+
+All routes require JWT + any role. Summary data is cached for 60 seconds. The response adapts based on the authenticated user's role — everyone gets a shared `overview`, plus a `department` section with metrics specific to their role.
+
+| Method | Endpoint | Roles | Description |
+|--------|----------|-------|-------------|
+| GET | `/api/v1/dashboard/summary` | All | Role-aware aggregate stats (shared overview + department-specific metrics) |
+| GET | `/api/v1/dashboard/activities` | All | Role-aware recent activities feed |
+
+### GET `/api/v1/dashboard/summary`
+
+Returns a shared `overview` for all roles, plus a `department` object whose contents depend on the authenticated user's role.
+
+#### Shared overview (all roles)
+
+```json
+{
+  "success": true,
+  "data": {
+    "overview": {
+      "total_customers": 1247,
+      "total_wallets": 3456,
+      "transactions_today": 892,
+      "open_disputes": 45,
+      "system_uptime_seconds": 864000
+    },
+    "department": { ... }
+  }
+}
+```
+
+#### Department section by role
+
+**Finance** (`role: "finance"`)
+
+```json
+"department": {
+  "role": "finance",
+  "settlement_status": {
+    "completed_today_ngn": "32349490023.11",
+    "pending_ngn": "41932322.87",
+    "completed_today_count": 156,
+    "pending_count": 23
+  },
+  "currency_usage": [
+    { "currency_code": "NGN", "wallet_count": 800 },
+    { "currency_code": "USD", "wallet_count": 200 }
+  ],
+  "total_ngn_deposits_today": 342,
+  "total_ngn_payouts_today": 189
+}
+```
+
+**Operations** (`role: "operations"`)
+
+```json
+"department": {
+  "role": "operations",
+  "open_disputes": 45,
+  "pending_overdraft_requests": 8,
+  "transfers_today": 234,
+  "ngn_payouts_today": 189,
+  "ngn_payouts_pending": 12,
+  "crypto_payouts_today": 47
+}
+```
+
+**Ops Support** (`role: "ops_support"`)
+
+```json
+"department": {
+  "role": "ops_support",
+  "customers_onboarded_today": 34,
+  "customers_onboarded_this_week": 156,
+  "disputes_filed_today": 7,
+  "disputes_resolved_today": 3,
+  "recent_customer_count": 50
+}
+```
+
+**Compliance** (`role: "compliance"`)
+
+```json
+"department": {
+  "role": "compliance",
+  "kyc_pending_approval": 45,
+  "id_verification_pending_approval": 12,
+  "customers_flagged_pnd": 3,
+  "customers_flagged_pnc": 1,
+  "non_compliant_personal": 18,
+  "non_compliant_business": 6
+}
+```
+
+**Growth** (`role: "growth"`)
+
+```json
+"department": {
+  "role": "growth",
+  "customers_onboarded_today": 34,
+  "customers_onboarded_this_week": 156,
+  "wallets_created_today": 67,
+  "wallets_created_this_week": 312,
+  "active_merchants": 23,
+  "currency_usage": [
+    { "currency_code": "NGN", "wallet_count": 800 },
+    { "currency_code": "USD", "wallet_count": 200 }
+  ]
+}
+```
+
+### GET `/api/v1/dashboard/activities`
+
+Returns recent activities filtered by role relevance. The activity types returned depend on the authenticated user's role.
+
+| Param | Description |
+|-------|-------------|
+| `page` | Page number (default: 1) |
+| `limit` | Items per page (default: 20) |
+
+#### Activity types by role
+
+| Role | Activity types included |
+|------|----------------------|
+| **finance** | `ngn_deposit_received`, `ngn_payout_processed`, `crypto_deposit_received`, `crypto_payout_processed`, `transfer_processed` |
+| **operations** | `dispute_created`, `dispute_resolved`, `transfer_processed`, `ngn_payout_processed`, `crypto_payout_processed`, `overdraft_requested` |
+| **ops_support** | `customer_onboarded`, `wallet_created`, `dispute_created`, `dispute_resolved` |
+| **compliance** | `kyc_submitted`, `kyc_approved`, `customer_flagged`, `customer_onboarded` |
+| **growth** | `customer_onboarded`, `wallet_created`, `merchant_activated` |
+
+#### Response
+
+```json
+{
+  "success": true,
+  "records": [
+    {
+      "type": "dispute_created",
+      "description": "Dispute DR7x89 filed",
+      "reference": "DR7x89",
+      "timestamp": "2026-02-03T10:30:00.000Z"
+    },
+    {
+      "type": "ngn_payout_processed",
+      "description": "NGN payout of 50000 processed",
+      "reference": "PAY_abc123",
+      "timestamp": "2026-02-03T10:25:00.000Z"
+    }
+  ],
+  "pagination": {
+    "total": 150,
+    "page": 1,
+    "limit": 20,
+    "total_pages": 8,
+    "has_next": true,
+    "has_prev": false
+  }
+}
+```
+
+All activity types: `customer_onboarded`, `wallet_created`, `dispute_created`, `dispute_resolved`, `transfer_processed`, `ngn_deposit_received`, `ngn_payout_processed`, `crypto_deposit_received`, `crypto_payout_processed`, `overdraft_requested`, `kyc_submitted`, `kyc_approved`, `customer_flagged`, `merchant_activated`
+
+---
+
 ## Error Responses
 
 All errors follow this format:
