@@ -470,6 +470,13 @@ Returns a shared `overview` for all roles, plus a `department` object whose cont
     { "currency_code": "NGN", "wallet_count": 800 },
     { "currency_code": "USD", "wallet_count": 200 }
   ],
+  "currency_volume": [
+    { "currency_code": "NGN", "total_volume": "16432890.50" },
+    { "currency_code": "USD", "total_volume": "10245300.00" },
+    { "currency_code": "GBP", "total_volume": "13800200.00" },
+    { "currency_code": "GHS", "total_volume": "11200100.30" },
+    { "currency_code": "USDT", "total_volume": "450000.00" }
+  ],
   "total_ngn_deposits_today": 342,
   "total_ngn_payouts_today": 189
 }
@@ -529,6 +536,11 @@ Returns a shared `overview` for all roles, plus a `department` object whose cont
   "currency_usage": [
     { "currency_code": "NGN", "wallet_count": 800 },
     { "currency_code": "USD", "wallet_count": 200 }
+  ],
+  "currency_volume": [
+    { "currency_code": "NGN", "total_volume": "16432890.50" },
+    { "currency_code": "USD", "total_volume": "10245300.00" },
+    { "currency_code": "GBP", "total_volume": "13800200.00" }
   ]
 }
 ```

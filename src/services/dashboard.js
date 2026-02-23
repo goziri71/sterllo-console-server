@@ -32,6 +32,32 @@ function countSince(table, dateCol, since) {
     .where(gte(dateCol, since));
 }
 
+async function getCurrencyVolume() {
+  const [rows] = await db.execute(sql`
+    SELECT currency_code, SUM(vol) as total_volume FROM (
+      SELECT currency_code, SUM(CAST(amount AS DECIMAL(20,2))) as vol FROM Deposits GROUP BY currency_code
+      UNION ALL
+      SELECT currency_code, SUM(CAST(amount AS DECIMAL(20,2))) as vol FROM Withdrawals GROUP BY currency_code
+      UNION ALL
+      SELECT currency_code, SUM(CAST(amount AS DECIMAL(20,2))) as vol FROM Transfers GROUP BY currency_code
+      UNION ALL
+      SELECT source_currency_code as currency_code, SUM(CAST(source_amount AS DECIMAL(20,2))) as vol FROM Swaps GROUP BY source_currency_code
+      UNION ALL
+      SELECT 'NGN' as currency_code, SUM(CAST(amount AS DECIMAL(20,2))) as vol FROM NGNDeposits
+      UNION ALL
+      SELECT 'NGN' as currency_code, SUM(CAST(amount AS DECIMAL(20,2))) as vol FROM NGNPayouts
+      UNION ALL
+      SELECT asset as currency_code, SUM(CAST(amount AS DECIMAL(20,2))) as vol FROM CryptocurrencyPayouts GROUP BY asset
+    ) combined
+    GROUP BY currency_code
+    ORDER BY total_volume DESC
+  `);
+  return rows.map((r) => ({
+    currency_code: r.currency_code,
+    total_volume: String(r.total_volume ?? "0.00"),
+  }));
+}
+
 function getCached(key) {
   const entry = cache.get(key);
   if (entry && Date.now() - entry.time < SUMMARY_CACHE_TTL_MS) return entry.data;
@@ -89,6 +115,7 @@ async function getFinanceDepartment(today) {
     currencyUsageRows,
     [{ total: ngnDepCount }],
     [{ total: ngnPayCount }],
+    currencyVolumeRows,
   ] = await Promise.all([
     db.execute(
       sql`SELECT COUNT(*) as cnt, COALESCE(SUM(CAST(amount AS DECIMAL(20,2))), 0) as total_amount FROM NGNPayouts WHERE payout_status = 'successful' AND date_created >= ${today}`,
@@ -102,6 +129,7 @@ async function getFinanceDepartment(today) {
       .orderBy(desc(count())),
     countSince(ngnDeposits, ngnDeposits.date_created, today),
     countSince(ngnPayouts, ngnPayouts.date_created, today),
+    getCurrencyVolume(),
   ]);
 
   const completedRow = Array.isArray(completedSettlement) ? completedSettlement[0] : completedSettlement;
@@ -119,6 +147,7 @@ async function getFinanceDepartment(today) {
       currency_code: r.currency_code,
       wallet_count: Number(r.wallet_count),
     })),
+    currency_volume: currencyVolumeRows,
     total_ngn_deposits_today: Number(ngnDepCount),
     total_ngn_payouts_today: Number(ngnPayCount),
   };
@@ -218,6 +247,7 @@ async function getGrowthDepartment(today) {
     [{ total: walletsWeek }],
     [{ total: activeMerchants }],
     currencyUsageRows,
+    currencyVolumeRows,
   ] = await Promise.all([
     countSince(customers, customers.date_created, today),
     countSince(customers, customers.date_created, week),
@@ -228,6 +258,7 @@ async function getGrowthDepartment(today) {
       .from(customerWallets)
       .groupBy(customerWallets.currency_code)
       .orderBy(desc(count())),
+    getCurrencyVolume(),
   ]);
 
   return {
@@ -241,6 +272,7 @@ async function getGrowthDepartment(today) {
       currency_code: r.currency_code,
       wallet_count: Number(r.wallet_count),
     })),
+    currency_volume: currencyVolumeRows,
   };
 }
 
