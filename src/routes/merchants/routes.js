@@ -1,6 +1,7 @@
 import {
   getAllMerchants,
   getMerchant,
+  getMerchantStats,
   updateMerchant,
   getMerchantLedgers,
   getMerchantSettlements,
@@ -12,8 +13,10 @@ import { authenticate, authorize } from "../../middleware/auth.js";
 import { ALL_ROLES, MERCHANT_UPDATE_ROLES } from "../../config/roles.js";
 
 export default async function merchantRoutes(fastify) {
-  // All routes require authentication
   fastify.addHook("preHandler", authenticate);
+
+  // Stats must be registered before /:account_key to avoid route conflict
+  fastify.get("/stats", { preHandler: authorize(...ALL_ROLES) }, getMerchantStats);
 
   // Read routes (all roles)
   fastify.get("/", { preHandler: authorize(...ALL_ROLES) }, getAllMerchants);

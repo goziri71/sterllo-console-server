@@ -68,8 +68,9 @@ All routes require JWT + any role.
 
 | Method | Endpoint | Roles | Description |
 |--------|----------|-------|-------------|
-| GET | `/api/v1/merchants` | All | List all merchants |
-| GET | `/api/v1/merchants/:account_key` | All | Get single merchant |
+| GET | `/api/v1/merchants` | All | List all merchants (enriched with customer_count, ledger_count, currencies, settlement_count) |
+| GET | `/api/v1/merchants/stats` | All | Merchant metric cards with month-over-month comparison |
+| GET | `/api/v1/merchants/:account_key` | All | Get single merchant (enriched) |
 | GET | `/api/v1/merchants/:account_key/customers` | All | Get merchant's customers |
 | GET | `/api/v1/merchants/:account_key/ledgers` | All | Get merchant's ledgers |
 | GET | `/api/v1/merchants/:account_key/settlements` | All | Get merchant's settlements |
@@ -77,6 +78,52 @@ All routes require JWT + any role.
 | GET | `/api/v1/merchants/:account_key/wallets/:wallet_key` | All | Get single merchant wallet (enriched) |
 | GET | `/api/v1/merchants/:account_key/fees` | All | Get merchant's BaaS fee schedule (custom + defaults) |
 | PATCH | `/api/v1/merchants/:account_key` | operations, compliance | Update merchant |
+
+### GET `/api/v1/merchants` — enriched list response
+
+Each merchant in the list now includes:
+
+```json
+{
+  "account_key": "OKwqt8DzVvoQXNbhh6HUyQbrYS6ar3",
+  "name": "Redbiller Technologies",
+  "trade_name": "Redbiller",
+  "default_kyc_tier": 1,
+  "customer_count": 45,
+  "ledger_count": 3,
+  "currencies": ["NGN", "USD"],
+  "settlement_count": 12,
+  "date_created": "2025-06-25T10:08:50.000Z"
+}
+```
+
+| Enriched field | Type | Description |
+|----------------|------|-------------|
+| `customer_count` | number | Total customers under this merchant |
+| `ledger_count` | number | Total ledgers (wallets) for this merchant |
+| `currencies` | string[] | Distinct currency codes across merchant ledgers |
+| `settlement_count` | number | Total settlement ledgers for this merchant |
+
+### GET `/api/v1/merchants/stats`
+
+Returns merchant metric cards with month-over-month comparison:
+
+```json
+{
+  "success": true,
+  "data": {
+    "total_merchants": {
+      "count": 23,
+      "new_this_month": 3,
+      "new_last_month": 2,
+      "change_pct": 50
+    },
+    "total_customers": 1277,
+    "total_ledgers": 156,
+    "total_settlements": 89
+  }
+}
+```
 
 ### PATCH `/api/v1/merchants/:account_key`
 
@@ -94,6 +141,10 @@ All routes require JWT + any role.
 |-------|-------------|
 | `page` | Page number (default: 1) |
 | `limit` | Items per page (default: 20) |
+| `name` | Search by merchant name (partial match) |
+| `trade_name` | Search by trade name (partial match) |
+| `sort_by` | Sort column: `name`, `trade_name`, `date_created` (default: `date_created`) |
+| `order` | Sort direction: `asc` or `desc` (default: `desc`) |
 
 ---
 
@@ -103,13 +154,80 @@ All routes require JWT + any role.
 
 | Method | Endpoint | Roles | Description |
 |--------|----------|-------|-------------|
-| GET | `/api/v1/customers` | All | List all customers |
-| GET | `/api/v1/customers/:identifier` | All | Get single customer |
+| GET | `/api/v1/customers` | All | List all customers (enriched with wallet_count, currencies, kyc_status) |
+| GET | `/api/v1/customers/stats` | All | Customer metric cards with month-over-month comparison |
+| GET | `/api/v1/customers/:identifier` | All | Get single customer (enriched with wallet_count, currencies, kyc_status) |
 | GET | `/api/v1/customers/:identifier/wallets` | All | Get customer's wallets (enriched with NGN accounts + crypto addresses) |
 | GET | `/api/v1/customers/:identifier/wallets/:wallet_key` | All | Get single customer wallet (enriched) |
 | GET | `/api/v1/customers/:identifier/fees` | All | Get customer's SaaS fee schedule |
 | GET | `/api/v1/customers/:identifier/kycs` | All | Get customer's KYCs |
 | PATCH | `/api/v1/customers/:identifier` | operations, compliance | Update customer |
+
+### GET `/api/v1/customers` — enriched list response
+
+Each customer in the list now includes:
+
+```json
+{
+  "identifier": "a6227257-9307-4544-bb84-3af0d020d508",
+  "first_name": "JERAHMEEL",
+  "surname": "ANIBOR",
+  "status": "PENDING",
+  "country_name": "NIGERIA",
+  "country_code": "NGA",
+  "is_pnd": "N",
+  "is_pnc": "N",
+  "is_personal_compliant": "N",
+  "wallet_count": 2,
+  "currencies": ["NGN", "USD"],
+  "kyc_status": "verified",
+  "date_created": "2025-06-25T15:51:52.000Z"
+}
+```
+
+| Enriched field | Type | Description |
+|----------------|------|-------------|
+| `wallet_count` | number | Total wallets for this customer |
+| `currencies` | string[] | Distinct currency codes across wallets |
+| `kyc_status` | string | `"verified"`, `"pending"`, or `"none"` — derived from KYCs table |
+
+### GET `/api/v1/customers/stats`
+
+Returns metric card data with month-over-month comparison:
+
+```json
+{
+  "success": true,
+  "data": {
+    "total": {
+      "count": 1277,
+      "new_this_month": 45,
+      "new_last_month": 40,
+      "change_pct": 12
+    },
+    "active": {
+      "count": 1100,
+      "new_this_month": 38,
+      "new_last_month": 30,
+      "change_pct": 27
+    },
+    "kyc_pending": {
+      "count": 89,
+      "new_this_month": 12,
+      "new_last_month": 15,
+      "change_pct": -20
+    },
+    "restricted": {
+      "count": 3,
+      "new_this_month": 1,
+      "new_last_month": 0,
+      "change_pct": 100
+    }
+  }
+}
+```
+
+`change_pct` = percentage change in new records this month vs last month. Positive = growth, negative = decline.
 
 ### PATCH `/api/v1/customers/:identifier`
 
@@ -133,6 +251,8 @@ All routes require JWT + any role.
 | `status` | Filter by status |
 | `account_key` | Filter by merchant account key |
 | `environment` | Filter by environment |
+| `sort_by` | Sort column: `name`, `surname`, `date_created`, `status`, `country`, `type` (default: `date_created`) |
+| `order` | Sort direction: `asc` or `desc` (default: `desc`) |
 
 ---
 

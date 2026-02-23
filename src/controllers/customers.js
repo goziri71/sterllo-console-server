@@ -10,7 +10,9 @@ export const getAllCustomers = async (request, reply) => {
     account_key: request.query.account_key,
     environment: request.query.environment,
   };
-  const data = await customerService.getAll({ limit, offset, filters });
+  const sortBy = request.query.sort_by;
+  const order = request.query.order;
+  const data = await customerService.getAll({ limit, offset, filters, sortBy, order });
 
   return reply.code(200).send({
     code: 200,
@@ -53,9 +55,20 @@ export const getCustomerWallets = async (request, reply) => {
   });
 };
 
+export const getCustomerStats = async (request, reply) => {
+  const data = await customerService.getStats();
+
+  return reply.code(200).send({
+    success: true,
+    data,
+  });
+};
+
 export const getMerchantCustomers = async (request, reply) => {
   const { page, limit, offset } = parsePagination(request.query);
-  const data = await customerService.getByMerchant(request.params.account_key, { limit, offset });
+  const sortBy = request.query.sort_by;
+  const order = request.query.order;
+  const data = await customerService.getByMerchant(request.params.account_key, { limit, offset, sortBy, order });
 
   return reply.code(200).send({
     code: 200,

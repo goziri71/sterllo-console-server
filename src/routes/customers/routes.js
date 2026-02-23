@@ -2,6 +2,7 @@ import {
   getAllCustomers,
   getCustomer,
   updateCustomer,
+  getCustomerStats,
 } from "../../controllers/customers.js";
 import { getEnrichedCustomerWallets, getCustomerWalletDetail } from "../../controllers/wallets.js";
 import { getCustomerFees } from "../../controllers/fees.js";
@@ -11,6 +12,9 @@ import { ALL_ROLES, CUSTOMER_UPDATE_ROLES } from "../../config/roles.js";
 
 export default async function customerRoutes(fastify) {
   fastify.addHook("preHandler", authenticate);
+
+  // Stats must be registered before /:identifier to avoid route conflict
+  fastify.get("/stats", { preHandler: authorize(...ALL_ROLES) }, getCustomerStats);
 
   // Read routes (all roles)
   fastify.get("/", { preHandler: authorize(...ALL_ROLES) }, getAllCustomers);

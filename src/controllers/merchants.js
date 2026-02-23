@@ -5,7 +5,13 @@ const merchantService = new MerchantService();
 
 export const getAllMerchants = async (request, reply) => {
   const { page, limit, offset } = parsePagination(request.query);
-  const data = await merchantService.getAll({ limit, offset });
+  const filters = {
+    name: request.query.name,
+    trade_name: request.query.trade_name,
+  };
+  const sortBy = request.query.sort_by;
+  const order = request.query.order;
+  const data = await merchantService.getAll({ limit, offset, filters, sortBy, order });
 
   return reply.code(200).send({
     code: 200,
@@ -23,6 +29,15 @@ export const getMerchant = async (request, reply) => {
     success: true,
     message: "Merchant fetched successfully",
     data: merchant,
+  });
+};
+
+export const getMerchantStats = async (request, reply) => {
+  const data = await merchantService.getStats();
+
+  return reply.code(200).send({
+    success: true,
+    data,
   });
 };
 
