@@ -489,7 +489,7 @@ Returns the SaaS fee schedule set by the customer's parent merchant:
 
 ## Wallets (Enriched)
 
-Wallet endpoints return the base wallet/ledger data enriched with linked NGN deposit accounts and crypto deposit addresses.
+Wallet endpoints return the base wallet/ledger data enriched with linked NGN deposit accounts, crypto deposit addresses, and a derived `current_balance` (from the most recent `closing_balance` seen for that wallet across transaction tables).
 
 ### Merchant wallets (`GET /api/v1/merchants/:account_key/wallets`)
 
@@ -499,6 +499,9 @@ Paginated. Each wallet includes:
 {
   "wallet_key": "...",
   "currency_code": "NGN",
+  "current_balance": "125000.75",
+  "balance_last_updated": "2026-02-09T15:22:48.000Z",
+  "balance_source": "derived_from_latest_closing_balance",
   "ngn_deposit_accounts": [
     {
       "bank_name": "BEAMER MICROFINANCE BANK",
@@ -532,6 +535,8 @@ Paginated. Each wallet includes:
   ]
 }
 ```
+
+`current_balance` is derived from the latest `closing_balance` for the wallet found across: `Deposits`, `Withdrawals`, `Transfers`, `Swaps`, `NGNDeposits`, `NGNPayouts`, `CryptocurrencyDeposits`, and `CryptocurrencyPayouts`.
 
 ### Query params (wallet list endpoints)
 

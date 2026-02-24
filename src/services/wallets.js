@@ -1,10 +1,110 @@
-import { eq, and, desc, count, isNull } from "drizzle-orm";
+import { eq, and, desc, count, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { merchants, merchantLedgers } from "../db/schema/merchants.js";
 import { customers, customerWallets } from "../db/schema/customers.js";
 import { ngnDepositAccountNumbers } from "../db/schema/ngnAccounts.js";
 import { cryptoDepositAddresses } from "../db/schema/cryptoInfra.js";
 import { ErrorClass } from "../utils/errorClass/index.js";
+
+async function getLatestClosingBalanceByWallet(walletKeys) {
+  if (walletKeys.length === 0) return new Map();
+
+  const walletKeyList = sql.join(walletKeys.map((k) => sql`${k}`), sql`,`);
+
+  const [rows] = await db.execute(sql`
+    SELECT wallet_key, closing_balance, date_created
+    FROM (
+      SELECT
+        wallet_key,
+        closing_balance,
+        date_created,
+        ROW_NUMBER() OVER (PARTITION BY wallet_key ORDER BY date_created DESC) AS rn
+      FROM (
+        SELECT source_wallet_key AS wallet_key, source_closing_balance AS closing_balance, date_created
+        FROM Deposits
+        WHERE source_wallet_key IN (${walletKeyList}) AND source_closing_balance IS NOT NULL
+
+        UNION ALL
+        SELECT target_wallet_key AS wallet_key, target_closing_balance AS closing_balance, date_created
+        FROM Deposits
+        WHERE target_wallet_key IN (${walletKeyList}) AND target_closing_balance IS NOT NULL
+
+        UNION ALL
+        SELECT source_wallet_key AS wallet_key, source_closing_balance AS closing_balance, date_created
+        FROM Withdrawals
+        WHERE source_wallet_key IN (${walletKeyList}) AND source_closing_balance IS NOT NULL
+
+        UNION ALL
+        SELECT target_wallet_key AS wallet_key, target_closing_balance AS closing_balance, date_created
+        FROM Withdrawals
+        WHERE target_wallet_key IN (${walletKeyList}) AND target_closing_balance IS NOT NULL
+
+        UNION ALL
+        SELECT source_wallet_key AS wallet_key, source_closing_balance AS closing_balance, date_created
+        FROM Transfers
+        WHERE source_wallet_key IN (${walletKeyList}) AND source_closing_balance IS NOT NULL
+
+        UNION ALL
+        SELECT target_wallet_key AS wallet_key, target_closing_balance AS closing_balance, date_created
+        FROM Transfers
+        WHERE target_wallet_key IN (${walletKeyList}) AND target_closing_balance IS NOT NULL
+
+        UNION ALL
+        SELECT source_from_wallet_key AS wallet_key, source_from_closing_balance AS closing_balance, date_created
+        FROM Swaps
+        WHERE source_from_wallet_key IN (${walletKeyList}) AND source_from_closing_balance IS NOT NULL
+
+        UNION ALL
+        SELECT source_to_wallet_key AS wallet_key, source_to_closing_balance AS closing_balance, date_created
+        FROM Swaps
+        WHERE source_to_wallet_key IN (${walletKeyList}) AND source_to_closing_balance IS NOT NULL
+
+        UNION ALL
+        SELECT target_from_wallet_key AS wallet_key, target_from_closing_balance AS closing_balance, date_created
+        FROM Swaps
+        WHERE target_from_wallet_key IN (${walletKeyList}) AND target_from_closing_balance IS NOT NULL
+
+        UNION ALL
+        SELECT target_to_wallet_key AS wallet_key, target_to_closing_balance AS closing_balance, date_created
+        FROM Swaps
+        WHERE target_to_wallet_key IN (${walletKeyList}) AND target_to_closing_balance IS NOT NULL
+
+        UNION ALL
+        SELECT wallet_key, closing_balance, date_created
+        FROM NGNDeposits
+        WHERE wallet_key IN (${walletKeyList}) AND closing_balance IS NOT NULL
+
+        UNION ALL
+        SELECT source_wallet_key AS wallet_key, closing_balance, date_created
+        FROM NGNPayouts
+        WHERE source_wallet_key IN (${walletKeyList}) AND closing_balance IS NOT NULL
+
+        UNION ALL
+        SELECT wallet_key, closing_balance, date_created
+        FROM CryptocurrencyDeposits
+        WHERE wallet_key IN (${walletKeyList}) AND closing_balance IS NOT NULL
+
+        UNION ALL
+        SELECT source_wallet_key AS wallet_key, closing_balance, date_created
+        FROM CryptocurrencyPayouts
+        WHERE source_wallet_key IN (${walletKeyList}) AND closing_balance IS NOT NULL
+      ) all_tx
+    ) ranked
+    WHERE rn = 1
+  `);
+
+  const balanceRows = Array.isArray(rows) ? rows : [];
+  const balanceMap = new Map();
+
+  for (const row of balanceRows) {
+    balanceMap.set(row.wallet_key, {
+      current_balance: String(row.closing_balance),
+      balance_last_updated: row.date_created,
+    });
+  }
+
+  return balanceMap;
+}
 
 function formatNgnAccount(acc) {
   return {
@@ -73,7 +173,9 @@ async function enrichWalletsByWalletKey(walletRows) {
 async function enrichMerchantWallets(walletRows, accountKey) {
   if (walletRows.length === 0) return walletRows;
 
-  const [allNgnAccounts, allCryptoAddresses] = await Promise.all([
+  const walletKeys = walletRows.map((w) => w.wallet_key);
+
+  const [allNgnAccounts, allCryptoAddresses, balanceByWallet] = await Promise.all([
     db
       .select()
       .from(ngnDepositAccountNumbers)
@@ -84,6 +186,7 @@ async function enrichMerchantWallets(walletRows, accountKey) {
       .from(cryptoDepositAddresses)
       .where(eq(cryptoDepositAddresses.account_key, accountKey))
       .orderBy(desc(cryptoDepositAddresses.date_created)),
+    getLatestClosingBalanceByWallet(walletKeys),
   ]);
 
   const ngnByWallet = new Map();
@@ -102,6 +205,9 @@ async function enrichMerchantWallets(walletRows, accountKey) {
 
   return walletRows.map((wallet) => ({
     ...wallet,
+    current_balance: balanceByWallet.get(wallet.wallet_key)?.current_balance ?? "0.00",
+    balance_last_updated: balanceByWallet.get(wallet.wallet_key)?.balance_last_updated ?? null,
+    balance_source: "derived_from_latest_closing_balance",
     ngn_deposit_accounts: ngnByWallet.get(wallet.wallet_key) || [],
     crypto_deposit_addresses: cryptoByWallet.get(wallet.wallet_key) || [],
   }));
@@ -161,7 +267,7 @@ export default class WalletService {
       throw new ErrorClass("Wallet not found", 404);
     }
 
-    const [ngnAccounts, cryptoAddresses] = await Promise.all([
+    const [ngnAccounts, cryptoAddresses, balanceByWallet] = await Promise.all([
       db
         .select()
         .from(ngnDepositAccountNumbers)
@@ -182,10 +288,14 @@ export default class WalletService {
           )
         )
         .orderBy(desc(cryptoDepositAddresses.date_created)),
+      getLatestClosingBalanceByWallet([walletKey]),
     ]);
 
     return {
       ...wallet,
+      current_balance: balanceByWallet.get(wallet.wallet_key)?.current_balance ?? "0.00",
+      balance_last_updated: balanceByWallet.get(wallet.wallet_key)?.balance_last_updated ?? null,
+      balance_source: "derived_from_latest_closing_balance",
       ngn_deposit_accounts: ngnAccounts.map(formatNgnAccount),
       crypto_deposit_addresses: cryptoAddresses.map(formatCryptoAddress),
     };
