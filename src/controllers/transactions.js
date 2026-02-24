@@ -19,7 +19,7 @@ export const getDeposits = async (request, reply) => {
 
   return reply.code(200).send({ 
     code: 200,
-    message: "Withdrawals fetched successfully",
+    message: "Deposits fetched successfully",
     success: true, 
     ...paginatedResponse(data, page, limit) });
 };
