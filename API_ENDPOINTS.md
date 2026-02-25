@@ -300,6 +300,7 @@ All routes require JWT + any role. All are read-only.
 | GET | `/api/v1/transactions/ngn-payouts` | List NGN payouts |
 | GET | `/api/v1/transactions/crypto-deposits` | List crypto deposits |
 | GET | `/api/v1/transactions/crypto-payouts` | List crypto payouts |
+| GET | `/api/v1/transactions/statement` | Unified statement feed across all transaction types |
 
 ### Query params (all transaction endpoints)
 
@@ -310,8 +311,42 @@ All routes require JWT + any role. All are read-only.
 | `account_key` | Filter by merchant account key |
 | `wallet_key` | Filter by wallet key |
 | `status` | Filter by status |
+| `currency_code` | Filter by currency code (where supported) |
+| `search` | Search by reference, wallet key, and transaction-specific identifiers |
 | `from_date` | Start date (ISO format) |
 | `to_date` | End date (ISO format) |
+
+### Statement response (`GET /api/v1/transactions/statement`)
+
+Returns a unified, paginated timeline with normalized fields:
+
+```json
+{
+  "code": 200,
+  "success": true,
+  "message": "Transaction statement fetched successfully",
+  "records": [
+    {
+      "transaction_type": "transfer",
+      "account_key": "OKwqt8DzVvoQXNbhh6HUyQbrYS6ar3",
+      "reference": "TRF_abc123",
+      "wallet_key": "ce3750bf78a9a46703803908a395a9",
+      "currency_code": "NGN",
+      "amount": "5000.00",
+      "status": "successful",
+      "date_created": "2026-02-20T10:30:00.000Z"
+    }
+  ],
+  "pagination": {
+    "total": 150,
+    "page": 1,
+    "limit": 20,
+    "total_pages": 8,
+    "has_next": true,
+    "has_prev": false
+  }
+}
+```
 
 ---
 

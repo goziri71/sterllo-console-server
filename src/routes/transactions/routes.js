@@ -7,6 +7,7 @@ import {
   getNGNPayouts,
   getCryptoDeposits,
   getCryptoPayouts,
+  getTransactionStatement,
 } from "../../controllers/transactions.js";
 import { authenticate, authorize } from "../../middleware/auth.js";
 import { ALL_ROLES } from "../../config/roles.js";
@@ -23,4 +24,5 @@ export default async function transactionRoutes(fastify) {
   fastify.get("/ngn-payouts", { preHandler: authorize(...ALL_ROLES) }, getNGNPayouts);
   fastify.get("/crypto-deposits", { preHandler: authorize(...ALL_ROLES) }, getCryptoDeposits);
   fastify.get("/crypto-payouts", { preHandler: authorize(...ALL_ROLES) }, getCryptoPayouts);
+  fastify.get("/statement", { preHandler: authorize(...ALL_ROLES) }, getTransactionStatement);
 }

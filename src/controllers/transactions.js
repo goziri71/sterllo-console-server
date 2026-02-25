@@ -8,6 +8,8 @@ function extractFilters(query) {
     account_key: query.account_key,
     wallet_key: query.wallet_key,
     status: query.status,
+    currency_code: query.currency_code,
+    search: query.search,
     from_date: query.from_date,
     to_date: query.to_date,
   };
@@ -99,4 +101,16 @@ export const getCryptoPayouts = async (request, reply) => {
     message: "Crypto Payouts fetched successfully",
     success: true, 
     ...paginatedResponse(data, page, limit) });
+};
+
+export const getTransactionStatement = async (request, reply) => {
+  const { page, limit, offset } = parsePagination(request.query);
+  const data = await txService.getStatement({ limit, offset, filters: extractFilters(request.query) });
+
+  return reply.code(200).send({
+    code: 200,
+    message: "Transaction statement fetched successfully",
+    success: true,
+    ...paginatedResponse(data, page, limit),
+  });
 };
