@@ -3,6 +3,27 @@ import { parsePagination, paginatedResponse } from "../utils/pagination/index.js
 
 const walletService = new WalletService();
 
+export const getWalletPage = async (request, reply) => {
+  const { page, limit, offset } = parsePagination(request.query);
+  const data = await walletService.getWalletPage({
+    ownerType: request.query.owner_type,
+    ownerKey: request.query.owner_key,
+    limit,
+    offset,
+    search: request.query.search,
+    currencyCode: request.query.currency_code,
+    status: request.query.status,
+  });
+
+  return reply.code(200).send({
+    success: true,
+    data: {
+      summary: data.summary,
+      ...paginatedResponse({ count: data.count, rows: data.rows }, page, limit),
+    },
+  });
+};
+
 export const getMerchantWallets = async (request, reply) => {
   const { page, limit, offset } = parsePagination(request.query);
   const data = await walletService.getMerchantWallets(request.params.account_key, { limit, offset });

@@ -538,6 +538,70 @@ Paginated. Each wallet includes:
 
 `current_balance` is derived from the latest `closing_balance` for the wallet found across: `Deposits`, `Withdrawals`, `Transfers`, `Swaps`, `NGNDeposits`, `NGNPayouts`, `CryptocurrencyDeposits`, and `CryptocurrencyPayouts`.
 
+
+
+
+
+
+
+### Wallet page endpoint (merchant + customer)
+
+`GET /api/v1/wallets/page` is a unified endpoint tailored for the console wallet page UI. It supports both merchant and customer contexts with the same response shape.
+
+#### Query params
+
+| Param | Required | Description |
+|-------|----------|-------------|
+| `owner_type` | Yes | `merchant` or `customer` |
+| `owner_key` | Yes | Merchant `account_key` when `owner_type=merchant`, or customer `identifier` when `owner_type=customer` |
+| `page` | No | Page number (default: 1) |
+| `limit` | No | Items per page (default: 20) |
+| `search` | No | Search by `wallet_key`, `wallet_id`, `owner_key` (account key / customer identifier), or owner name (partial match) |
+| `currency_code` | No | Filter wallets by currency code |
+| `status` | No | `all`, `active`, `inactive` (derived status) |
+
+#### Response
+
+```json
+{
+  "success": true,
+  "data": {
+    "summary": {
+      "total_wallets": 127,
+      "total_value": "2400000000.00",
+      "active_wallets": 120,
+      "pending_transactions": 1498
+    },
+    "records": [
+      {
+        "owner_type": "merchant",
+        "owner_key": "OKwqt8DzVvoQXNbhh6HUyQbrYS6ar3",
+        "owner_name": "Redbiller",
+        "country_name": null,
+        "country_code": null,
+        "wallet_key": "ce3750bf78a9a46703803908a395a9",
+        "wallet_id": "714488e7-8626-4319-be80-65e2b677eeb9",
+        "currency_code": "NGN",
+        "current_balance": "3669.3625",
+        "pending_transactions_count": 4,
+        "status": "active",
+        "date_created": "2025-12-25T13:40:25.000Z",
+        "last_activity_at": "2026-01-28 17:05:35",
+        "balance_source": "derived_from_latest_closing_balance"
+      }
+    ],
+    "pagination": {
+      "total": 127,
+      "page": 1,
+      "limit": 20,
+      "total_pages": 7,
+      "has_next": true,
+      "has_prev": false
+    }
+  }
+}
+```
+
 ### Query params (wallet list endpoints)
 
 | Param | Description |
