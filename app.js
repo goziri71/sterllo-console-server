@@ -52,8 +52,18 @@ app.register(fjwt, {
 app.register(helmet);
 app.register(cors);
 app.register(rateLimit, {
-  max: 100,
+  // Permanent baseline limiter:
+  // - Uses preHandler so CORS preflight OPTIONS is not throttled
+  // - Higher global quota for read-heavy console traffic
+  hook: "preHandler",
+  max: 1500,
   timeWindow: "15 minutes",
+  addHeaders: {
+    "x-ratelimit-limit": true,
+    "x-ratelimit-remaining": true,
+    "x-ratelimit-reset": true,
+    "retry-after": true,
+  },
 });
 
 
