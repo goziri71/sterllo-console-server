@@ -39,7 +39,7 @@ jobs:
 
       - name: Update ECS service
         run: |
-          aws ecs update-service --cluster sterllo-web-app-cluster --service console-be --force-new-deployment
+          aws ecs update-service --cluster sterllo-web-app-cluster --service console-be-service --force-new-deployment
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
