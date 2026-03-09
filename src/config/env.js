@@ -86,7 +86,7 @@ const decryptFromEnv = ({ encryptedVarNames, keychainVarNames, valueName }) => {
   let keychainVarName = keychainCandidate.name;
 
   // Handle swapped env naming: if ciphertext/keychain were stored in opposite vars,
-  // infer by base64 shape and swap before decrypting.
+  // infer by base64 shape and swap before
   if (!looksLikeBase64(encryptedValue) && looksLikeBase64(keychainValue)) {
     encryptedValue = keychainCandidate.value;
     encryptedVarName = keychainCandidate.name;
