@@ -36,6 +36,15 @@ const app = Fastify({
 // Global error handler (must be set before route registration)
 app.setErrorHandler(errorHandler);
 
+// Elastic Beanstalk and basic uptime checks commonly probe "/".
+// Keep this route stable and unauthenticated.
+app.get("/", async (_request, reply) => {
+  return reply.code(200).send({
+    success: true,
+    message: "Service is running",
+  });
+});
+
 // 404 handler
 app.setNotFoundHandler((request, reply) => {
   reply.code(404).send({
