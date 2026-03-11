@@ -1,7 +1,7 @@
 import bcrypt from "bcrypt";
 import crypto from "crypto";
 import { eq } from "drizzle-orm";
-import { db } from "../db/index.js";
+import { authDb } from "../db/index.js";
 import { users } from "../db/schema/users.js";
 import { ErrorClass } from "../utils/errorClass/index.js";
 import { generateToken } from "../utils/jwt/index.js";
@@ -20,7 +20,7 @@ export default class AuthService {
   }
 
   async register({ email, password, first_name, last_name, role }) {
-    const [existingUser] = await db
+    const [existingUser] = await authDb
       .select()
       .from(users)
       .where(eq(users.email, email))
@@ -42,10 +42,10 @@ export default class AuthService {
       date_created: new Date(),
     };
 
-    const result = await db.insert(users).values(userValues);
+    const result = await authDb.insert(users).values(userValues);
     const insertId = result[0].insertId;
 
-    const [newUser] = await db
+    const [newUser] = await authDb
       .select()
       .from(users)
       .where(eq(users.id, insertId))
@@ -70,7 +70,7 @@ export default class AuthService {
   async login({ email, password }) {
     const invalidFields = [];
 
-    const [user] = await db
+    const [user] = await authDb
       .select()
       .from(users)
       .where(eq(users.email, email))
@@ -96,7 +96,7 @@ export default class AuthService {
 
     const newTokenVersion = (user.token_version || 0) + 1;
 
-    await db
+    await authDb
       .update(users)
       .set({ last_login: new Date(), date_modified: new Date(), token_version: newTokenVersion })
       .where(eq(users.id, user.id));
@@ -120,7 +120,7 @@ export default class AuthService {
    * Change password (requires current password)
    */
   async changePassword({ userKey, currentPassword, newPassword }) {
-    const [user] = await db
+    const [user] = await authDb
       .select()
       .from(users)
       .where(eq(users.user_key, userKey))
@@ -149,7 +149,7 @@ export default class AuthService {
     const hashedPassword = await bcrypt.hash(newPassword, SALT_ROUNDS);
     const newTokenVersion = (user.token_version || 0) + 1;
 
-    await db
+    await authDb
       .update(users)
       .set({ password: hashedPassword, date_modified: new Date(), token_version: newTokenVersion })
       .where(eq(users.id, user.id));
@@ -163,7 +163,7 @@ export default class AuthService {
    * Logout - invalidates the current token by incrementing token_version
    */
   async logout(userKey) {
-    const [user] = await db
+    const [user] = await authDb
       .select()
       .from(users)
       .where(eq(users.user_key, userKey))
@@ -173,7 +173,7 @@ export default class AuthService {
       throw new ErrorClass("User not found", 404);
     }
 
-    await db
+    await authDb
       .update(users)
       .set({ token_version: (user.token_version || 0) + 1, date_modified: new Date() })
       .where(eq(users.id, user.id));
@@ -187,7 +187,7 @@ export default class AuthService {
    * Get current user profile
    */
   async getProfile(userId) {
-    const [user] = await db
+    const [user] = await authDb
       .select()
       .from(users)
       .where(eq(users.id, userId))

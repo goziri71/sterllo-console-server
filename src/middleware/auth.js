@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { ErrorClass } from "../utils/errorClass/index.js";
 import { verifyToken } from "../utils/jwt/index.js";
-import { db } from "../db/index.js";
+import { authDb } from "../db/index.js";
 import { users } from "../db/schema/users.js";
 
 /**
@@ -69,7 +69,7 @@ export const authenticate = async (request, reply) => {
   let user = getCachedUser(decoded.user_key);
 
   if (!user) {
-    const [row] = await db
+    const [row] = await authDb
       .select()
       .from(users)
       .where(eq(users.user_key, decoded.user_key))
