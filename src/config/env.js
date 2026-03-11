@@ -144,6 +144,9 @@ const productionDbConfig = useProductionDb
   : null;
 
 const activeDbConfig = useProductionDb ? productionDbConfig : localDbConfig;
+const authDbName = stripWrappingQuotes(
+  process.env.AUTH_DB_NAME || process.env.CONSOLE_DB_NAME || (useProductionDb ? "console" : activeDbConfig.DB_NAME),
+);
 
 export const env = {
   PORT: process.env.PORT,
@@ -154,6 +157,7 @@ export const env = {
   DB_PASSWORD: activeDbConfig.DB_PASSWORD,
   DB_HOST: activeDbConfig.DB_HOST,
   DB_PORT: activeDbConfig.DB_PORT,
+  AUTH_DB_NAME: authDbName,
   DB_DIALECT: process.env.DB_DIALECT || "mysql",
   DB_MODE: dbMode,
   USE_PRODUCTION_DB: useProductionDb,
