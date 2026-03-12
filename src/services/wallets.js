@@ -532,20 +532,97 @@ export default class WalletService {
 
     let summary = getCachedWalletSummary(summaryCacheKey);
     if (!summary) {
-      const totalWallets = normalizedStatus === "all" ? totalCount : rows.length;
-      const activeWallets = rows.filter((r) => r.status === "active").length;
+      let summaryWalletKeys = [];
+
+      if (normalizedOwnerType === "merchant") {
+        const [keyRows] = await db.execute(sql`
+          SELECT wallet_key
+          FROM MerchantLedgers
+          WHERE account_key = ${normalizedOwnerKey}
+            AND (
+              ${searchTerm} IS NULL
+              OR wallet_key LIKE CONCAT('%', ${searchTerm}, '%')
+              OR wallet_id LIKE CONCAT('%', ${searchTerm}, '%')
+              OR account_key LIKE CONCAT('%', ${searchTerm}, '%')
+            )
+            AND (${currencyFilter} IS NULL OR currency_code = ${currencyFilter})
+        `);
+        summaryWalletKeys = (keyRows || []).map((r) => r.wallet_key);
+      } else if (normalizedOwnerType === "customer") {
+        const [keyRows] = await db.execute(sql`
+          SELECT wallet_key
+          FROM CustomerWallets
+          WHERE identifier = ${normalizedOwnerKey}
+            AND (
+              ${searchTerm} IS NULL
+              OR wallet_key LIKE CONCAT('%', ${searchTerm}, '%')
+              OR wallet_id LIKE CONCAT('%', ${searchTerm}, '%')
+              OR identifier LIKE CONCAT('%', ${searchTerm}, '%')
+            )
+            AND (${currencyFilter} IS NULL OR currency_code = ${currencyFilter})
+        `);
+        summaryWalletKeys = (keyRows || []).map((r) => r.wallet_key);
+      } else {
+        const [keyRows] = await db.execute(sql`
+          SELECT wallet_key
+          FROM (
+            SELECT
+              ml.wallet_key,
+              ml.wallet_id,
+              ml.account_key AS owner_key,
+              COALESCE(m.trade_name, m.name, ml.account_key) AS owner_name,
+              ml.currency_code
+            FROM MerchantLedgers ml
+            LEFT JOIN Merchants m ON m.account_key = ml.account_key
+            UNION ALL
+            SELECT
+              cw.wallet_key,
+              cw.wallet_id,
+              cw.identifier AS owner_key,
+              TRIM(CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.surname, ''))) AS owner_name,
+              cw.currency_code
+            FROM CustomerWallets cw
+            LEFT JOIN Customers c ON c.identifier = cw.identifier
+          ) w
+          WHERE (
+            ${searchTerm} IS NULL
+            OR w.wallet_key LIKE CONCAT('%', ${searchTerm}, '%')
+            OR w.wallet_id LIKE CONCAT('%', ${searchTerm}, '%')
+            OR w.owner_key LIKE CONCAT('%', ${searchTerm}, '%')
+            OR w.owner_name LIKE CONCAT('%', ${searchTerm}, '%')
+          )
+            AND (${currencyFilter} IS NULL OR w.currency_code = ${currencyFilter})
+        `);
+        summaryWalletKeys = (keyRows || []).map((r) => r.wallet_key);
+      }
+
+      const summaryBalances = await getLatestClosingBalanceByWallet(summaryWalletKeys);
+      const summaryRows = summaryWalletKeys.map((walletKey) => {
+        const currentBalance = summaryBalances.get(walletKey)?.current_balance ?? "0.00";
+        const rowStatus = toNumber(currentBalance) > 0 ? "active" : "inactive";
+        return {
+          wallet_key: walletKey,
+          status: rowStatus,
+        };
+      });
+
+      const filteredSummaryRows =
+        normalizedStatus === "all"
+          ? summaryRows
+          : summaryRows.filter((r) => r.status === normalizedStatus);
+
       summary = {
-        total_wallets: Number(totalWallets || 0),
+        total_wallets: Number(filteredSummaryRows.length || 0),
         // Temporarily disabled to avoid expensive full-dataset balance rollups.
         total_value: "0.00",
-        active_wallets: activeWallets,
+        active_wallets: summaryRows.filter((r) => r.status === "active").length,
         // Temporarily disabled to avoid expensive cross-table pending scans.
         pending_transactions: 0,
       };
       setCachedWalletSummary(summaryCacheKey, summary);
     }
 
-    const count = normalizedStatus === "all" ? totalCount : rows.length;
+    const count = normalizedStatus === "all" ? totalCount : Number(summary.total_wallets || 0);
 
     return { summary, count, rows };
   }
