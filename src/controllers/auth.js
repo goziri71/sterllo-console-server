@@ -1,9 +1,8 @@
 import AuthService from "../services/auth.js";
 import { ErrorClass } from "../utils/errorClass/index.js";
 
-const authService = new AuthService();
-
 export const register = async (request, reply) => {
+  const authService = new AuthService();
   if (!request.body || Object.keys(request.body).length === 0) {
     throw new ErrorClass("Request body is required", 400);
   }
@@ -41,6 +40,7 @@ export const register = async (request, reply) => {
 };
 
 export const login = async (request, reply) => {
+  const authService = new AuthService();
   if (!request.body || Object.keys(request.body).length === 0) {
     throw new ErrorClass("Login request body is required", 400);
   }
@@ -65,6 +65,7 @@ export const login = async (request, reply) => {
 };
 
 export const changePassword = async (request, reply) => {
+  const authService = new AuthService();
   if (!request.body || Object.keys(request.body).length === 0) {
     throw new ErrorClass("Request body is required", 400);
   }
@@ -96,6 +97,7 @@ export const changePassword = async (request, reply) => {
 };
 
 export const logout = async (request, reply) => {
+  const authService = new AuthService();
   const result = await authService.logout(request.user.user_key);
 
   return reply.code(200).send({
@@ -106,6 +108,7 @@ export const logout = async (request, reply) => {
 };
 
 export const getProfile = async (request, reply) => {
+  const authService = new AuthService();
   const user = await authService.getProfile(request.user.id);
 
   return reply.code(200).send({
