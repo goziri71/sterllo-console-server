@@ -499,7 +499,6 @@ export default class WalletService {
     let rows = baseRows.map((wallet) => {
       const currentBalance = balanceByWallet.get(wallet.wallet_key)?.current_balance ?? "0.00";
       const lastActivityAt = balanceByWallet.get(wallet.wallet_key)?.balance_last_updated ?? null;
-      const pendingCount = pendingByWallet.get(wallet.wallet_key) ?? 0;
       const derivedStatus = toNumber(currentBalance) > 0 ? "active" : "inactive";
 
       return {
