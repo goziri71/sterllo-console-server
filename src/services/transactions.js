@@ -62,6 +62,74 @@ async function paginated(table, { where, limit, offset }) {
   return { count: Number(total), rows };
 }
 
+async function loadWalletOwnerMap(walletKeys = []) {
+  const keys = [...new Set(walletKeys.filter(Boolean))];
+  if (keys.length === 0) return new Map();
+
+  const values = sql.join(keys.map((k) => sql`${k}`), sql`, `);
+  const [rows] = await db.execute(sql`
+    SELECT wallet_key, owner_name
+    FROM (
+      SELECT
+        ml.wallet_key AS wallet_key,
+        COALESCE(m.trade_name, m.name, ml.account_key) AS owner_name
+      FROM MerchantLedgers ml
+      LEFT JOIN Merchants m ON m.account_key = ml.account_key
+      WHERE ml.wallet_key IN (${values})
+
+      UNION ALL
+
+      SELECT
+        cw.wallet_key AS wallet_key,
+        NULLIF(TRIM(CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.surname, ''))), '') AS owner_name
+      FROM CustomerWallets cw
+      LEFT JOIN Customers c ON c.identifier = cw.identifier
+      WHERE cw.wallet_key IN (${values})
+    ) t
+  `);
+
+  const map = new Map();
+  for (const row of rows || []) {
+    if (!row.wallet_key || map.has(row.wallet_key)) continue;
+    map.set(row.wallet_key, row.owner_name || null);
+  }
+  return map;
+}
+
+async function enrichTransferRows(rows = []) {
+  const keys = rows.flatMap((r) => [r.source_wallet_key, r.target_wallet_key]).filter(Boolean);
+  const nameMap = await loadWalletOwnerMap(keys);
+
+  return rows.map((row) => ({
+    ...row,
+    sender_wallet_key: row.source_wallet_key || null,
+    recipient_wallet_key: row.target_wallet_key || null,
+    sender_name: nameMap.get(row.source_wallet_key) || null,
+    recipient_name: nameMap.get(row.target_wallet_key) || null,
+  }));
+}
+
+async function enrichSwapRows(rows = []) {
+  const keys = rows
+    .flatMap((r) => [r.source_from_wallet_key, r.source_to_wallet_key, r.target_from_wallet_key, r.target_to_wallet_key])
+    .filter(Boolean);
+  const nameMap = await loadWalletOwnerMap(keys);
+
+  return rows.map((row) => ({
+    ...row,
+    sender_wallet_key: row.source_from_wallet_key || row.target_from_wallet_key || null,
+    recipient_wallet_key: row.source_to_wallet_key || row.target_to_wallet_key || null,
+    sender_name:
+      nameMap.get(row.source_from_wallet_key) ||
+      nameMap.get(row.target_from_wallet_key) ||
+      null,
+    recipient_name:
+      nameMap.get(row.source_to_wallet_key) ||
+      nameMap.get(row.target_to_wallet_key) ||
+      null,
+  }));
+}
+
 export default class TransactionService {
   async getDeposits({ limit, offset, filters }) {
     return paginated(deposits, {
@@ -80,15 +148,16 @@ export default class TransactionService {
   }
 
   async getTransfers({ limit, offset, filters }) {
-    return paginated(transfers, {
+    const data = await paginated(transfers, {
       where: buildConditions(transfers, filters),
       limit,
       offset,
     });
+    return { ...data, rows: await enrichTransferRows(data.rows) };
   }
 
   async getSwaps({ limit, offset, filters }) {
-    return paginated(swaps, {
+    const data = await paginated(swaps, {
       where: buildConditions(swaps, filters, {
         walletColumn: "source_from_wallet_key",
         currencyColumn: "source_currency_code",
@@ -102,6 +171,7 @@ export default class TransactionService {
       limit,
       offset,
     });
+    return { ...data, rows: await enrichSwapRows(data.rows) };
   }
 
   async getNGNDeposits({ limit, offset, filters }) {
@@ -263,6 +333,7 @@ export default class TransactionService {
         account_key: transfers.account_key,
         reference: transfers.source_reference,
         wallet_key: transfers.source_wallet_key,
+        counterpart_wallet_key: transfers.target_wallet_key,
         currency_code: transfers.currency_code,
         amount: transfers.amount,
         status: transfers.status,
@@ -273,6 +344,7 @@ export default class TransactionService {
         account_key: swaps.account_key,
         reference: swaps.source_from_reference,
         wallet_key: swaps.source_from_wallet_key,
+        counterpart_wallet_key: swaps.source_to_wallet_key,
         currency_code: swaps.source_currency_code,
         amount: swaps.source_amount,
         status: swaps.status,
@@ -283,6 +355,7 @@ export default class TransactionService {
         account_key: sql`NULL`.as("account_key"),
         reference: ngnDeposits.deposit_reference,
         wallet_key: ngnDeposits.wallet_key,
+        counterpart_wallet_key: sql`NULL`.as("counterpart_wallet_key"),
         currency_code: sql`'NGN'`.as("currency_code"),
         amount: ngnDeposits.amount,
         status: ngnDeposits.credit_status,
@@ -293,6 +366,7 @@ export default class TransactionService {
         account_key: ngnPayouts.account_key,
         reference: ngnPayouts.live_reference,
         wallet_key: ngnPayouts.source_wallet_key,
+        counterpart_wallet_key: sql`NULL`.as("counterpart_wallet_key"),
         currency_code: sql`'NGN'`.as("currency_code"),
         amount: ngnPayouts.amount,
         status: ngnPayouts.payout_status,
@@ -303,6 +377,7 @@ export default class TransactionService {
         account_key: sql`NULL`.as("account_key"),
         reference: cryptoDeposits.deposit_reference,
         wallet_key: cryptoDeposits.wallet_key,
+        counterpart_wallet_key: sql`NULL`.as("counterpart_wallet_key"),
         currency_code: sql`NULL`.as("currency_code"),
         amount: cryptoDeposits.amount,
         status: cryptoDeposits.credit_status,
@@ -313,6 +388,7 @@ export default class TransactionService {
         account_key: cryptoPayouts.account_key,
         reference: cryptoPayouts.live_reference,
         wallet_key: cryptoPayouts.source_wallet_key,
+        counterpart_wallet_key: sql`NULL`.as("counterpart_wallet_key"),
         currency_code: cryptoPayouts.asset,
         amount: cryptoPayouts.amount,
         status: cryptoPayouts.payout_status,
@@ -336,11 +412,34 @@ export default class TransactionService {
       return true;
     });
 
-    filtered.sort((a, b) => new Date(b.date_created) - new Date(a.date_created));
+    const walletKeysForNames = filtered
+      .flatMap((row) => [row.wallet_key, row.counterpart_wallet_key])
+      .filter(Boolean);
+    const nameMap = await loadWalletOwnerMap(walletKeysForNames);
+
+    const enriched = filtered.map((row) => {
+      const walletName = nameMap.get(row.wallet_key) || null;
+      const counterpartName = nameMap.get(row.counterpart_wallet_key) || null;
+      return {
+        ...row,
+        wallet_name: walletName,
+        counterpart_wallet_name: counterpartName,
+        sender_name:
+          row.transaction_type === "transfer" || row.transaction_type === "swap"
+            ? walletName
+            : null,
+        recipient_name:
+          row.transaction_type === "transfer" || row.transaction_type === "swap"
+            ? counterpartName
+            : null,
+      };
+    });
+
+    enriched.sort((a, b) => new Date(b.date_created) - new Date(a.date_created));
 
     return {
-      count: filtered.length,
-      rows: filtered.slice(offset, offset + limit),
+      count: enriched.length,
+      rows: enriched.slice(offset, offset + limit),
     };
   }
 }
