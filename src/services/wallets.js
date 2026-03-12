@@ -533,11 +533,12 @@ export default class WalletService {
     let summary = getCachedWalletSummary(summaryCacheKey);
     if (!summary) {
       const totalWallets = normalizedStatus === "all" ? totalCount : rows.length;
+      const activeWallets = rows.filter((r) => r.status === "active").length;
       summary = {
         total_wallets: Number(totalWallets || 0),
         // Temporarily disabled to avoid expensive full-dataset balance rollups.
         total_value: "0.00",
-        active_wallets: null,
+        active_wallets: activeWallets,
         // Temporarily disabled to avoid expensive cross-table pending scans.
         pending_transactions: 0,
       };
