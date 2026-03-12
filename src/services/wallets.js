@@ -494,10 +494,7 @@ export default class WalletService {
     }
 
     const pageWalletKeys = baseRows.map((w) => w.wallet_key);
-    const [balanceByWallet, pendingByWallet] = await Promise.all([
-      getLatestClosingBalanceByWallet(pageWalletKeys),
-      getPendingTransactionsByWallet(pageWalletKeys),
-    ]);
+    const balanceByWallet = await getLatestClosingBalanceByWallet(pageWalletKeys);
 
     let rows = baseRows.map((wallet) => {
       const currentBalance = balanceByWallet.get(wallet.wallet_key)?.current_balance ?? "0.00";
@@ -508,7 +505,7 @@ export default class WalletService {
       return {
         ...wallet,
         current_balance: String(currentBalance),
-        pending_transactions_count: pendingCount,
+        pending_transactions_count: 0,
         status: derivedStatus,
         last_activity_at: lastActivityAt,
         balance_source: "derived_from_latest_closing_balance",
@@ -529,108 +526,19 @@ export default class WalletService {
 
     let summary = getCachedWalletSummary(summaryCacheKey);
     if (!summary) {
-      let summaryWalletKeys = [];
-
-      if (normalizedOwnerType === "merchant") {
-        const [keyRows] = await db.execute(sql`
-          SELECT wallet_key
-          FROM MerchantLedgers
-          WHERE account_key = ${normalizedOwnerKey}
-            AND (
-              ${searchTerm} IS NULL
-              OR wallet_key LIKE CONCAT('%', ${searchTerm}, '%')
-              OR wallet_id LIKE CONCAT('%', ${searchTerm}, '%')
-              OR account_key LIKE CONCAT('%', ${searchTerm}, '%')
-            )
-            AND (${currencyFilter} IS NULL OR currency_code = ${currencyFilter})
-        `);
-        summaryWalletKeys = (keyRows || []).map((r) => r.wallet_key);
-      } else if (normalizedOwnerType === "customer") {
-        const [keyRows] = await db.execute(sql`
-          SELECT wallet_key
-          FROM CustomerWallets
-          WHERE identifier = ${normalizedOwnerKey}
-            AND (
-              ${searchTerm} IS NULL
-              OR wallet_key LIKE CONCAT('%', ${searchTerm}, '%')
-              OR wallet_id LIKE CONCAT('%', ${searchTerm}, '%')
-              OR identifier LIKE CONCAT('%', ${searchTerm}, '%')
-            )
-            AND (${currencyFilter} IS NULL OR currency_code = ${currencyFilter})
-        `);
-        summaryWalletKeys = (keyRows || []).map((r) => r.wallet_key);
-      } else {
-        const [keyRows] = await db.execute(sql`
-          SELECT wallet_key
-          FROM (
-            SELECT
-              ml.wallet_key,
-              ml.wallet_id,
-              ml.account_key AS owner_key,
-              ml.currency_code,
-              COALESCE(m.trade_name, m.name, ml.account_key) AS owner_name
-            FROM MerchantLedgers ml
-            LEFT JOIN Merchants m ON m.account_key = ml.account_key
-            UNION ALL
-            SELECT
-              cw.wallet_key,
-              cw.wallet_id,
-              cw.identifier AS owner_key,
-              cw.currency_code,
-              TRIM(CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.surname, ''))) AS owner_name
-            FROM CustomerWallets cw
-            LEFT JOIN Customers c ON c.identifier = cw.identifier
-          ) w
-          WHERE (
-            ${searchTerm} IS NULL
-            OR w.wallet_key LIKE CONCAT('%', ${searchTerm}, '%')
-            OR w.wallet_id LIKE CONCAT('%', ${searchTerm}, '%')
-            OR w.owner_key LIKE CONCAT('%', ${searchTerm}, '%')
-            OR w.owner_name LIKE CONCAT('%', ${searchTerm}, '%')
-          )
-            AND (${currencyFilter} IS NULL OR w.currency_code = ${currencyFilter})
-        `);
-        summaryWalletKeys = (keyRows || []).map((r) => r.wallet_key);
-      }
-
-      const [summaryBalances, summaryPending] = await Promise.all([
-        getLatestClosingBalanceByWallet(summaryWalletKeys),
-        getPendingTransactionsByWallet(summaryWalletKeys),
-      ]);
-
-      const summaryRows = summaryWalletKeys.map((walletKey) => {
-        const currentBalance = summaryBalances.get(walletKey)?.current_balance ?? "0.00";
-        const rowStatus = toNumber(currentBalance) > 0 ? "active" : "inactive";
-        return {
-          wallet_key: walletKey,
-          current_balance: currentBalance,
-          status: rowStatus,
-          pending_transactions_count: summaryPending.get(walletKey) ?? 0,
-        };
-      });
-
-      const filteredSummaryRows =
-        normalizedStatus === "all"
-          ? summaryRows
-          : summaryRows.filter((r) => r.status === normalizedStatus);
-
+      const totalWallets = normalizedStatus === "all" ? totalCount : rows.length;
       summary = {
-        total_wallets: filteredSummaryRows.length,
-        total_value: filteredSummaryRows
-          .reduce((sum, r) => sum + toNumber(r.current_balance), 0)
-          .toFixed(2),
-        active_wallets: filteredSummaryRows.filter((r) => r.status === "active").length,
-        pending_transactions: filteredSummaryRows.reduce(
-          (sum, r) => sum + Number(r.pending_transactions_count || 0),
-          0,
-        ),
+        total_wallets: Number(totalWallets || 0),
+        // Temporarily disabled to avoid expensive full-dataset balance rollups.
+        total_value: "0.00",
+        active_wallets: null,
+        // Temporarily disabled to avoid expensive cross-table pending scans.
+        pending_transactions: 0,
       };
-
       setCachedWalletSummary(summaryCacheKey, summary);
     }
 
-    const count =
-      normalizedStatus === "all" ? totalCount : Number(summary.total_wallets || 0);
+    const count = normalizedStatus === "all" ? totalCount : rows.length;
 
     return { summary, count, rows };
   }
