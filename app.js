@@ -18,6 +18,7 @@ import configRoutes from "./src/routes/config/routes.js";
 import feeRoutes from "./src/routes/fees/routes.js";
 import dashboardRoutes from "./src/routes/dashboard/routes.js";
 import walletsRoutes from "./src/routes/wallets/routes.js";
+import settlementRoutes from "./src/routes/settlements/routes.js";
 import { errorHandler } from "./src/middleware/errorHandler.js";
 
 const isProduction = process.env.NODE_ENV === "production";
@@ -90,5 +91,6 @@ app.register(configRoutes, { prefix: api("/config") });
 app.register(feeRoutes, { prefix: api("/fees") });
 app.register(dashboardRoutes, { prefix: api("/dashboard") });
 app.register(walletsRoutes, { prefix: api("/wallets") });
+app.register(settlementRoutes, { prefix: api("/settlements") });
 
 export default app;
