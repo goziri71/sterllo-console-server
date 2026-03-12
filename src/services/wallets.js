@@ -326,7 +326,7 @@ export default class WalletService {
       totalCount = Number(countRows?.[0]?.total || 0);
 
       const [rows] = await db.execute(sql`
-        SELECT wallet_key, wallet_id, currency_code, date_created
+        SELECT wallet_key, wallet_id, environment, currency_code, date_created
         FROM MerchantLedgers
         WHERE account_key = ${normalizedOwnerKey}
           AND (
@@ -348,6 +348,7 @@ export default class WalletService {
         country_code: null,
         wallet_key: r.wallet_key,
         wallet_id: r.wallet_id,
+        environment: r.environment || null,
         currency_code: r.currency_code,
         date_created: r.date_created,
       }));
@@ -379,7 +380,7 @@ export default class WalletService {
       totalCount = Number(countRows?.[0]?.total || 0);
 
       const [rows] = await db.execute(sql`
-        SELECT wallet_key, wallet_id, currency_code, date_created
+        SELECT wallet_key, wallet_id, environment, currency_code, date_created
         FROM CustomerWallets
         WHERE identifier = ${normalizedOwnerKey}
           AND (
@@ -401,6 +402,7 @@ export default class WalletService {
         country_code: customer.country_code || null,
         wallet_key: r.wallet_key,
         wallet_id: r.wallet_id,
+        environment: r.environment || null,
         currency_code: r.currency_code,
         date_created: r.date_created,
       }));
@@ -412,6 +414,7 @@ export default class WalletService {
             ml.wallet_key,
             ml.wallet_id,
             ml.account_key AS owner_key,
+            ml.environment,
             ml.currency_code,
             COALESCE(m.trade_name, m.name, ml.account_key) AS owner_name
           FROM MerchantLedgers ml
@@ -421,6 +424,7 @@ export default class WalletService {
             cw.wallet_key,
             cw.wallet_id,
             cw.identifier AS owner_key,
+            cw.environment,
             cw.currency_code,
             TRIM(CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.surname, ''))) AS owner_name
           FROM CustomerWallets cw
@@ -448,6 +452,7 @@ export default class WalletService {
             NULL AS country_code,
             ml.wallet_key,
             ml.wallet_id,
+            ml.environment,
             ml.currency_code,
             ml.date_created
           FROM MerchantLedgers ml
@@ -463,6 +468,7 @@ export default class WalletService {
             c.country_code AS country_code,
             cw.wallet_key,
             cw.wallet_id,
+            cw.environment,
             cw.currency_code,
             cw.date_created
           FROM CustomerWallets cw
@@ -488,6 +494,7 @@ export default class WalletService {
         country_code: r.country_code || null,
         wallet_key: r.wallet_key,
         wallet_id: r.wallet_id,
+        environment: r.environment || null,
         currency_code: r.currency_code,
         date_created: r.date_created,
       }));
