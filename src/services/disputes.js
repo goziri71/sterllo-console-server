@@ -1,5 +1,5 @@
 import { eq, and, desc, count, gte, lte, asc, inArray, sql, or } from "drizzle-orm";
-import { db } from "../db/index.js";
+import { db, authDb } from "../db/index.js";
 import { transactionDisputes } from "../db/schema/disputes.js";
 import { customers } from "../db/schema/customers.js";
 import { users } from "../db/schema/users.js";
@@ -111,7 +111,7 @@ export default class DisputeService {
           .where(inArray(customers.account_key, accountKeys))
         : Promise.resolve([]),
       userKeys.length
-        ? db
+        ? authDb
           .select({
             user_key: users.user_key,
             first_name: users.first_name,
