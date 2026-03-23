@@ -44,11 +44,12 @@ export const updateCustomer = async (request, reply) => {
 };
 
 export const updateCustomerKycStatus = async (request, reply) => {
+  const { reference, status } = request.body || {};
   const customer = await customerService.updateKycStatusByParams({
     userKey: request.params.user_key,
     accountKey: request.params.account_key,
-    reference: request.params.reference,
-    status: request.params.status,
+    reference,
+    status,
   });
 
   return reply.code(200).send({

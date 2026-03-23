@@ -250,6 +250,9 @@ export default class CustomerService {
   }
 
   async updateKycStatusByParams({ userKey, accountKey, reference, status }) {
+    if (!reference) {
+      throw new ErrorClass("reference is required in request body", 400);
+    }
     const [customer] = await db
       .select()
       .from(customers)
@@ -268,7 +271,14 @@ export default class CustomerService {
 
     const normalizedStatus = String(status || "").trim().toUpperCase();
     if (!normalizedStatus) {
-      throw new ErrorClass("status header is required", 400);
+      throw new ErrorClass("status is required in request body", 400);
+    }
+    const allowedStatuses = new Set(["PENDING", "ACTIVE", "FAILED", "REJECTED"]);
+    if (!allowedStatuses.has(normalizedStatus)) {
+      throw new ErrorClass(
+        "status must be one of: PENDING, ACTIVE, FAILED, REJECTED",
+        400,
+      );
     }
 
     await db
