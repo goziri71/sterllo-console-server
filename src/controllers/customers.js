@@ -43,6 +43,22 @@ export const updateCustomer = async (request, reply) => {
   });
 };
 
+export const updateCustomerKycStatus = async (request, reply) => {
+  const customer = await customerService.updateKycStatusByParams({
+    userKey: request.params.user_key,
+    accountKey: request.params.account_key,
+    reference: request.params.reference,
+    status: request.params.status,
+  });
+
+  return reply.code(200).send({
+    code: 200,
+    success: true,
+    message: "Customer KYC status updated successfully",
+    data: customer,
+  });
+};
+
 export const getCustomerWallets = async (request, reply) => {
   const { page, limit, offset } = parsePagination(request.query);
   const data = await customerService.getWallets(request.params.identifier, { limit, offset });

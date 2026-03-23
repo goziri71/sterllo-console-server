@@ -3,6 +3,7 @@ import {
   getCustomer,
   updateCustomer,
   getCustomerStats,
+  updateCustomerKycStatus,
 } from "../../controllers/customers.js";
 import { getEnrichedCustomerWallets, getCustomerWalletDetail } from "../../controllers/wallets.js";
 import { getCustomerFees } from "../../controllers/fees.js";
@@ -23,6 +24,12 @@ export default async function customerRoutes(fastify) {
   fastify.get("/:identifier/wallets/:wallet_key", { preHandler: authorize(...ALL_ROLES) }, getCustomerWalletDetail);
   fastify.get("/:identifier/fees", { preHandler: authorize(...ALL_ROLES) }, getCustomerFees);
   fastify.get("/:identifier/kycs", { preHandler: authorize(...ALL_ROLES) }, getCustomerKYCs);
+
+  // KYC status update route (no role-based authorization per request)
+  fastify.patch(
+    "/kyc-status/:user_key/:account_key/:reference/:status",
+    updateCustomerKycStatus,
+  );
 
   // Update routes (operations + compliance only)
   fastify.patch("/:identifier", { preHandler: authorize(...CUSTOMER_UPDATE_ROLES) }, updateCustomer);

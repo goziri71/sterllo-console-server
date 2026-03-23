@@ -249,6 +249,45 @@ export default class CustomerService {
     return updated;
   }
 
+  async updateKycStatusByParams({ userKey, accountKey, reference, status }) {
+    const [customer] = await db
+      .select()
+      .from(customers)
+      .where(
+        and(
+          eq(customers.user_key, userKey),
+          eq(customers.account_key, accountKey),
+          eq(customers.reference, reference),
+        ),
+      )
+      .limit(1);
+
+    if (!customer) {
+      throw new ErrorClass("Customer not found", 404);
+    }
+
+    const normalizedStatus = String(status || "").trim().toUpperCase();
+    if (!normalizedStatus) {
+      throw new ErrorClass("status header is required", 400);
+    }
+
+    await db
+      .update(customers)
+      .set({
+        status: normalizedStatus,
+        date_modified: new Date(),
+      })
+      .where(eq(customers.id, customer.id));
+
+    const [updated] = await db
+      .select()
+      .from(customers)
+      .where(eq(customers.id, customer.id))
+      .limit(1);
+
+    return updated;
+  }
+
   async getWallets(identifier, { limit, offset }) {
     const [customer] = await db
       .select()
