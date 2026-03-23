@@ -30,13 +30,27 @@ function statusFilterClause(status) {
   return sql`LOWER(COALESCE(t.status, '')) = ${value}`;
 }
 
+const settlementMovementClause = sql`(
+  (
+    sm.wallet_key IS NOT NULL
+    AND ts.wallet_key IS NOT NULL
+    AND t.account_key IS NOT NULL
+    AND sm.account_key = t.account_key
+    AND ts.account_key = t.account_key
+  )
+  OR
+  (
+    ss.wallet_key IS NOT NULL
+    AND tm.wallet_key IS NOT NULL
+    AND t.account_key IS NOT NULL
+    AND ss.account_key = t.account_key
+    AND tm.account_key = t.account_key
+  )
+)`;
+
 function buildWhere(filters = {}) {
   const conditions = [
-    sql`(
-      (sm.wallet_key IS NOT NULL AND ts.wallet_key IS NOT NULL)
-      OR
-      (ss.wallet_key IS NOT NULL AND tm.wallet_key IS NOT NULL)
-    )`,
+    settlementMovementClause,
   ];
 
   if (filters.account_key) {
@@ -178,9 +192,7 @@ export default class SettlementService {
         t.date_modified
       ${fromClause}
       WHERE (
-        (sm.wallet_key IS NOT NULL AND ts.wallet_key IS NOT NULL)
-        OR
-        (ss.wallet_key IS NOT NULL AND tm.wallet_key IS NOT NULL)
+        ${settlementMovementClause}
       )
       AND (
         COALESCE(t.source_reference, t.target_reference, CAST(t.id AS CHAR)) = ${batchId}
