@@ -13,9 +13,42 @@ const SORTABLE_COLUMNS = {
   settlement_status: transactionDisputes.settlement_status,
 };
 
+const ALLOWED_SORT_FIELDS = new Set(Object.keys(SORTABLE_COLUMNS));
+const ALLOWED_ORDER = new Set(["asc", "desc"]);
+const ALLOWED_UPDATE_FIELDS = new Set(["status", "settlement_status"]);
+
+function parseDateOrThrow(value, fieldName) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new ErrorClass(`Invalid ${fieldName}`, 400);
+  }
+  return parsed;
+}
+
+function validateFilters(filters = {}) {
+  if (filters.sort_by && !ALLOWED_SORT_FIELDS.has(filters.sort_by)) {
+    throw new ErrorClass(
+      `Invalid sort_by. Allowed values: ${[...ALLOWED_SORT_FIELDS].join(", ")}`,
+      400,
+    );
+  }
+
+  if (filters.order && !ALLOWED_ORDER.has(String(filters.order).toLowerCase())) {
+    throw new ErrorClass("Invalid order. Allowed values: asc, desc", 400);
+  }
+
+  if (filters.from_date) {
+    parseDateOrThrow(filters.from_date, "from_date");
+  }
+  if (filters.to_date) {
+    parseDateOrThrow(filters.to_date, "to_date");
+  }
+}
+
 function normalizeSort(sortBy, order) {
   const column = SORTABLE_COLUMNS[sortBy] || transactionDisputes.date_created;
-  return order === "asc" ? asc(column) : desc(column);
+  const normalizedOrder = String(order || "desc").toLowerCase();
+  return normalizedOrder === "asc" ? asc(column) : desc(column);
 }
 
 function buildConditions(filters = {}) {
@@ -25,8 +58,8 @@ function buildConditions(filters = {}) {
   if (filters.account_key) conditions.push(eq(transactionDisputes.account_key, filters.account_key));
   if (filters.settlement_status) conditions.push(eq(transactionDisputes.settlement_status, filters.settlement_status));
   if (filters.user_key) conditions.push(eq(transactionDisputes.user_key, filters.user_key));
-  if (filters.from_date) conditions.push(gte(transactionDisputes.date_created, new Date(filters.from_date)));
-  if (filters.to_date) conditions.push(lte(transactionDisputes.date_created, new Date(filters.to_date)));
+  if (filters.from_date) conditions.push(gte(transactionDisputes.date_created, parseDateOrThrow(filters.from_date, "from_date")));
+  if (filters.to_date) conditions.push(lte(transactionDisputes.date_created, parseDateOrThrow(filters.to_date, "to_date")));
   if (filters.search) {
     const pattern = `%${String(filters.search).trim()}%`;
     conditions.push(
@@ -52,6 +85,7 @@ function formatCustomerName(customer) {
 
 export default class DisputeService {
   async getAll({ limit, offset, filters }) {
+    validateFilters(filters);
     const conditions = buildConditions(filters);
     const where = conditions.length > 0 ? and(...conditions) : undefined;
     const orderBy = normalizeSort(filters.sort_by, filters.order);
@@ -66,6 +100,7 @@ export default class DisputeService {
   }
 
   async getSummary(filters = {}) {
+    validateFilters(filters);
     const conditions = buildConditions(filters);
     const where = conditions.length > 0 ? and(...conditions) : undefined;
 
@@ -94,51 +129,70 @@ export default class DisputeService {
     const accountKeys = [...new Set(rows.map((row) => row.account_key).filter(Boolean))];
     const txRefs = [...new Set(rows.map((row) => row.transaction_reference).filter(Boolean))];
 
-    const [customerRows, userRows, transferRows] = await Promise.all([
-      accountKeys.length
-        ? db
-          .select({
-            user_key: customers.user_key,
-            account_key: customers.account_key,
-            first_name: customers.first_name,
-            middle_name: customers.middle_name,
-            surname: customers.surname,
-            business_name: customers.business_name,
-            reference: customers.reference,
-            environment: customers.environment,
-          })
-          .from(customers)
-          .where(inArray(customers.account_key, accountKeys))
-        : Promise.resolve([]),
-      userKeys.length
-        ? authDb
-          .select({
-            user_key: users.user_key,
-            first_name: users.first_name,
-            last_name: users.last_name,
-            email: users.email,
-          })
-          .from(users)
-          .where(inArray(users.user_key, userKeys))
-        : Promise.resolve([]),
-      txRefs.length
-        ? db
-          .select({
-            source_reference: transfers.source_reference,
-            target_reference: transfers.target_reference,
-            amount: transfers.amount,
-            currency_code: transfers.currency_code,
-            date_created: transfers.date_created,
-          })
-          .from(transfers)
-          .where(
-            or(
-              inArray(transfers.source_reference, txRefs),
-              inArray(transfers.target_reference, txRefs),
-            ),
-          )
-        : Promise.resolve([]),
-    ]);
+    let customerRows = [];
+    let userRows = [];
+    let transferRows = [];
+    try {
+      [customerRows, userRows, transferRows] = await Promise.all([
+        accountKeys.length
+          ? db
+            .select({
+              user_key: customers.user_key,
+              account_key: customers.account_key,
+              first_name: customers.first_name,
+              middle_name: customers.middle_name,
+              surname: customers.surname,
+              business_name: customers.business_name,
+              reference: customers.reference,
+              environment: customers.environment,
+            })
+            .from(customers)
+            .where(inArray(customers.account_key, accountKeys))
+          : Promise.resolve([]),
+        userKeys.length
+          ? authDb
+            .select({
+              user_key: users.user_key,
+              first_name: users.first_name,
+              last_name: users.last_name,
+              email: users.email,
+            })
+            .from(users)
+            .where(inArray(users.user_key, userKeys))
+          : Promise.resolve([]),
+        txRefs.length
+          ? db
+            .select({
+              source_reference: transfers.source_reference,
+              target_reference: transfers.target_reference,
+              amount: transfers.amount,
+              currency_code: transfers.currency_code,
+              date_created: transfers.date_created,
+            })
+            .from(transfers)
+            .where(
+              or(
+                inArray(transfers.source_reference, txRefs),
+                inArray(transfers.target_reference, txRefs),
+              ),
+            )
+          : Promise.resolve([]),
+      ]);
+    } catch (_error) {
+      // Keep core dispute listing stable if optional enrichment sources fail.
+      return rows.map((row) => ({
+        ...row,
+        dispute_id: row.dispute_reference,
+        dispute_type: row.settlement_reference ? "Settlement Dispute" : "Transfer Dispute",
+        customer_name: null,
+        customer_reference: null,
+        environment: null,
+        amount: null,
+        currency_code: null,
+        transaction_date: null,
+        assigned_to: null,
+      }));
+    }
 
     const customerByAccount = new Map();
     for (const customer of customerRows) {
@@ -203,10 +257,16 @@ export default class DisputeService {
       throw new ErrorClass("Dispute not found", 404);
     }
 
-    const allowedFields = ["status", "settlement_status"];
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      throw new ErrorClass("Invalid request body", 400);
+    }
+
     const updateData = {};
-    for (const field of allowedFields) {
+    for (const field of ALLOWED_UPDATE_FIELDS) {
       if (data[field] !== undefined) {
+        if (typeof data[field] !== "string" || !String(data[field]).trim()) {
+          throw new ErrorClass(`Invalid ${field}`, 400);
+        }
         updateData[field] = data[field];
       }
     }
