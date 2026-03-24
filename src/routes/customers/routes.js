@@ -27,7 +27,7 @@ export default async function customerRoutes(fastify) {
 
   // KYC status update route (no role-based authorization per request)
   fastify.patch(
-    "/kyc-status/:user_key/:account_key",
+    "/kyc-status",
     updateCustomerKycStatus,
   );
 

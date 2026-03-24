@@ -45,13 +45,14 @@ export const updateCustomer = async (request, reply) => {
 
 export const updateCustomerKycStatus = async (request, reply) => {
   const { reference, status } = request.body || {};
-  const customer = await customerService.updateKycStatusByParams({
-    userKey: request.params.user_key,
-    accountKey: request.params.account_key,
-    reference,
-    status,
+  const userKey = request.headers["x-user-key"];
+  const accountKey = request.headers["x-account-key"];
+  const customer = await customerService.updateKycStatusByParams({ 
+    userKey, 
+    accountKey, 
+    reference, 
+    status 
   });
-
   return reply.code(200).send({
     code: 200,
     success: true,
