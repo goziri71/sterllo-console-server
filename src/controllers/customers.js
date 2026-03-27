@@ -51,9 +51,9 @@ export const updateCustomerByHeaders = async (request, reply) => {
     accountKey,
     data: request.body || {},
   });
-  return reply.code(200).send({
+  return reply.code(2000).send({
     state: "success",
-    code: 200,
+    code: 2000,
     message: "Customer updated successfully",
     data: customer,
     meta: null,
@@ -73,9 +73,9 @@ export const getCustomerByHeaders = async (request, reply) => {
     offset,
   });
   const { records, pagination } = paginatedResponse(data, page, limit);
-  return reply.code(200).send({
+  return reply.code(2000).send({
     state: "success",
-    code: 200,
+    code: 2000,
     message: "Customers fetched successfully",
     data: records,
     meta: pagination,
