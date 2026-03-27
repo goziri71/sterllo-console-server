@@ -60,19 +60,22 @@ export const updateCustomerByHeaders = async (request, reply) => {
 };
 
 export const getCustomerByHeaders = async (request, reply) => {
+  const { page, limit, offset } = parsePagination(request.query);
   const userKey = request.headers["x-user-key"];
   const accountKey = request.headers["x-account-key"];
   const reference = request.query.reference;
-  const customer = await customerService.getByUserAccountAndReference({
+  const data = await customerService.getByUserAccountHeadersPaginated({
     userKey,
     accountKey,
     reference,
+    limit,
+    offset,
   });
   return reply.code(200).send({
     code: 200,
     success: true,
-    message: "Customer fetched successfully",
-    data: customer,
+    message: "Customers fetched successfully",
+    ...paginatedResponse(data, page, limit),
   });
 };
 
