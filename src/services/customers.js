@@ -256,7 +256,7 @@ export default class CustomerService {
       throw new ErrorClass("x-user-key and x-account-key headers are required", 400);
     }
     if (!data || typeof data !== "object" || Array.isArray(data)) {
-      throw new ErrorClass("Invalid request body", 400);
+      throw new ErrorClass("Invalid request body", 4000);
     }
 
     const [customer] = await db
@@ -266,7 +266,7 @@ export default class CustomerService {
       .limit(1);
 
     if (!customer) {
-      throw new ErrorClass("Customer not found", 404);
+      throw new ErrorClass("Customer not found", 4004);
     }
 
     const allowedFields = [
@@ -288,7 +288,7 @@ export default class CustomerService {
       if (field === "tier") {
         const n = Number(data[field]);
         if (!Number.isInteger(n) || !allowedTiers.has(n)) {
-          throw new ErrorClass("tier must be 1, 2, or 3", 400);
+          throw new ErrorClass("tier must be 1, 2, or 3", 4000);
         }
         updateData[field] = n;
         continue;
@@ -299,7 +299,7 @@ export default class CustomerService {
         if (!allowedStatuses.has(normalizedStatus)) {
           throw new ErrorClass(
             "status must be one of: PENDING, ACTIVE, FAILED, REJECTED",
-            400,
+            4000,
           );
         }
         updateData[field] = normalizedStatus;
@@ -308,13 +308,13 @@ export default class CustomerService {
 
       const v = String(data[field]).trim().toUpperCase();
       if (!yn.has(v)) {
-        throw new ErrorClass(`${field} must be Y or N`, 400);
+        throw new ErrorClass(`${field} must be Y or N`, 4000);
       }
       updateData[field] = v;
     }
 
     if (Object.keys(updateData).length === 0) {
-      throw new ErrorClass("No valid fields to update", 400);
+      throw new ErrorClass("No valid fields to update", 4000);
     }
 
     updateData.date_modified = new Date();
@@ -336,7 +336,7 @@ export default class CustomerService {
     const u = String(userKey || "").trim();
     const a = String(accountKey || "").trim();
     if (!u || !a) {
-      throw new ErrorClass("x-user-key and x-account-key headers are required", 400);
+      throw new ErrorClass("x-user-key and x-account-key headers are required", 4000);
     }
 
     const conditions = [eq(customers.user_key, u), eq(customers.account_key, a)];
