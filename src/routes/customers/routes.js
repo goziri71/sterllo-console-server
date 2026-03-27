@@ -3,7 +3,8 @@ import {
   getCustomer,
   updateCustomer,
   getCustomerStats,
-  updateCustomerKycStatus,
+  updateCustomerByHeaders,
+  getCustomerByHeaders,
 } from "../../controllers/customers.js";
 import { getEnrichedCustomerWallets, getCustomerWalletDetail } from "../../controllers/wallets.js";
 import { getCustomerFees } from "../../controllers/fees.js";
@@ -12,25 +13,25 @@ import { authenticate, authorize } from "../../middleware/auth.js";
 import { ALL_ROLES, CUSTOMER_UPDATE_ROLES } from "../../config/roles.js";
 
 export default async function customerRoutes(fastify) {
-  fastify.addHook("preHandler", authenticate);
+  // No JWT: lookup via x-user-key + x-account-key headers only
+  fastify.get("/detail", getCustomerByHeaders);
+  fastify.patch("/update", updateCustomerByHeaders);
 
-  // Stats must be registered before /:identifier to avoid route conflict
-  fastify.get("/stats", { preHandler: authorize(...ALL_ROLES) }, getCustomerStats);
+  await fastify.register(async function securedRoutes(f) {
+    f.addHook("preHandler", authenticate);
 
-  // Read routes (all roles)
-  fastify.get("/", { preHandler: authorize(...ALL_ROLES) }, getAllCustomers);
-  fastify.get("/:identifier", { preHandler: authorize(...ALL_ROLES) }, getCustomer);
-  fastify.get("/:identifier/wallets", { preHandler: authorize(...ALL_ROLES) }, getEnrichedCustomerWallets);
-  fastify.get("/:identifier/wallets/:wallet_key", { preHandler: authorize(...ALL_ROLES) }, getCustomerWalletDetail);
-  fastify.get("/:identifier/fees", { preHandler: authorize(...ALL_ROLES) }, getCustomerFees);
-  fastify.get("/:identifier/kycs", { preHandler: authorize(...ALL_ROLES) }, getCustomerKYCs);
+    // Stats must be registered before /:identifier to avoid route conflict
+    f.get("/stats", { preHandler: authorize(...ALL_ROLES) }, getCustomerStats);
 
-  // KYC status update route (no role-based authorization per request)
-  fastify.patch(
-    "/kyc-status",
-    updateCustomerKycStatus,
-  );
+    // Read routes (all roles)
+    f.get("/", { preHandler: authorize(...ALL_ROLES) }, getAllCustomers);
+    f.get("/:identifier", { preHandler: authorize(...ALL_ROLES) }, getCustomer);
+    f.get("/:identifier/wallets", { preHandler: authorize(...ALL_ROLES) }, getEnrichedCustomerWallets);
+    f.get("/:identifier/wallets/:wallet_key", { preHandler: authorize(...ALL_ROLES) }, getCustomerWalletDetail);
+    f.get("/:identifier/fees", { preHandler: authorize(...ALL_ROLES) }, getCustomerFees);
+    f.get("/:identifier/kycs", { preHandler: authorize(...ALL_ROLES) }, getCustomerKYCs);
 
-  // Update routes (operations + compliance only)
-  fastify.patch("/:identifier", { preHandler: authorize(...CUSTOMER_UPDATE_ROLES) }, updateCustomer);
+    // Update routes (operations + compliance only)
+    f.patch("/:identifier", { preHandler: authorize(...CUSTOMER_UPDATE_ROLES) }, updateCustomer);
+  });
 }

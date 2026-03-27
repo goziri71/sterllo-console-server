@@ -249,44 +249,78 @@ export default class CustomerService {
     return updated;
   }
 
-  async updateKycStatusByParams({ userKey, accountKey, reference, status }) {
-    if (!reference) {
-      throw new ErrorClass("reference is required in request body", 400);
+  async updateByUserAndAccountHeaders({ userKey, accountKey, data }) {
+    const u = String(userKey || "").trim();
+    const a = String(accountKey || "").trim();
+    if (!u || !a) {
+      throw new ErrorClass("x-user-key and x-account-key headers are required", 400);
     }
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      throw new ErrorClass("Invalid request body", 400);
+    }
+
     const [customer] = await db
       .select()
       .from(customers)
-      .where(
-        and(
-          eq(customers.user_key, userKey),
-          eq(customers.account_key, accountKey),
-          eq(customers.reference, reference),
-        ),
-      )
+      .where(and(eq(customers.user_key, u), eq(customers.account_key, a)))
       .limit(1);
 
     if (!customer) {
       throw new ErrorClass("Customer not found", 404);
     }
 
-    const normalizedStatus = String(status || "").trim().toUpperCase();
-    if (!normalizedStatus) {
-      throw new ErrorClass("status is required in request body", 400);
-    }
+    const allowedFields = [
+      "is_personal_compliant",
+      "is_business_compliant",
+      "status",
+      "is_pnd",
+      "is_pnc",
+      "tier",
+    ];
+    const yn = new Set(["Y", "N"]);
     const allowedStatuses = new Set(["PENDING", "ACTIVE", "FAILED", "REJECTED"]);
-    if (!allowedStatuses.has(normalizedStatus)) {
-      throw new ErrorClass(
-        "status must be one of: PENDING, ACTIVE, FAILED, REJECTED",
-        400,
-      );
+    const allowedTiers = new Set([1, 2, 3]);
+
+    const updateData = {};
+    for (const field of allowedFields) {
+      if (data[field] === undefined) continue;
+
+      if (field === "tier") {
+        const n = Number(data[field]);
+        if (!Number.isInteger(n) || !allowedTiers.has(n)) {
+          throw new ErrorClass("tier must be 1, 2, or 3", 400);
+        }
+        updateData[field] = n;
+        continue;
+      }
+
+      if (field === "status") {
+        const normalizedStatus = String(data[field]).trim().toUpperCase();
+        if (!allowedStatuses.has(normalizedStatus)) {
+          throw new ErrorClass(
+            "status must be one of: PENDING, ACTIVE, FAILED, REJECTED",
+            400,
+          );
+        }
+        updateData[field] = normalizedStatus;
+        continue;
+      }
+
+      const v = String(data[field]).trim().toUpperCase();
+      if (!yn.has(v)) {
+        throw new ErrorClass(`${field} must be Y or N`, 400);
+      }
+      updateData[field] = v;
     }
 
+    if (Object.keys(updateData).length === 0) {
+      throw new ErrorClass("No valid fields to update", 400);
+    }
+
+    updateData.date_modified = new Date();
     await db
       .update(customers)
-      .set({
-        status: normalizedStatus,
-        date_modified: new Date(),
-      })
+      .set(updateData)
       .where(eq(customers.id, customer.id));
 
     const [updated] = await db
@@ -296,6 +330,36 @@ export default class CustomerService {
       .limit(1);
 
     return updated;
+  }
+
+  async getByUserAccountAndReference({ userKey, accountKey, reference }) {
+    const u = String(userKey || "").trim();
+    const a = String(accountKey || "").trim();
+    const r = String(reference || "").trim();
+    if (!u || !a) {
+      throw new ErrorClass("x-user-key and x-account-key headers are required", 400);
+    }
+    if (!r) {
+      throw new ErrorClass("reference query parameter is required", 400);
+    }
+
+    const [customer] = await db
+      .select()
+      .from(customers)
+      .where(
+        and(
+          eq(customers.user_key, u),
+          eq(customers.account_key, a),
+          eq(customers.reference, r),
+        ),
+      )
+      .limit(1);
+
+    if (!customer) {
+      throw new ErrorClass("Customer not found", 404);
+    }
+
+    return customer;
   }
 
   async getWallets(identifier, { limit, offset }) {
