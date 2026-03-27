@@ -52,10 +52,11 @@ export const updateCustomerByHeaders = async (request, reply) => {
     data: request.body || {},
   });
   return reply.code(200).send({
+    state: "success",
     code: 200,
-    success: true,
     message: "Customer updated successfully",
     data: customer,
+    meta: null,
   });
 };
 
@@ -71,11 +72,13 @@ export const getCustomerByHeaders = async (request, reply) => {
     limit,
     offset,
   });
+  const { records, pagination } = paginatedResponse(data, page, limit);
   return reply.code(200).send({
+    state: "success",
     code: 200,
-    success: true,
     message: "Customers fetched successfully",
-    ...paginatedResponse(data, page, limit),
+    data: records,
+    meta: pagination,
   });
 };
 
