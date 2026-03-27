@@ -43,20 +43,35 @@ export const updateCustomer = async (request, reply) => {
   });
 };
 
-export const updateCustomerKycStatus = async (request, reply) => {
-  const { reference, status } = request.body || {};
+export const updateCustomerByHeaders = async (request, reply) => {
   const userKey = request.headers["x-user-key"];
   const accountKey = request.headers["x-account-key"];
-  const customer = await customerService.updateKycStatusByParams({ 
-    userKey, 
-    accountKey, 
-    reference, 
-    status 
+  const customer = await customerService.updateByUserAndAccountHeaders({
+    userKey,
+    accountKey,
+    data: request.body || {},
   });
   return reply.code(200).send({
     code: 200,
     success: true,
-    message: "Customer KYC status updated successfully",
+    message: "Customer updated successfully",
+    data: customer,
+  });
+};
+
+export const getCustomerByHeaders = async (request, reply) => {
+  const userKey = request.headers["x-user-key"];
+  const accountKey = request.headers["x-account-key"];
+  const reference = request.query.reference;
+  const customer = await customerService.getByUserAccountAndReference({
+    userKey,
+    accountKey,
+    reference,
+  });
+  return reply.code(200).send({
+    code: 200,
+    success: true,
+    message: "Customer fetched successfully",
     data: customer,
   });
 };
