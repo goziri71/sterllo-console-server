@@ -332,34 +332,32 @@ export default class CustomerService {
     return updated;
   }
 
-  async getByUserAccountAndReference({ userKey, accountKey, reference }) {
+  async getByUserAccountHeadersPaginated({ userKey, accountKey, reference, limit, offset }) {
     const u = String(userKey || "").trim();
     const a = String(accountKey || "").trim();
-    const r = String(reference || "").trim();
     if (!u || !a) {
       throw new ErrorClass("x-user-key and x-account-key headers are required", 400);
     }
-    if (!r) {
-      throw new ErrorClass("reference query parameter is required", 400);
+
+    const conditions = [eq(customers.user_key, u), eq(customers.account_key, a)];
+    const r = String(reference || "").trim();
+    if (r) {
+      conditions.push(eq(customers.reference, r));
     }
+    const where = and(...conditions);
 
-    const [customer] = await db
-      .select()
-      .from(customers)
-      .where(
-        and(
-          eq(customers.user_key, u),
-          eq(customers.account_key, a),
-          eq(customers.reference, r),
-        ),
-      )
-      .limit(1);
+    const [rows, [{ total }]] = await Promise.all([
+      db
+        .select()
+        .from(customers)
+        .where(where)
+        .orderBy(desc(customers.date_created))
+        .limit(limit)
+        .offset(offset),
+      db.select({ total: count() }).from(customers).where(where),
+    ]);
 
-    if (!customer) {
-      throw new ErrorClass("Customer not found", 404);
-    }
-
-    return customer;
+    return { count: Number(total), rows };
   }
 
   async getWallets(identifier, { limit, offset }) {
