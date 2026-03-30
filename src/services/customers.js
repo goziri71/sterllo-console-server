@@ -249,10 +249,11 @@ export default class CustomerService {
     return updated;
   }
 
-  async updateByUserAndAccountHeaders({ userKey, accountKey, data }) {
+  async updateByUserAndAccountHeaders({ userKey, accountKey, reference, data }) {
     const u = String(userKey || "").trim();
     const a = String(accountKey || "").trim();
-    if (!u || !a) {
+    const r = String(reference || "").trim();
+    if (!u || !a || !r) {
       throw new ErrorClass("x-user-key and x-account-key headers are required", 400);
     }
     if (!data || typeof data !== "object" || Array.isArray(data)) {
