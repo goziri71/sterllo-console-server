@@ -50,8 +50,10 @@ app.get("/", async (_request, reply) => {
 // 404 handler
 app.setNotFoundHandler((request, reply) => {
   reply.code(404).send({
-    success: false,
+    code: 4040,
+    state: false,
     message: "Route not found",
+    data: {},
   });
 });
 
