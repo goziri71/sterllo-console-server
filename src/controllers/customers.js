@@ -71,14 +71,14 @@ export const getCustomerByHeaders = async (request, reply) => {
     limit,
     offset,
   });
-  const { records, pagination } = paginatedResponse(data, page, limit);
+  const { records, metadata } = paginatedResponse(data, page, limit);
   return reply.code(200).send({
     code: 2000,
     state: true,
     message: "Successful.",
     data: {
       records,
-      pagination,
+      metadata,
     },
   });
 };
