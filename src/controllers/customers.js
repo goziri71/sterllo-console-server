@@ -76,10 +76,8 @@ export const getCustomerByHeaders = async (request, reply) => {
     code: 2000,
     state: true,
     message: "Successful.",
-    data: {
-      records,
-      pagination,
-    },
+    data: records,
+    pagination,
   });
 };
 

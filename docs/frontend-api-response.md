@@ -18,14 +18,15 @@ All JSON responses that follow the console standard use the **same top-level sha
 | `code`    | number  | Application result code (see below). **Always in the thousands** for this API (`2000`, `4000`, `4040`, …). |
 | `state`   | boolean | `true` = business success; `false` = failure. |
 | `message` | string  | Human-readable summary (show in UI or logs). |
-| `data`    | object  | Payload; often `{}` on errors. May include nested `records`, `pagination`, etc. on success. |
+| `data`    | object or array | Payload; often `{}` on errors. For some list endpoints, `data` is the **array of rows** and **`pagination`** is a separate top-level field with metadata. |
 
 ## Success
 
 - **`code`:** `2000`
 - **`state`:** `true`
 - **`message`:** Typically `"Successful."` (exact text may vary slightly per endpoint).
-- **`data`:** Endpoint-specific payload (e.g. a single entity, or `{ records, pagination }` for lists).
+- **`data`:** Endpoint-specific payload (e.g. a single entity, or an **array** for list endpoints).
+- **`pagination`:** (List endpoints only) Metadata object (`total`, `page`, `limit`, `total_pages`, `has_next`, `has_prev`) — **sibling** of `data`, not nested under it.
 - **HTTP:** Usually `200` for successful operations handled by this API.
 
 **Suggested client logic:** treat as success when `state === true` (and optionally `code === 2000`).
@@ -54,11 +55,21 @@ Failures use the **same envelope**, with `state: false` and a **thousand-range**
 ## TypeScript sketch
 
 ```ts
+type PaginationMeta = {
+  total: number;
+  page: number;
+  limit: number;
+  total_pages: number;
+  has_next: boolean;
+  has_prev: boolean;
+};
+
 type ApiEnvelope<T = unknown> = {
   code: number;
   state: boolean;
   message: string;
   data: T;
+  pagination?: PaginationMeta;
 };
 
 function isApiSuccess<T>(body: ApiEnvelope<T>): body is ApiEnvelope<T> & { state: true; code: 2000 } {
