@@ -252,9 +252,12 @@ export default class CustomerService {
   async updateByUserAndAccountHeaders({ userKey, accountKey, reference, data }) {
     const u = String(userKey || "").trim();
     const a = String(accountKey || "").trim();
-    const r = String(reference || "").trim();
-    if (!u || !a || !r) {
+    const r = String(reference ?? data?.reference ?? "").trim();
+    if (!u || !a) {
       throw new ErrorClass("x-user-key and x-account-key headers are required", 400);
+    }
+    if (!r) {
+      throw new ErrorClass("reference is required", 4000);
     }
     if (!data || typeof data !== "object" || Array.isArray(data)) {
       throw new ErrorClass("Invalid request body", 4000);
@@ -263,7 +266,13 @@ export default class CustomerService {
     const [customer] = await db
       .select()
       .from(customers)
-      .where(and(eq(customers.user_key, u), eq(customers.account_key, a)))
+      .where(
+        and(
+          eq(customers.user_key, u),
+          eq(customers.account_key, a),
+          eq(customers.reference, r),
+        ),
+      )
       .limit(1);
 
     if (!customer) {
