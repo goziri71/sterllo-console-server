@@ -1,26 +1,86 @@
 # Frontend guide: financial data access (`financial.read`)
 
-The API hides **balances, amounts, fees, volumes, and other monetary fields** unless the signed-in user is allowed to see them. Access is controlled only through **RBAC permissions**, not hardcoded job titles in the client.
+This document covers **(A)** auth profile / RBAC fields the UI must read correctly, **(B)** `financial.read` and redaction, and **(C)** admin endpoints to assign roles.
 
-**Permission key:** `financial.read`  
-**Full access:** users whose effective permission set includes `*` (management / super-admin) always see financial data.
+The API hides **balances, amounts, fees, volumes, and other monetary fields** unless the signed-in user is allowed to see them. Access is controlled through **RBAC permissions** in the auth database.
+
+**Permission key (money):** `financial.read`  
+**Full access (money + everything implied by `*`):** effective permission set includes `*` (management role in RBAC).
 
 For envelope shapes (`code` / `state` / `success`), see [frontend-api-response.md](./frontend-api-response.md). Note: some routes use `success: true` and `code: 200`; RBAC admin routes use `state: true` and `code: 2000`.
 
 ---
 
-## 1. Detecting access in the UI
+## 0. Roles, permissions, and “Admin tools” (read this first)
 
-After login (or on app load), use the **profile** payload. The backend merges permissions from all assigned roles.
+### 0.1 Where `roles` and `permissions` appear
 
-**GET** `{API_PREFIX}/auth/profile` (authenticated)
+Effective RBAC comes from tables `rbac_user_roles` + `rbac_role_permissions` on the **auth** database. The legacy `Users.role` column is **not** the source of truth for the API.
 
-Relevant fields on the user object inside the response body (exact nesting matches your existing auth client):
+The backend returns **`roles`**, **`permissions`**, and a single display **`role`** (primary slug when multiple roles exist) on:
+
+| Endpoint | Response shape |
+|----------|------------------|
+| **POST** `{API_PREFIX}/auth/login` | `{ code, success, data: { user, token } }` — **`user` includes `roles`, `permissions`, `role`** |
+| **POST** `{API_PREFIX}/auth/register` | same as login |
+| **GET** `{API_PREFIX}/auth/profile` | `{ code, success, data: { …user, roles, permissions, role } }` |
+
+**Critical for the frontend:** read arrays from **`data.user`** (login/register) or **`data`** (profile), not from the top-level JSON. Example:
+
+```ts
+// Login
+const user = response.data.user;
+const roles = user.roles ?? [];
+const permissions = user.permissions ?? [];
+
+// Profile
+const profile = response.data;
+const roles = profile.roles ?? [];
+const permissions = profile.permissions ?? [];
+```
+
+If the UI only stored **`data.user`** from an older API that omitted `roles` / `permissions`, it would show **“No roles on profile”** even when the database is correct. **Re-login after deploying** the API that includes these fields on login, or **always call GET `/auth/profile`** after login and use that payload as the source of truth.
+
+### 0.2 Who can open RBAC admin APIs (`/rbac/*`)
+
+Routes under **`/rbac`** use **`requireRbacManage`**: the user must have **`rbac.manage`** **or** **`*`** in their effective permission set.
+
+The **management** role is seeded with permission **`*`**, so a user with only the **management** role should pass this check **if** RBAC rows exist in the **same** database the running API uses.
+
+Helpers:
+
+```ts
+const ALL = "*";
+const RBAC_MANAGE = "rbac.manage";
+
+export function canManageRbac(permissions: string[] | undefined | null): boolean {
+  if (!permissions?.length) return false;
+  return permissions.includes(ALL) || permissions.includes(RBAC_MANAGE);
+}
+```
+
+### 0.3 If `roles` / `permissions` are empty arrays
+
+| Cause | What to do |
+|--------|------------|
+| **Wrong response path** | Use `data.user.roles` / `data.user.permissions` (login) or `data.roles` / `data.permissions` (profile). |
+| **Stale session** | Log out and log in again; after role changes, `token_version` may invalidate old tokens. |
+| **Production DB never migrated / user not linked** | On the **auth** DB used in production, run `npm run migrate:auth-rbac` and/or `npm run set:user-management-only -- user@email.com`, or assign roles via API using another admin. |
+| **Different API URL** | Admin UI must call the **same** base URL / `{API_PREFIX}` as the console API that owns the `Users` + `rbac_*` tables. |
+
+---
+
+## 1. Detecting financial access in the UI
+
+Use the **`permissions`** array from login or profile (see §0.1).
+
+**GET** `{API_PREFIX}/auth/profile` (authenticated) — same fields as login `user` object.
 
 | Field | Type | Use |
 |--------|------|-----|
 | `permissions` | `string[]` | Effective permission keys for this user. |
-| `roles` | `string[]` | Assigned role slugs (e.g. `finance`, `operations`). |
+| `roles` | `string[]` | Assigned role slugs (e.g. `management`, `finance`, `operations`). |
+| `role` | `string \| null` | Single slug for display (prefers `management` when multiple roles exist). |
 
 **Client helper (recommended):**
 
