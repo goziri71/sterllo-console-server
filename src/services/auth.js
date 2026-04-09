@@ -164,7 +164,7 @@ export default class AuthService {
 
   /**
    * Logout - invalidates the current token by incrementing token_version
-   */
+
   async logout(userKey) {
     const [user] = await authDb
       .select()
