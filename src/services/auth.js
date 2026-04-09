@@ -21,6 +21,17 @@ export default class AuthService {
     return safeUser;
   }
 
+  /** Same shape as getProfile: RBAC roles + permission keys for API clients. */
+  _userWithAccess(userRow, access) {
+    const safe = this._sanitizeUser(userRow);
+    return {
+      ...safe,
+      roles: access.roleSlugs,
+      permissions: [...access.permissionKeys],
+      role: pickPrimaryRoleSlug(access.roleSlugs) ?? safe.role ?? null,
+    };
+  }
+
   async register({ email, password, first_name, last_name }) {
     const [existingUser] = await authDb
       .select()
@@ -62,7 +73,7 @@ export default class AuthService {
     });
 
     return {
-      user: this._sanitizeUser(newUser),
+      user: this._userWithAccess(newUser, access),
       token,
     };
   }
@@ -115,7 +126,7 @@ export default class AuthService {
     });
 
     return {
-      user: this._sanitizeUser({ ...user, token_version: newTokenVersion }),
+      user: this._userWithAccess({ ...user, token_version: newTokenVersion }, access),
       token,
     };
   }
@@ -165,7 +176,7 @@ export default class AuthService {
 
   /**
    * Logout - invalidates the current token by incrementing token_version
-
+   */
   async logout(userKey) {
     const [user] = await authDb
       .select()
@@ -202,12 +213,6 @@ export default class AuthService {
     }
 
     const access = await loadUserAccess(userId);
-    const safe = this._sanitizeUser(user);
-    return {
-      ...safe,
-      roles: access.roleSlugs,
-      permissions: [...access.permissionKeys],
-      role: pickPrimaryRoleSlug(access.roleSlugs) ?? safe.role ?? null,
-    };
+    return this._userWithAccess(user, access);
   }
 }
