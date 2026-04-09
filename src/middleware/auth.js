@@ -6,6 +6,7 @@ import { users } from "../db/schema/users.js";
 import { getCachedUser, setCachedUser } from "../utils/userCache.js";
 import { loadUserAccess } from "../services/rbac.js";
 import { PERMISSIONS } from "../config/permissions.js";
+import { pickPrimaryRoleSlug } from "../config/roles.js";
 
 export { clearUserCache } from "../utils/userCache.js";
 
@@ -67,7 +68,7 @@ export const authenticate = async (request, reply) => {
     ...user,
     roleSlugs: access.roleSlugs,
     permissionKeys: access.permissionKeys,
-    role: access.roleSlugs[0] ?? user.role ?? null,
+    role: pickPrimaryRoleSlug(access.roleSlugs) ?? user.role ?? null,
   };
 };
 

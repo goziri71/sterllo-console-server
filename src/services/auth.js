@@ -7,6 +7,7 @@ import { ErrorClass } from "../utils/errorClass/index.js";
 import { generateToken } from "../utils/jwt/index.js";
 import { clearUserCache } from "../utils/userCache.js";
 import { loadUserAccess } from "./rbac.js";
+import { pickPrimaryRoleSlug } from "../config/roles.js";
 
 const SALT_ROUNDS = 6;
 
@@ -201,10 +202,12 @@ export default class AuthService {
     }
 
     const access = await loadUserAccess(userId);
+    const safe = this._sanitizeUser(user);
     return {
-      ...this._sanitizeUser(user),
+      ...safe,
       roles: access.roleSlugs,
       permissions: [...access.permissionKeys],
+      role: pickPrimaryRoleSlug(access.roleSlugs) ?? safe.role ?? null,
     };
   }
 }
