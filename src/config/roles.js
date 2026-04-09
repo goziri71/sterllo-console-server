@@ -4,6 +4,7 @@
  */
 
 export const ROLES = {
+  MANAGEMENT: "management",
   FINANCE: "finance",
   OPERATIONS: "operations",
   OPS_SUPPORT: "ops_support",

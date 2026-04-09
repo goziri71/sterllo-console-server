@@ -1,7 +1,14 @@
 import TransactionService from "../services/transactions.js";
 import { parsePagination, paginatedResponse } from "../utils/pagination/index.js";
+import { userCanReadFinancial, redactFinancialDeep } from "../utils/financialAccess.js";
+import { ErrorClass } from "../utils/errorClass/index.js";
 
 const txService = new TransactionService();
+
+function maybeRedactTxPage(data, user) {
+  if (userCanReadFinancial(user)) return data;
+  return { ...data, rows: data.rows.map((row) => redactFinancialDeep(row)) };
+}
 
 function extractFilters(query) {
   return {
@@ -17,7 +24,8 @@ function extractFilters(query) {
 
 export const getDeposits = async (request, reply) => {
   const { page, limit, offset } = parsePagination(request.query);
-  const data = await txService.getDeposits({ limit, offset, filters: extractFilters(request.query) });
+  const raw = await txService.getDeposits({ limit, offset, filters: extractFilters(request.query) });
+  const data = maybeRedactTxPage(raw, request.user);
 
   return reply.code(200).send({ 
     code: 200,
@@ -28,7 +36,8 @@ export const getDeposits = async (request, reply) => {
 
 export const getWithdrawals = async (request, reply) => {
   const { page, limit, offset } = parsePagination(request.query);
-  const data = await txService.getWithdrawals({ limit, offset, filters: extractFilters(request.query) });
+  const raw = await txService.getWithdrawals({ limit, offset, filters: extractFilters(request.query) });
+  const data = maybeRedactTxPage(raw, request.user);
 
   return reply.code(200).send({
     code: 200,
@@ -39,7 +48,8 @@ export const getWithdrawals = async (request, reply) => {
 
 export const getTransfers = async (request, reply) => {
   const { page, limit, offset } = parsePagination(request.query);
-  const data = await txService.getTransfers({ limit, offset, filters: extractFilters(request.query) });
+  const raw = await txService.getTransfers({ limit, offset, filters: extractFilters(request.query) });
+  const data = maybeRedactTxPage(raw, request.user);
 
   return reply.code(200).send({ 
     code: 200,
@@ -50,7 +60,8 @@ export const getTransfers = async (request, reply) => {
 
 export const getSwaps = async (request, reply) => {
   const { page, limit, offset } = parsePagination(request.query);
-  const data = await txService.getSwaps({ limit, offset, filters: extractFilters(request.query) });
+  const raw = await txService.getSwaps({ limit, offset, filters: extractFilters(request.query) });
+  const data = maybeRedactTxPage(raw, request.user);
 
   return reply.code(200).send({ 
     code: 200,
@@ -61,7 +72,8 @@ export const getSwaps = async (request, reply) => {
 
 export const getNGNDeposits = async (request, reply) => {
   const { page, limit, offset } = parsePagination(request.query);
-  const data = await txService.getNGNDeposits({ limit, offset, filters: extractFilters(request.query) });
+  const raw = await txService.getNGNDeposits({ limit, offset, filters: extractFilters(request.query) });
+  const data = maybeRedactTxPage(raw, request.user);
 
   return reply.code(200).send({ 
     code: 200,
@@ -72,7 +84,8 @@ export const getNGNDeposits = async (request, reply) => {
 
 export const getNGNPayouts = async (request, reply) => {
   const { page, limit, offset } = parsePagination(request.query);
-  const data = await txService.getNGNPayouts({ limit, offset, filters: extractFilters(request.query) });
+  const raw = await txService.getNGNPayouts({ limit, offset, filters: extractFilters(request.query) });
+  const data = maybeRedactTxPage(raw, request.user);
 
   return reply.code(200).send({ 
     code: 200,
@@ -83,7 +96,8 @@ export const getNGNPayouts = async (request, reply) => {
 
 export const getCryptoDeposits = async (request, reply) => {
   const { page, limit, offset } = parsePagination(request.query);
-  const data = await txService.getCryptoDeposits({ limit, offset, filters: extractFilters(request.query) });
+  const raw = await txService.getCryptoDeposits({ limit, offset, filters: extractFilters(request.query) });
+  const data = maybeRedactTxPage(raw, request.user);
 
   return reply.code(200).send({ 
     code: 200,
@@ -94,7 +108,8 @@ export const getCryptoDeposits = async (request, reply) => {
 
 export const getCryptoPayouts = async (request, reply) => {
   const { page, limit, offset } = parsePagination(request.query);
-  const data = await txService.getCryptoPayouts({ limit, offset, filters: extractFilters(request.query) });
+  const raw = await txService.getCryptoPayouts({ limit, offset, filters: extractFilters(request.query) });
+  const data = maybeRedactTxPage(raw, request.user);
 
   return reply.code(200).send({ 
     code: 200,
@@ -104,6 +119,9 @@ export const getCryptoPayouts = async (request, reply) => {
 };
 
 export const getTransactionStatement = async (request, reply) => {
+  if (!userCanReadFinancial(request.user)) {
+    throw new ErrorClass("Transaction statement requires financial.read permission", 403);
+  }
   const { page, limit, offset } = parsePagination(request.query);
   const data = await txService.getStatement({ limit, offset, filters: extractFilters(request.query) });
 

@@ -20,6 +20,7 @@ import dashboardRoutes from "./src/routes/dashboard/routes.js";
 import walletsRoutes from "./src/routes/wallets/routes.js";
 import settlementRoutes from "./src/routes/settlements/routes.js";
 import complianceRoutes from "./src/routes/compliance/routes.js";
+import rbacRoutes from "./src/routes/rbac/routes.js";
 import { errorHandler } from "./src/middleware/errorHandler.js";
 
 const isProduction = process.env.NODE_ENV === "production";
@@ -84,6 +85,7 @@ app.register(rateLimit, {
 // Routes
 app.register(healthRoutes, { prefix: api("/health") });
 app.register(authRoutes, { prefix: api("/auth") });
+app.register(rbacRoutes, { prefix: api("/rbac") });
 app.register(merchantRoutes, { prefix: api("/merchants") });
 app.register(customerRoutes, { prefix: api("/customers") });
 app.register(kycRoutes, { prefix: api("/kycs") });

@@ -5,6 +5,7 @@ import { customers, customerWallets } from "../db/schema/customers.js";
 import { ngnDepositAccountNumbers } from "../db/schema/ngnAccounts.js";
 import { cryptoDepositAddresses } from "../db/schema/cryptoInfra.js";
 import { ErrorClass } from "../utils/errorClass/index.js";
+import { redactWalletBalanceFields } from "../utils/financialAccess.js";
 
 function toNumber(value) {
   const n = Number(value);
@@ -240,7 +241,7 @@ async function enrichWalletsByWalletKey(walletRows) {
   );
 }
 
-async function enrichMerchantWallets(walletRows, accountKey) {
+async function enrichMerchantWallets(walletRows, accountKey, revealFinancial = true) {
   if (walletRows.length === 0) return walletRows;
 
   const walletKeys = walletRows.map((w) => w.wallet_key);
@@ -256,7 +257,7 @@ async function enrichMerchantWallets(walletRows, accountKey) {
       .from(cryptoDepositAddresses)
       .where(eq(cryptoDepositAddresses.account_key, accountKey))
       .orderBy(desc(cryptoDepositAddresses.date_created)),
-    getLatestClosingBalanceByWallet(walletKeys),
+    revealFinancial ? getLatestClosingBalanceByWallet(walletKeys) : Promise.resolve(new Map()),
   ]);
 
   const ngnByWallet = new Map();
@@ -273,18 +274,26 @@ async function enrichMerchantWallets(walletRows, accountKey) {
     cryptoByWallet.get(key).push(formatCryptoAddress(addr));
   }
 
-  return walletRows.map((wallet) => ({
-    ...wallet,
-    current_balance: balanceByWallet.get(wallet.wallet_key)?.current_balance ?? "0.00",
-    balance_last_updated: balanceByWallet.get(wallet.wallet_key)?.balance_last_updated ?? null,
-    balance_source: "derived_from_latest_closing_balance",
-    ngn_deposit_accounts: ngnByWallet.get(wallet.wallet_key) || [],
-    crypto_deposit_addresses: cryptoByWallet.get(wallet.wallet_key) || [],
-  }));
+  return walletRows.map((wallet) => {
+    const base = {
+      ...wallet,
+      ngn_deposit_accounts: ngnByWallet.get(wallet.wallet_key) || [],
+      crypto_deposit_addresses: cryptoByWallet.get(wallet.wallet_key) || [],
+    };
+    if (!revealFinancial) {
+      return redactWalletBalanceFields(base);
+    }
+    return {
+      ...base,
+      current_balance: balanceByWallet.get(wallet.wallet_key)?.current_balance ?? "0.00",
+      balance_last_updated: balanceByWallet.get(wallet.wallet_key)?.balance_last_updated ?? null,
+      balance_source: "derived_from_latest_closing_balance",
+    };
+  });
 }
 
 export default class WalletService {
-  async getWalletPage({ ownerType, ownerKey, limit, offset, search, currencyCode, status }) {
+  async getWalletPage({ ownerType, ownerKey, limit, offset, search, currencyCode, status, revealFinancial = true }) {
     const normalizedOwnerType = ownerType ? String(ownerType).toLowerCase() : "all";
     const normalizedOwnerKey = ownerKey || "all";
     const normalizedStatus = status ? String(status).toLowerCase() : "all";
@@ -500,6 +509,29 @@ export default class WalletService {
       }));
     }
 
+    if (!revealFinancial) {
+      if (normalizedStatus !== "all") {
+        throw new ErrorClass("Filtering wallets by status requires financial.read permission", 403);
+      }
+      const rowsNoBal = baseRows.map((wallet) =>
+        redactWalletBalanceFields({
+          ...wallet,
+          pending_transactions_count: 0,
+        }),
+      );
+      return {
+        summary: {
+          total_wallets: totalCount,
+          total_value: null,
+          active_wallets: null,
+          pending_transactions: null,
+          financial_fields_redacted: true,
+        },
+        count: totalCount,
+        rows: rowsNoBal,
+      };
+    }
+
     const pageWalletKeys = baseRows.map((w) => w.wallet_key);
     const balanceByWallet = await getLatestClosingBalanceByWallet(pageWalletKeys);
 
@@ -627,7 +659,7 @@ export default class WalletService {
     return { summary, count, rows };
   }
 
-  async getMerchantWallets(accountKey, { limit, offset }) {
+  async getMerchantWallets(accountKey, { limit, offset, revealFinancial = true }) {
     const [merchant] = await db
       .select()
       .from(merchants)
@@ -650,11 +682,11 @@ export default class WalletService {
       db.select({ total: count() }).from(merchantLedgers).where(where),
     ]);
 
-    const enrichedRows = await enrichMerchantWallets(rows, accountKey);
+    const enrichedRows = await enrichMerchantWallets(rows, accountKey, revealFinancial);
     return { count: Number(total), rows: enrichedRows };
   }
 
-  async getMerchantWallet(accountKey, walletKey) {
+  async getMerchantWallet(accountKey, walletKey, revealFinancial = true) {
     const [merchant] = await db
       .select()
       .from(merchants)
@@ -671,8 +703,8 @@ export default class WalletService {
       .where(
         and(
           eq(merchantLedgers.account_key, accountKey),
-          eq(merchantLedgers.wallet_key, walletKey)
-        )
+          eq(merchantLedgers.wallet_key, walletKey),
+        ),
       )
       .limit(1);
 
@@ -687,8 +719,8 @@ export default class WalletService {
         .where(
           and(
             eq(ngnDepositAccountNumbers.account_key, accountKey),
-            eq(ngnDepositAccountNumbers.wallet_key, walletKey)
-          )
+            eq(ngnDepositAccountNumbers.wallet_key, walletKey),
+          ),
         )
         .orderBy(desc(ngnDepositAccountNumbers.date_created)),
       db
@@ -697,20 +729,26 @@ export default class WalletService {
         .where(
           and(
             eq(cryptoDepositAddresses.account_key, accountKey),
-            eq(cryptoDepositAddresses.wallet_key, walletKey)
-          )
+            eq(cryptoDepositAddresses.wallet_key, walletKey),
+          ),
         )
         .orderBy(desc(cryptoDepositAddresses.date_created)),
-      getLatestClosingBalanceByWallet([walletKey]),
+      revealFinancial ? getLatestClosingBalanceByWallet([walletKey]) : Promise.resolve(new Map()),
     ]);
 
-    return {
+    const base = {
       ...wallet,
+      ngn_deposit_accounts: ngnAccounts.map(formatNgnAccount),
+      crypto_deposit_addresses: cryptoAddresses.map(formatCryptoAddress),
+    };
+    if (!revealFinancial) {
+      return redactWalletBalanceFields(base);
+    }
+    return {
+      ...base,
       current_balance: balanceByWallet.get(wallet.wallet_key)?.current_balance ?? "0.00",
       balance_last_updated: balanceByWallet.get(wallet.wallet_key)?.balance_last_updated ?? null,
       balance_source: "derived_from_latest_closing_balance",
-      ngn_deposit_accounts: ngnAccounts.map(formatNgnAccount),
-      crypto_deposit_addresses: cryptoAddresses.map(formatCryptoAddress),
     };
   }
 
