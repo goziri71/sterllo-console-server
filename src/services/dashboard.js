@@ -108,7 +108,49 @@ async function getSharedOverview(today) {
   };
 }
 
-async function getFinanceDepartment(today) {
+async function getFinanceDepartment(today, revealFinancial = true) {
+  if (!revealFinancial) {
+    const [
+      completedSettlement,
+      pendingSettlement,
+      currencyUsageRows,
+      [{ total: ngnDepCount }],
+      [{ total: ngnPayCount }],
+    ] = await Promise.all([
+      db.execute(
+        sql`SELECT COUNT(*) as cnt FROM NGNPayouts WHERE payout_status = 'successful' AND date_created >= ${today}`,
+      ),
+      db.execute(sql`SELECT COUNT(*) as cnt FROM NGNPayouts WHERE payout_status = 'pending'`),
+      db
+        .select({ currency_code: customerWallets.currency_code, wallet_count: count() })
+        .from(customerWallets)
+        .groupBy(customerWallets.currency_code)
+        .orderBy(desc(count())),
+      countSince(ngnDeposits, ngnDeposits.date_created, today),
+      countSince(ngnPayouts, ngnPayouts.date_created, today),
+    ]);
+
+    const completedRow = Array.isArray(completedSettlement) ? completedSettlement[0] : completedSettlement;
+    const pendingRow = Array.isArray(pendingSettlement) ? pendingSettlement[0] : pendingSettlement;
+
+    return {
+      role: ROLES.FINANCE,
+      settlement_status: {
+        completed_today_ngn: null,
+        pending_ngn: null,
+        completed_today_count: Number(completedRow?.cnt ?? 0),
+        pending_count: Number(pendingRow?.cnt ?? 0),
+      },
+      currency_usage: currencyUsageRows.map((r) => ({
+        currency_code: r.currency_code,
+        wallet_count: Number(r.wallet_count),
+      })),
+      currency_volume: [],
+      total_ngn_deposits_today: Number(ngnDepCount),
+      total_ngn_payouts_today: Number(ngnPayCount),
+    };
+  }
+
   const [
     completedSettlement,
     pendingSettlement,
@@ -123,7 +165,8 @@ async function getFinanceDepartment(today) {
     db.execute(
       sql`SELECT COUNT(*) as cnt, COALESCE(SUM(CAST(amount AS DECIMAL(20,2))), 0) as total_amount FROM NGNPayouts WHERE payout_status = 'pending'`,
     ),
-    db.select({ currency_code: customerWallets.currency_code, wallet_count: count() })
+    db
+      .select({ currency_code: customerWallets.currency_code, wallet_count: count() })
       .from(customerWallets)
       .groupBy(customerWallets.currency_code)
       .orderBy(desc(count())),
@@ -237,7 +280,7 @@ async function getComplianceDepartment() {
   };
 }
 
-async function getGrowthDepartment(today) {
+async function getGrowthDepartment(today, revealFinancial = true) {
   const week = startOfWeek();
 
   const [
@@ -254,11 +297,12 @@ async function getGrowthDepartment(today) {
     countSince(customerWallets, customerWallets.date_created, today),
     countSince(customerWallets, customerWallets.date_created, week),
     db.select({ total: count() }).from(merchants),
-    db.select({ currency_code: customerWallets.currency_code, wallet_count: count() })
+    db
+      .select({ currency_code: customerWallets.currency_code, wallet_count: count() })
       .from(customerWallets)
       .groupBy(customerWallets.currency_code)
       .orderBy(desc(count())),
-    getCurrencyVolume(),
+    revealFinancial ? getCurrencyVolume() : Promise.resolve([]),
   ]);
 
   return {
@@ -276,7 +320,28 @@ async function getGrowthDepartment(today) {
   };
 }
 
+async function getManagementDepartment(today, revealFinancial = true) {
+  const [finance, operations, ops_support, compliance, growth] = await Promise.all([
+    getFinanceDepartment(today, revealFinancial),
+    getOperationsDepartment(today),
+    getOpsSupportDepartment(today),
+    getComplianceDepartment(),
+    getGrowthDepartment(today, revealFinancial),
+  ]);
+  return {
+    role: ROLES.MANAGEMENT,
+    departments: {
+      finance,
+      operations,
+      ops_support,
+      compliance,
+      growth,
+    },
+  };
+}
+
 const departmentBuilders = {
+  [ROLES.MANAGEMENT]: getManagementDepartment,
   [ROLES.FINANCE]: getFinanceDepartment,
   [ROLES.OPERATIONS]: getOperationsDepartment,
   [ROLES.OPS_SUPPORT]: getOpsSupportDepartment,
@@ -308,9 +373,17 @@ const ACTIVITY_TYPES_BY_ROLE = {
   ]),
 };
 
+const allDashboardActivityTypes = new Set();
+for (const key of Object.keys(ACTIVITY_TYPES_BY_ROLE)) {
+  for (const t of ACTIVITY_TYPES_BY_ROLE[key]) {
+    allDashboardActivityTypes.add(t);
+  }
+}
+ACTIVITY_TYPES_BY_ROLE[ROLES.MANAGEMENT] = allDashboardActivityTypes;
+
 export default class DashboardService {
-  async getSummary(role) {
-    const cacheKey = `summary_${role}`;
+  async getSummary(role, { revealFinancial = true } = {}) {
+    const cacheKey = `summary_${role}_${revealFinancial ? "fin" : "nofin"}`;
     const cached = getCached(cacheKey);
     if (cached) return cached;
 
@@ -319,7 +392,7 @@ export default class DashboardService {
     const buildDepartment = departmentBuilders[role];
     const [overview, department] = await Promise.all([
       getSharedOverview(today),
-      buildDepartment ? buildDepartment(today) : { role },
+      buildDepartment ? buildDepartment(today, revealFinancial) : { role },
     ]);
 
     const result = { overview, department };
@@ -328,7 +401,7 @@ export default class DashboardService {
     return result;
   }
 
-  async getActivities({ role, limit, offset }) {
+  async getActivities({ role, limit, offset, revealFinancial = true }) {
     const perSource = limit + offset;
     const allowedTypes = ACTIVITY_TYPES_BY_ROLE[role];
 
@@ -484,7 +557,22 @@ export default class DashboardService {
     activities.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
     const total = activities.length;
-    const paged = activities.slice(offset, offset + limit);
+    let paged = activities.slice(offset, offset + limit);
+
+    if (!revealFinancial) {
+      const noAmountLabel = {
+        transfer_processed: "Transfer processed",
+        ngn_deposit_received: "NGN deposit received",
+        ngn_payout_processed: "NGN payout recorded",
+        crypto_deposit_received: "Crypto deposit received",
+        crypto_payout_processed: "Crypto payout processed",
+        overdraft_requested: "Overdraft request submitted",
+      };
+      paged = paged.map((a) => ({
+        ...a,
+        description: noAmountLabel[a.type] ?? a.description,
+      }));
+    }
 
     return { count: total, rows: paged };
   }

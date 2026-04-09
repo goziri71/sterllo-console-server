@@ -6,7 +6,7 @@ export const register = async (request, reply) => {
   if (!request.body || Object.keys(request.body).length === 0) {
     throw new ErrorClass("Request body is required", 400);
   }
-  const { email, password, first_name, last_name, role } = request.body;
+  const { email, password, first_name, last_name } = request.body;
 
   // Validation
   const missingFields = [];
@@ -28,7 +28,6 @@ export const register = async (request, reply) => {
     password,
     first_name,
     last_name,
-    role,
   });
 
   return reply.code(201).send({
@@ -84,7 +83,7 @@ export const changePassword = async (request, reply) => {
   }
 
   const result = await authService.changePassword({
-    userId: request.user.id,
+    userKey: request.user.user_key,
     currentPassword: current_password,
     newPassword: new_password,
   });

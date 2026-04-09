@@ -1,9 +1,9 @@
 import { getWalletPage } from "../../controllers/wallets.js";
-import { authenticate, authorize } from "../../middleware/auth.js";
-import { ALL_ROLES } from "../../config/roles.js";
+import { authenticate, requirePermission } from "../../middleware/auth.js";
+import { PERMISSIONS } from "../../config/permissions.js";
 
 export default async function walletsRoutes(fastify) {
   fastify.addHook("preHandler", authenticate);
 
-  fastify.get("/page", { preHandler: authorize(...ALL_ROLES) }, getWalletPage);
+  fastify.get("/page", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getWalletPage);
 }

@@ -7,24 +7,22 @@ import {
   getCryptoAssets,
   getDepositMethods,
 } from "../../controllers/config.js";
-import { authenticate, authorize } from "../../middleware/auth.js";
-import { ALL_ROLES, ROLES } from "../../config/roles.js";
+import { authenticate, requirePermission } from "../../middleware/auth.js";
+import { PERMISSIONS } from "../../config/permissions.js";
 
 export default async function configRoutes(fastify) {
   fastify.addHook("preHandler", authenticate);
 
-  // Read-only config routes (all roles)
-  fastify.get("/currencies", { preHandler: authorize(...ALL_ROLES) }, getCurrencies);
-  fastify.get("/vats", { preHandler: authorize(...ALL_ROLES) }, getVATs);
-  fastify.get("/customer-tiers", { preHandler: authorize(...ALL_ROLES) }, getCustomerTiers);
-  fastify.get("/financial-institutions", { preHandler: authorize(...ALL_ROLES) }, getFinancialInstitutions);
-  fastify.get("/crypto-assets", { preHandler: authorize(...ALL_ROLES) }, getCryptoAssets);
-  fastify.get("/deposit-methods", { preHandler: authorize(...ALL_ROLES) }, getDepositMethods);
+  fastify.get("/currencies", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getCurrencies);
+  fastify.get("/vats", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getVATs);
+  fastify.get("/customer-tiers", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getCustomerTiers);
+  fastify.get("/financial-institutions", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getFinancialInstitutions);
+  fastify.get("/crypto-assets", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getCryptoAssets);
+  fastify.get("/deposit-methods", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getDepositMethods);
 
-  // Whitelisted IPs (operations + compliance only)
   fastify.get(
     "/whitelisted-ips",
-    { preHandler: authorize(ROLES.OPERATIONS, ROLES.COMPLIANCE) },
-    getWhitelistedIPs
+    { preHandler: requirePermission(PERMISSIONS.CONFIG_WHITELIST_UPDATE) },
+    getWhitelistedIPs,
   );
 }

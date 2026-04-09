@@ -3,13 +3,13 @@ import {
   getSettlementBatches,
   getSettlementBatch,
 } from "../../controllers/settlements.js";
-import { authenticate, authorize } from "../../middleware/auth.js";
-import { ALL_ROLES } from "../../config/roles.js";
+import { authenticate, requirePermission } from "../../middleware/auth.js";
+import { PERMISSIONS } from "../../config/permissions.js";
 
 export default async function settlementRoutes(fastify) {
   fastify.addHook("preHandler", authenticate);
 
-  fastify.get("/summary", { preHandler: authorize(...ALL_ROLES) }, getSettlementSummary);
-  fastify.get("/batches", { preHandler: authorize(...ALL_ROLES) }, getSettlementBatches);
-  fastify.get("/batches/:batch_id", { preHandler: authorize(...ALL_ROLES) }, getSettlementBatch);
+  fastify.get("/summary", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getSettlementSummary);
+  fastify.get("/batches", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getSettlementBatches);
+  fastify.get("/batches/:batch_id", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getSettlementBatch);
 }

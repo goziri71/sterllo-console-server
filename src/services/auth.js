@@ -5,7 +5,8 @@ import { authDb } from "../db/index.js";
 import { users } from "../db/schema/users.js";
 import { ErrorClass } from "../utils/errorClass/index.js";
 import { generateToken } from "../utils/jwt/index.js";
-import { clearUserCache } from "../middleware/auth.js";
+import { clearUserCache } from "../utils/userCache.js";
+import { loadUserAccess } from "./rbac.js";
 
 const SALT_ROUNDS = 6;
 
@@ -19,7 +20,7 @@ export default class AuthService {
     return safeUser;
   }
 
-  async register({ email, password, first_name, last_name, role }) {
+  async register({ email, password, first_name, last_name }) {
     const [existingUser] = await authDb
       .select()
       .from(users)
@@ -38,7 +39,7 @@ export default class AuthService {
       password: hashedPassword,
       first_name,
       last_name,
-      role: role || "user",
+      role: null,
       date_created: new Date(),
     };
 
@@ -51,11 +52,12 @@ export default class AuthService {
       .where(eq(users.id, insertId))
       .limit(1);
 
+    const access = await loadUserAccess(newUser.id);
     const token = generateToken({
       id: newUser.id,
       user_key: newUser.user_key,
-      role: newUser.role,
       token_version: newUser.token_version,
+      roles: access.roleSlugs,
     });
 
     return {
@@ -103,11 +105,12 @@ export default class AuthService {
 
     clearUserCache(user.user_key);
 
+    const access = await loadUserAccess(user.id);
     const token = generateToken({
       id: user.id,
       user_key: user.user_key,
-      role: user.role,
       token_version: newTokenVersion,
+      roles: access.roleSlugs,
     });
 
     return {
@@ -197,6 +200,11 @@ export default class AuthService {
       throw new ErrorClass("User not found", 404);
     }
 
-    return this._sanitizeUser(user);
+    const access = await loadUserAccess(userId);
+    return {
+      ...this._sanitizeUser(user),
+      roles: access.roleSlugs,
+      permissions: [...access.permissionKeys],
+    };
   }
 }

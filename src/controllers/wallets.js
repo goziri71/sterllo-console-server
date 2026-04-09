@@ -1,10 +1,12 @@
 import WalletService from "../services/wallets.js";
 import { parsePagination, paginatedResponse } from "../utils/pagination/index.js";
+import { userCanReadFinancial } from "../utils/financialAccess.js";
 
 const walletService = new WalletService();
 
 export const getWalletPage = async (request, reply) => {
   const { page, limit, offset } = parsePagination(request.query);
+  const revealFinancial = userCanReadFinancial(request.user);
   const data = await walletService.getWalletPage({
     ownerType: request.query.owner_type,
     ownerKey: request.query.owner_key,
@@ -13,6 +15,7 @@ export const getWalletPage = async (request, reply) => {
     search: request.query.search,
     currencyCode: request.query.currency_code,
     status: request.query.status,
+    revealFinancial,
   });
 
   return reply.code(200).send({
@@ -26,7 +29,12 @@ export const getWalletPage = async (request, reply) => {
 
 export const getMerchantWallets = async (request, reply) => {
   const { page, limit, offset } = parsePagination(request.query);
-  const data = await walletService.getMerchantWallets(request.params.account_key, { limit, offset });
+  const revealFinancial = userCanReadFinancial(request.user);
+  const data = await walletService.getMerchantWallets(request.params.account_key, {
+    limit,
+    offset,
+    revealFinancial,
+  });
 
   return reply.code(200).send({
     code: 200,
@@ -37,9 +45,11 @@ export const getMerchantWallets = async (request, reply) => {
 };
 
 export const getMerchantWallet = async (request, reply) => {
+  const revealFinancial = userCanReadFinancial(request.user);
   const wallet = await walletService.getMerchantWallet(
     request.params.account_key,
-    request.params.wallet_key
+    request.params.wallet_key,
+    revealFinancial,
   );
 
   return reply.code(200).send({

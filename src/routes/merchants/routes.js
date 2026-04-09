@@ -9,25 +9,22 @@ import {
 import { getMerchantCustomers } from "../../controllers/customers.js";
 import { getMerchantWallets, getMerchantWallet } from "../../controllers/wallets.js";
 import { getMerchantFees } from "../../controllers/fees.js";
-import { authenticate, authorize } from "../../middleware/auth.js";
-import { ALL_ROLES, MERCHANT_UPDATE_ROLES } from "../../config/roles.js";
+import { authenticate, requirePermission } from "../../middleware/auth.js";
+import { PERMISSIONS } from "../../config/permissions.js";
 
 export default async function merchantRoutes(fastify) {
   fastify.addHook("preHandler", authenticate);
 
-  // Stats must be registered before /:account_key to avoid route conflict
-  fastify.get("/stats", { preHandler: authorize(...ALL_ROLES) }, getMerchantStats);
+  fastify.get("/stats", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getMerchantStats);
 
-  // Read routes (all roles)
-  fastify.get("/", { preHandler: authorize(...ALL_ROLES) }, getAllMerchants);
-  fastify.get("/:account_key", { preHandler: authorize(...ALL_ROLES) }, getMerchant);
-  fastify.get("/:account_key/customers", { preHandler: authorize(...ALL_ROLES) }, getMerchantCustomers);
-  fastify.get("/:account_key/ledgers", { preHandler: authorize(...ALL_ROLES) }, getMerchantLedgers);
-  fastify.get("/:account_key/settlements", { preHandler: authorize(...ALL_ROLES) }, getMerchantSettlements);
-  fastify.get("/:account_key/wallets", { preHandler: authorize(...ALL_ROLES) }, getMerchantWallets);
-  fastify.get("/:account_key/wallets/:wallet_key", { preHandler: authorize(...ALL_ROLES) }, getMerchantWallet);
-  fastify.get("/:account_key/fees", { preHandler: authorize(...ALL_ROLES) }, getMerchantFees);
+  fastify.get("/", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getAllMerchants);
+  fastify.get("/:account_key", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getMerchant);
+  fastify.get("/:account_key/customers", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getMerchantCustomers);
+  fastify.get("/:account_key/ledgers", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getMerchantLedgers);
+  fastify.get("/:account_key/settlements", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getMerchantSettlements);
+  fastify.get("/:account_key/wallets", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getMerchantWallets);
+  fastify.get("/:account_key/wallets/:wallet_key", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getMerchantWallet);
+  fastify.get("/:account_key/fees", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getMerchantFees);
 
-  // Update routes (operations + compliance only)
-  fastify.patch("/:account_key", { preHandler: authorize(...MERCHANT_UPDATE_ROLES) }, updateMerchant);
+  fastify.patch("/:account_key", { preHandler: requirePermission(PERMISSIONS.MERCHANT_UPDATE) }, updateMerchant);
 }

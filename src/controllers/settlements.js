@@ -1,5 +1,6 @@
 import SettlementService from "../services/settlements.js";
 import { parsePagination, paginatedResponse } from "../utils/pagination/index.js";
+import { userCanReadFinancial, redactFinancialDeep } from "../utils/financialAccess.js";
 
 const settlementService = new SettlementService();
 
@@ -15,7 +16,8 @@ function extractFilters(query) {
 }
 
 export const getSettlementSummary = async (request, reply) => {
-  const data = await settlementService.getSummary(extractFilters(request.query));
+  const raw = await settlementService.getSummary(extractFilters(request.query));
+  const data = userCanReadFinancial(request.user) ? raw : redactFinancialDeep(raw);
   return reply.code(200).send({
     code: 200,
     success: true,
@@ -26,11 +28,14 @@ export const getSettlementSummary = async (request, reply) => {
 
 export const getSettlementBatches = async (request, reply) => {
   const { page, limit, offset } = parsePagination(request.query);
-  const data = await settlementService.getBatches({
+  const raw = await settlementService.getBatches({
     limit,
     offset,
     filters: extractFilters(request.query),
   });
+  const data = userCanReadFinancial(request.user)
+    ? raw
+    : { ...raw, rows: raw.rows.map((row) => redactFinancialDeep(row)) };
 
   return reply.code(200).send({
     code: 200,
@@ -41,7 +46,8 @@ export const getSettlementBatches = async (request, reply) => {
 };
 
 export const getSettlementBatch = async (request, reply) => {
-  const data = await settlementService.getBatch(request.params.batch_id);
+  const raw = await settlementService.getBatch(request.params.batch_id);
+  const data = userCanReadFinancial(request.user) ? raw : redactFinancialDeep(raw);
   return reply.code(200).send({
     code: 200,
     success: true,
