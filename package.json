@@ -15,7 +15,9 @@
     "db:migrate": "npx drizzle-kit migrate",
     "db:introspect": "npx drizzle-kit introspect",
     "db:check": "npx drizzle-kit check",
-    "migrate:auth-rbac": "node scripts/run-auth-rbac-migration.js"
+    "migrate:auth-rbac": "node scripts/run-auth-rbac-migration.js",
+    "inspect:user-rbac": "node scripts/inspect-user-rbac.js",
+    "set:user-management-only": "node scripts/set-user-management-only.js"
   },
   "dependencies": {
     "@fastify/cors": "^11.2.0",
