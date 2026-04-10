@@ -59,6 +59,28 @@ Legacy column **`Users.role`** is **not** used for authorization anymore; only *
 
 ---
 
-## 6. Related docs
+## 6. Listing team members (console users)
+
+There was no “directory” before because the product only needed **assign role** by `user_key`. To show a **team list**, call:
+
+**GET** `{API_PREFIX}/rbac/users` (requires `*` or `rbac.manage`, same as other `/rbac` routes)
+
+Query parameters:
+
+| Param | Meaning |
+|--------|---------|
+| `page`, `limit` | Pagination (same as elsewhere; default page 1, limit 20, max 100). |
+| `search` | Optional. Matches **email**, **first_name**, or **last_name** (substring). |
+| `role_slug` | Optional. Only users who have this role (e.g. `management`, `finance`). |
+
+Response envelope: `{ code: 2000, state: true, message, data: { records: [...], pagination: { ... } } }`.
+
+Each **record** includes: `id`, `email`, `user_key`, `first_name`, `last_name`, `date_created`, `last_login`, **`roles`** (array of `{ slug, label }`). Passwords are never returned.
+
+Use `user_key` from a row when calling **POST** `/rbac/users/:userKey/roles`.
+
+---
+
+## 7. Related docs
 
 - [frontend-financial-read.md](./frontend-financial-read.md) — profile fields, `financial.read`, redaction, RBAC API table.

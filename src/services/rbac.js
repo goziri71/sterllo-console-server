@@ -92,6 +92,86 @@ export default class RbacService {
     return out;
   }
 
+  /**
+   * List auth DB users with assigned roles (for team / RBAC admin UIs).
+   * @param {{ limit: number, offset: number, search?: string, role_slug?: string }} opts
+   */
+  async listUsers({ limit, offset, search, role_slug: roleSlug }) {
+    const params = [];
+    const whereClauses = [];
+
+    const searchTerm = search ? String(search).trim() : "";
+    if (searchTerm) {
+      const pattern = `%${searchTerm}%`;
+      params.push(pattern, pattern, pattern);
+      whereClauses.push("(u.email LIKE ? OR u.first_name LIKE ? OR u.last_name LIKE ?)");
+    }
+
+    const slug = roleSlug ? String(roleSlug).trim().toLowerCase() : "";
+    if (slug) {
+      if (!SLUG_RE.test(slug)) {
+        throw new ErrorClass("role_slug must be a valid role slug", 400);
+      }
+      params.push(slug);
+      whereClauses.push(`EXISTS (
+        SELECT 1 FROM rbac_user_roles ur
+        INNER JOIN rbac_roles r ON r.id = ur.role_id
+        WHERE ur.user_id = u.id AND r.slug = ?
+      )`);
+    }
+
+    const whereSql = whereClauses.length > 0 ? whereClauses.join(" AND ") : "1=1";
+
+    const countSql = `SELECT COUNT(*) AS c FROM Users u WHERE ${whereSql}`;
+    const [countRows] = await authPool.execute(countSql, params);
+    const total = Number(countRows[0]?.c ?? 0);
+
+    const listParams = [...params, limit, offset];
+    const listSql = `
+      SELECT u.id, u.email, u.user_key, u.first_name, u.last_name, u.date_created, u.last_login
+      FROM Users u
+      WHERE ${whereSql}
+      ORDER BY u.date_created DESC
+      LIMIT ? OFFSET ?
+    `;
+    const [rows] = await authPool.execute(listSql, listParams);
+
+    const userIds = rows.map((r) => r.id);
+    if (userIds.length === 0) {
+      return { count: total, rows: [] };
+    }
+
+    const placeholders = userIds.map(() => "?").join(",");
+    const [roleRows] = await authPool.execute(
+      `SELECT ur.user_id, r.slug, r.label
+       FROM rbac_user_roles ur
+       INNER JOIN rbac_roles r ON r.id = ur.role_id
+       WHERE ur.user_id IN (${placeholders})
+       ORDER BY r.slug`,
+      userIds,
+    );
+
+    const rolesByUser = new Map();
+    for (const r of roleRows) {
+      const uid = r.user_id;
+      if (!rolesByUser.has(uid)) rolesByUser.set(uid, []);
+      rolesByUser.get(uid).push({ slug: r.slug, label: r.label });
+    }
+
+    const enriched = rows.map((u) => ({
+      id: u.id,
+      email: u.email,
+      user_key: u.user_key,
+      first_name: u.first_name,
+      last_name: u.last_name,
+      date_created: u.date_created,
+      last_login: u.last_login,
+      roles: rolesByUser.get(u.id) ?? [],
+    }));
+
+    return { count: total, rows: enriched };
+  }
+
   async createRole({ slug, label, permission_keys: permissionKeys }) {
     const s = String(slug || "").trim().toLowerCase();
     const l = String(label || "").trim();

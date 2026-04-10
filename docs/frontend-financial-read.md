@@ -112,6 +112,7 @@ Administrators need **`rbac.manage`** (or equivalent full access) to change role
 
 | Action | Method | Path | Body / notes |
 |--------|--------|------|----------------|
+| **List team (users)** | GET | `{API_PREFIX}/rbac/users` | Query: `page`, `limit`, optional `search`, optional `role_slug`. Returns users with `roles[]`; use `user_key` for assign below. |
 | List permissions | GET | `{API_PREFIX}/rbac/permissions` | Includes `financial.read` with description. |
 | List roles + their keys | GET | `{API_PREFIX}/rbac/roles` | Each role has `permission_keys`. |
 | Create role | POST | `{API_PREFIX}/rbac/roles` | `slug`, `label`, `permission_keys: string[]`. |

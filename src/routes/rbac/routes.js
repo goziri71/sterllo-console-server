@@ -1,4 +1,5 @@
 import {
+  listUsers,
   listPermissions,
   listRoles,
   createRole,
@@ -11,6 +12,7 @@ import { authenticate, requireRbacManage } from "../../middleware/auth.js";
 export default async function rbacRoutes(fastify) {
   const guard = { preHandler: [authenticate, requireRbacManage] };
 
+  fastify.get("/users", guard, listUsers);
   fastify.get("/permissions", guard, listPermissions);
   fastify.get("/roles", guard, listRoles);
   fastify.post("/roles", guard, createRole);
