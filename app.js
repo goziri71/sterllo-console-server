@@ -63,8 +63,15 @@ app.register(fjwt, {
   secret: env.JWT_SECRET,
   sign: { expiresIn: env.JWT_EXPIRES_IN },
 });
+// CORS before helmet. Must list DELETE + PATCH — default @fastify/cors only allows GET/HEAD/POST,
+// so assign/revoke role (DELETE) and PATCH role permissions failed from browsers with a CORS error.
+app.register(cors, {
+  origin: true,
+  methods: ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"],
+  allowedHeaders: ["Authorization", "Content-Type", "Accept"],
+  credentials: true,
+});
 app.register(helmet);
-app.register(cors);
 app.register(rateLimit, {
   // Permanent baseline limiter:
   // - Uses preHandler so CORS preflight OPTIONS is not throttled
