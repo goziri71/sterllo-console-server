@@ -115,7 +115,7 @@ Administrators need **`rbac.manage`** (or equivalent full access) to change role
 | List permissions | GET | `{API_PREFIX}/rbac/permissions` | Includes `financial.read` with description. |
 | List roles + their keys | GET | `{API_PREFIX}/rbac/roles` | Each role has `permission_keys`. |
 | Create role | POST | `{API_PREFIX}/rbac/roles` | `slug`, `label`, `permission_keys: string[]`. |
-| Replace role permissions | PATCH | `{API_PREFIX}/rbac/roles/:roleId/permissions` | JSON body: `{ "permission_keys": ["console.read", "financial.read", ...] }`. **`Content-Type: application/json`**. Only the **management** role is blocked from edits; other seeded roles (finance, operations, …) can be updated. |
+| Replace role permissions | PATCH | `{API_PREFIX}/rbac/roles/:roleId/permissions` | JSON body: `{ "permission_keys": ["console.read", "financial.read", ...] }`. **`Content-Type: application/json`**. For the **management** role, **`"*"` must stay in the array** or the API returns **400** (prevents locking all admins out). Other roles cannot include `*`. |
 | Assign role to user | POST | `{API_PREFIX}/rbac/users/:userKey/roles` | `role_slug`. |
 | Revoke role | DELETE | `{API_PREFIX}/rbac/users/:userKey/roles/:roleSlug` | |
 

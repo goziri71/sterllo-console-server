@@ -146,13 +146,22 @@ export default class RbacService {
     if (!role) {
       throw new ErrorClass("Role not found", 404);
     }
-    // Seeded department roles (is_system) are editable so admins can tune e.g. financial.read.
-    // Only the management role must stay immutable (always * in DB).
-    if (role.slug === ROLES.MANAGEMENT) {
-      throw new ErrorClass("The management role cannot be modified", 403);
-    }
 
     const keys = Array.isArray(permissionKeys) ? permissionKeys : [];
+
+    if (role.slug === ROLES.MANAGEMENT) {
+      if (!keys.includes("*")) {
+        throw new ErrorClass(
+          "The management role must always include the * (full access) permission. Your save was rejected so no admin loses access.",
+          400,
+        );
+      }
+      await this._replaceRolePermissions(id, keys);
+      const affected = await userIdsForRole(id);
+      await bumpTokenVersionForUserIds(affected);
+      return this._roleWithPermissions(id);
+    }
+
     if (keys.includes("*")) {
       throw new ErrorClass("The * permission cannot be assigned to custom roles", 400);
     }
