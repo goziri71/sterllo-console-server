@@ -1,4 +1,5 @@
 import RbacService from "../services/rbac.js";
+import { parsePagination, paginatedResponse } from "../utils/pagination/index.js";
 
 const rbacService = new RbacService();
 
@@ -9,6 +10,19 @@ const ok = (reply, data) =>
     message: "Successful.",
     data,
   });
+
+export const listUsers = async (request, reply) => {
+  const { page, limit, offset } = parsePagination(request.query);
+  const data = await rbacService.listUsers({
+    limit,
+    offset,
+    search: request.query.search,
+    role_slug: request.query.role_slug,
+  });
+  return ok(reply, {
+    ...paginatedResponse(data, page, limit),
+  });
+};
 
 export const listPermissions = async (request, reply) => {
   const rows = await rbacService.listPermissions();
