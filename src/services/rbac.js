@@ -13,6 +13,14 @@ import { clearUserCache } from "../utils/userCache.js";
 
 const SLUG_RE = /^[a-z][a-z0-9_]{1,63}$/;
 
+/** mysql2 / MySQL 8 may return BIGINT as bigint; JSON cannot serialize BigInt (causes 500). */
+function num(v) {
+  if (v == null) return v;
+  if (typeof v === "bigint") return Number(v);
+  const n = Number(v);
+  return Number.isFinite(n) ? n : v;
+}
+
 export async function loadUserAccess(userId) {
   const userRoleRows = await authDb
     .select({ slug: rbacRoles.slug, roleId: rbacRoles.id })
@@ -124,7 +132,7 @@ export default class RbacService {
 
     const countSql = `SELECT COUNT(*) AS c FROM Users u WHERE ${whereSql}`;
     const [countRows] = await authPool.execute(countSql, params);
-    const total = Number(countRows[0]?.c ?? 0);
+    const total = num(countRows[0]?.c ?? 0);
 
     const listParams = [...params, limit, offset];
     const listSql = `
@@ -153,21 +161,24 @@ export default class RbacService {
 
     const rolesByUser = new Map();
     for (const r of roleRows) {
-      const uid = r.user_id;
+      const uid = num(r.user_id);
       if (!rolesByUser.has(uid)) rolesByUser.set(uid, []);
       rolesByUser.get(uid).push({ slug: r.slug, label: r.label });
     }
 
-    const enriched = rows.map((u) => ({
-      id: u.id,
-      email: u.email,
-      user_key: u.user_key,
-      first_name: u.first_name,
-      last_name: u.last_name,
-      date_created: u.date_created,
-      last_login: u.last_login,
-      roles: rolesByUser.get(u.id) ?? [],
-    }));
+    const enriched = rows.map((u) => {
+      const id = num(u.id);
+      return {
+        id,
+        email: u.email,
+        user_key: u.user_key,
+        first_name: u.first_name,
+        last_name: u.last_name,
+        date_created: u.date_created,
+        last_login: u.last_login,
+        roles: rolesByUser.get(id) ?? [],
+      };
+    });
 
     return { count: total, rows: enriched };
   }
