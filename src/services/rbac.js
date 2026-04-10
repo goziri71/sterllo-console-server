@@ -8,6 +8,7 @@ import {
   rbacUserRoles,
 } from "../db/schema/authRbac.js";
 import { ErrorClass } from "../utils/errorClass/index.js";
+import { ROLES } from "../config/roles.js";
 import { clearUserCache } from "../utils/userCache.js";
 
 const SLUG_RE = /^[a-z][a-z0-9_]{1,63}$/;
@@ -145,8 +146,10 @@ export default class RbacService {
     if (!role) {
       throw new ErrorClass("Role not found", 404);
     }
-    if (role.is_system === 1) {
-      throw new ErrorClass("System roles cannot be modified", 403);
+    // Seeded department roles (is_system) are editable so admins can tune e.g. financial.read.
+    // Only the management role must stay immutable (always * in DB).
+    if (role.slug === ROLES.MANAGEMENT) {
+      throw new ErrorClass("The management role cannot be modified", 403);
     }
 
     const keys = Array.isArray(permissionKeys) ? permissionKeys : [];
