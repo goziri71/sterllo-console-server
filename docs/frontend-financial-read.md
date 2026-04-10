@@ -67,6 +67,7 @@ export function canManageRbac(permissions: string[] | undefined | null): boolean
 | **Stale session** | Log out and log in again; after role changes, `token_version` may invalidate old tokens. |
 | **Production DB never migrated / user not linked** | On the **auth** DB used in production, run `npm run migrate:auth-rbac` and/or `npm run set:user-management-only -- user@email.com`, or assign roles via API using another admin. |
 | **Different API URL** | Admin UI must call the **same** base URL / `{API_PREFIX}` as the console API that owns the `Users` + `rbac_*` tables. |
+| **Browser “CORS error” on DELETE / PATCH only** | The API must allow those methods in CORS (see `app.js` `@fastify/cors` `methods`). Default CORS often omits **DELETE** and **PATCH**, which breaks revoke role and save role permissions. |
 
 ---
 
@@ -106,21 +107,52 @@ Use `canReadFinancial(user.permissions)` to:
 
 ## 2. How management grants access
 
-Administrators need **`rbac.manage`** (or equivalent full access) to change roles.
+You need **`*`** or **`rbac.manage`** on your own user (via login/profile `permissions`) or every RBAC call returns **403**.
 
-**API prefix:** `{API_PREFIX}` is the versioned root used by the app (see `API_VERSION` in `src/services/centralizedversion.js`, e.g. `/1.202602.0`).
+There are **two different ways** to “give access” — do not mix them up:
+
+### A) Give a **person** a role (e.g. “make this user Finance”)
+
+Use the **user’s `user_key`** from `GET /rbac/users` or profile.
+
+- **POST** `{API_PREFIX}/rbac/users/:userKey/roles`  
+- Body: `{ "role_slug": "finance" }` — **snake_case** `role_slug`, not `roleSlug`.
+
+This does **not** use `PATCH …/roles/:id/permissions`. It only links that user to an existing role.
+
+### B) Change what a **role** is allowed to do (affects everyone with that role)
+
+- **PATCH** `{API_PREFIX}/rbac/roles/:roleId/permissions`  
+- Body: `{ "permission_keys": ["console.read", "financial.read", ...] }` — **must** be the key **`permission_keys`** (snake_case). If the frontend sends `permissionKeys` (camelCase), the server sees **no keys** and the save can **fail** (e.g. empty list, or management role missing `*`).
+
+Rules:
+
+- **`management` role:** the list **must include `"*"`**. If you remove `*`, the API returns **400** on purpose.
+- **Any other role:** `*` is **not** allowed — only real keys like `console.read`, `financial.read`, `rbac.manage`, etc.
+
+### If “give access” fails — check this first
+
+| Symptom | Likely cause |
+|--------|----------------|
+| **403** on any `/rbac/...` | Your logged-in user does not have `*` or `rbac.manage`. Fix roles in DB or use another admin. |
+| **400** when saving a role | Wrong JSON keys (`permissionKeys` instead of `permission_keys`), or **management** row without `"*"`, or a permission string that does not exist in `GET /rbac/permissions`. |
+| **400** when assigning user | Body must be `{ "role_slug": "finance" }` with a real slug from `GET /rbac/roles`. |
+
+---
+
+**API prefix:** `{API_PREFIX}` — see `API_VERSION` in `src/services/centralizedversion.js` (e.g. `/1.202602.0`).
 
 | Action | Method | Path | Body / notes |
 |--------|--------|------|----------------|
-| **List team (users)** | GET | `{API_PREFIX}/rbac/users` | Query: `page`, `limit`, optional `search`, optional `role_slug`. Returns users with `roles[]`; use `user_key` for assign below. |
-| List permissions | GET | `{API_PREFIX}/rbac/permissions` | Includes `financial.read` with description. |
-| List roles + their keys | GET | `{API_PREFIX}/rbac/roles` | Each role has `permission_keys`. |
-| Create role | POST | `{API_PREFIX}/rbac/roles` | `slug`, `label`, `permission_keys: string[]`. |
-| Replace role permissions | PATCH | `{API_PREFIX}/rbac/roles/:roleId/permissions` | JSON body: `{ "permission_keys": ["console.read", "financial.read", ...] }`. **`Content-Type: application/json`**. For the **management** role, **`"*"` must stay in the array** or the API returns **400** (prevents locking all admins out). Other roles cannot include `*`. |
-| Assign role to user | POST | `{API_PREFIX}/rbac/users/:userKey/roles` | `role_slug`. |
+| **List team (users)** | GET | `{API_PREFIX}/rbac/users` | Query: `page`, `limit`, optional `search`, optional `role_slug`. |
+| List permissions | GET | `{API_PREFIX}/rbac/permissions` | Valid strings for `permission_keys`. |
+| List roles + their keys | GET | `{API_PREFIX}/rbac/roles` | Each role has `id`, `slug`, `permission_keys`. |
+| Create role | POST | `{API_PREFIX}/rbac/roles` | `slug`, `label`, `permission_keys` (snake_case). |
+| Replace role permissions | PATCH | `{API_PREFIX}/rbac/roles/:roleId/permissions` | `{ "permission_keys": [...] }` only. |
+| Assign role to user | POST | `{API_PREFIX}/rbac/users/:userKey/roles` | `{ "role_slug": "finance" }` — **different** from PATCH above. |
 | Revoke role | DELETE | `{API_PREFIX}/rbac/users/:userKey/roles/:roleSlug` | |
 
-Seeded roles that receive `financial.read` after migration `002` include finance/operations-related roles; **custom roles** need `financial.read` added explicitly if they should see money.
+Seeded roles may already include `financial.read` after migration `002`; **custom roles** need `financial.read` added in **B** if they should see money.
 
 ---
 
