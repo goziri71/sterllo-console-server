@@ -24,6 +24,24 @@ function startOfLastMonth() {
   return new Date(now.getFullYear(), now.getMonth() - 1, 1);
 }
 
+/** Normalize MerchantLedgers.environment to response `type`: "baas" | "saas" | null */
+function merchantTypeFromEnvironments(environmentsCsv) {
+  if (!environmentsCsv || typeof environmentsCsv !== "string") return null;
+  const parts = [
+    ...new Set(
+      environmentsCsv
+        .split(",")
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean),
+    ),
+  ];
+  if (parts.length === 0) return null;
+  if (parts.length === 1) return parts[0];
+  if (parts.includes("baas")) return "baas";
+  if (parts.includes("saas")) return "saas";
+  return parts[0];
+}
+
 async function enrichWithCounts(rows) {
   if (rows.length === 0) return rows;
 
@@ -34,7 +52,7 @@ async function enrichWithCounts(rows) {
       sql`SELECT account_key, COUNT(*) as customer_count FROM Customers WHERE account_key IN (${sql.join(accountKeys.map((k) => sql`${k}`), sql`,`)}) GROUP BY account_key`,
     ),
     db.execute(
-      sql`SELECT account_key, COUNT(*) as ledger_count, GROUP_CONCAT(DISTINCT currency_code) as currencies FROM MerchantLedgers WHERE account_key IN (${sql.join(accountKeys.map((k) => sql`${k}`), sql`,`)}) GROUP BY account_key`,
+      sql`SELECT account_key, COUNT(*) as ledger_count, GROUP_CONCAT(DISTINCT currency_code) as currencies, GROUP_CONCAT(DISTINCT NULLIF(TRIM(LOWER(environment)), '')) as environments FROM MerchantLedgers WHERE account_key IN (${sql.join(accountKeys.map((k) => sql`${k}`), sql`,`)}) GROUP BY account_key`,
     ),
     db.execute(
       sql`SELECT account_key, COUNT(*) as settlement_count FROM SettlementLedgers WHERE account_key IN (${sql.join(accountKeys.map((k) => sql`${k}`), sql`,`)}) GROUP BY account_key`,
@@ -53,6 +71,7 @@ async function enrichWithCounts(rows) {
     ledgMap.set(l.account_key, {
       ledger_count: Number(l.ledger_count),
       currencies: l.currencies ? l.currencies.split(",") : [],
+      type: merchantTypeFromEnvironments(l.environments),
     });
   }
 
@@ -64,6 +83,7 @@ async function enrichWithCounts(rows) {
     customer_count: custMap.get(row.account_key) ?? 0,
     ledger_count: ledgMap.get(row.account_key)?.ledger_count ?? 0,
     currencies: ledgMap.get(row.account_key)?.currencies ?? [],
+    type: ledgMap.get(row.account_key)?.type ?? null,
     settlement_count: settMap.get(row.account_key) ?? 0,
   }));
 }
