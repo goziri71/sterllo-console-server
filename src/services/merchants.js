@@ -1,7 +1,8 @@
-import { eq, and, desc, asc, count, gte, lt, sql } from "drizzle-orm";
+import { eq, and, desc, asc, count, ne, or, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { merchants, merchantLedgers, settlementLedgers } from "../db/schema/merchants.js";
 import { customers } from "../db/schema/customers.js";
+import { kycs } from "../db/schema/kycs.js";
 import { ErrorClass } from "../utils/errorClass/index.js";
 
 const SORTABLE_COLUMNS = {
@@ -13,15 +14,6 @@ const SORTABLE_COLUMNS = {
 function buildOrderBy(sortBy, order) {
   const column = SORTABLE_COLUMNS[sortBy] || merchants.date_created;
   return order === "asc" ? asc(column) : desc(column);
-}
-
-function startOfMonth(date = new Date()) {
-  return new Date(date.getFullYear(), date.getMonth(), 1);
-}
-
-function startOfLastMonth() {
-  const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth() - 1, 1);
 }
 
 /** Normalize combined environment strings to response `type`: "baas" | "saas" | null */
@@ -152,43 +144,26 @@ export default class MerchantService {
   }
 
   async getStats() {
-    const thisMonth = startOfMonth();
-    const lastMonth = startOfLastMonth();
-
     const [
-      [{ total: totalAll }],
+      [{ total: totalMerchants }],
       [{ total: totalCustomers }],
-      [{ total: totalLedgers }],
-      [{ total: totalSettlements }],
-      [{ total: newThisMonth }],
-      [{ total: newLastMonth }],
+      [{ total: kycPending }],
+      [{ total: restrictedAccounts }],
     ] = await Promise.all([
       db.select({ total: count() }).from(merchants),
       db.select({ total: count() }).from(customers),
-      db.select({ total: count() }).from(merchantLedgers),
-      db.select({ total: count() }).from(settlementLedgers),
-      db.select({ total: count() }).from(merchants).where(gte(merchants.date_created, thisMonth)),
-      db.select({ total: count() }).from(merchants)
-        .where(and(gte(merchants.date_created, lastMonth), lt(merchants.date_created, thisMonth))),
+      db.select({ total: count() }).from(kycs).where(ne(kycs.is_compliant, "Y")),
+      db
+        .select({ total: count() })
+        .from(customers)
+        .where(or(eq(customers.is_pnd, "Y"), eq(customers.is_pnc, "Y"))),
     ]);
 
-    function pctChange(current, previous) {
-      const cur = Number(current);
-      const prev = Number(previous);
-      if (prev === 0) return cur > 0 ? 100 : 0;
-      return Math.round(((cur - prev) / prev) * 100);
-    }
-
     return {
-      total_merchants: {
-        count: Number(totalAll),
-        new_this_month: Number(newThisMonth),
-        new_last_month: Number(newLastMonth),
-        change_pct: pctChange(newThisMonth, newLastMonth),
-      },
+      total_merchants: Number(totalMerchants),
       total_customers: Number(totalCustomers),
-      total_ledgers: Number(totalLedgers),
-      total_settlements: Number(totalSettlements),
+      kyc_pending: Number(kycPending),
+      restricted_accounts: Number(restrictedAccounts),
     };
   }
 
