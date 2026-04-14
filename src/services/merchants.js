@@ -24,7 +24,7 @@ function startOfLastMonth() {
   return new Date(now.getFullYear(), now.getMonth() - 1, 1);
 }
 
-/** Normalize MerchantLedgers.environment to response `type`: "baas" | "saas" | null */
+/** Normalize combined environment strings to response `type`: "baas" | "saas" | null */
 function merchantTypeFromEnvironments(environmentsCsv) {
   if (!environmentsCsv || typeof environmentsCsv !== "string") return null;
   const parts = [
@@ -42,26 +42,48 @@ function merchantTypeFromEnvironments(environmentsCsv) {
   return parts[0];
 }
 
+function mergeMerchantEnvironments(ledgerEnvsCsv, customerEnvsCsv) {
+  const merged = [ledgerEnvsCsv, customerEnvsCsv].filter(Boolean).join(",");
+  return merchantTypeFromEnvironments(merged || null);
+}
+
 async function enrichWithCounts(rows) {
   if (rows.length === 0) return rows;
 
   const accountKeys = rows.map((r) => r.account_key);
+  const accountKeyList = sql.join(accountKeys.map((k) => sql`${k}`), sql`,`);
 
-  const [customerCounts, ledgerCounts, settlementCounts] = await Promise.all([
+  const [customerCounts, ledgerCounts, settlementCounts, customerEnvCounts] = await Promise.all([
     db.execute(
-      sql`SELECT account_key, COUNT(*) as customer_count FROM Customers WHERE account_key IN (${sql.join(accountKeys.map((k) => sql`${k}`), sql`,`)}) GROUP BY account_key`,
+      sql`SELECT account_key, COUNT(*) as customer_count FROM Customers WHERE account_key IN (${accountKeyList}) GROUP BY account_key`,
     ),
     db.execute(
-      sql`SELECT account_key, COUNT(*) as ledger_count, GROUP_CONCAT(DISTINCT currency_code) as currencies, GROUP_CONCAT(DISTINCT NULLIF(TRIM(LOWER(environment)), '')) as environments FROM MerchantLedgers WHERE account_key IN (${sql.join(accountKeys.map((k) => sql`${k}`), sql`,`)}) GROUP BY account_key`,
+      sql`SELECT account_key, COUNT(*) as ledger_count, GROUP_CONCAT(DISTINCT currency_code) as currencies, GROUP_CONCAT(DISTINCT NULLIF(TRIM(LOWER(environment)), '')) as environments FROM MerchantLedgers WHERE account_key IN (${accountKeyList}) GROUP BY account_key`,
     ),
     db.execute(
-      sql`SELECT account_key, COUNT(*) as settlement_count FROM SettlementLedgers WHERE account_key IN (${sql.join(accountKeys.map((k) => sql`${k}`), sql`,`)}) GROUP BY account_key`,
+      sql`SELECT account_key, COUNT(*) as settlement_count FROM SettlementLedgers WHERE account_key IN (${accountKeyList}) GROUP BY account_key`,
     ),
+    db.execute(sql`
+      SELECT account_key, GROUP_CONCAT(DISTINCT env) AS environments
+      FROM (
+        SELECT account_key, NULLIF(TRIM(LOWER(environment)), '') AS env
+        FROM Customers
+        WHERE account_key IN (${accountKeyList})
+        UNION ALL
+        SELECT c.account_key, NULLIF(TRIM(LOWER(cw.environment)), '') AS env
+        FROM Customers c
+        INNER JOIN CustomerWallets cw ON cw.identifier = c.identifier
+        WHERE c.account_key IN (${accountKeyList})
+      ) x
+      WHERE env IS NOT NULL AND env <> ''
+      GROUP BY account_key
+    `),
   ]);
 
   const custRows = Array.isArray(customerCounts[0]) ? customerCounts[0] : customerCounts;
   const ledgRows = Array.isArray(ledgerCounts[0]) ? ledgerCounts[0] : ledgerCounts;
   const settRows = Array.isArray(settlementCounts[0]) ? settlementCounts[0] : settlementCounts;
+  const custEnvRows = Array.isArray(customerEnvCounts[0]) ? customerEnvCounts[0] : customerEnvCounts;
 
   const custMap = new Map();
   for (const c of custRows) custMap.set(c.account_key, Number(c.customer_count));
@@ -71,21 +93,28 @@ async function enrichWithCounts(rows) {
     ledgMap.set(l.account_key, {
       ledger_count: Number(l.ledger_count),
       currencies: l.currencies ? l.currencies.split(",") : [],
-      type: merchantTypeFromEnvironments(l.environments),
+      environments: l.environments,
     });
   }
+
+  const custEnvMap = new Map();
+  for (const e of custEnvRows) custEnvMap.set(e.account_key, e.environments);
 
   const settMap = new Map();
   for (const s of settRows) settMap.set(s.account_key, Number(s.settlement_count));
 
-  return rows.map((row) => ({
-    ...row,
-    customer_count: custMap.get(row.account_key) ?? 0,
-    ledger_count: ledgMap.get(row.account_key)?.ledger_count ?? 0,
-    currencies: ledgMap.get(row.account_key)?.currencies ?? [],
-    type: ledgMap.get(row.account_key)?.type ?? null,
-    settlement_count: settMap.get(row.account_key) ?? 0,
-  }));
+  return rows.map((row) => {
+    const ledgerPart = ledgMap.get(row.account_key);
+    const type = mergeMerchantEnvironments(ledgerPart?.environments, custEnvMap.get(row.account_key));
+    return {
+      ...row,
+      customer_count: custMap.get(row.account_key) ?? 0,
+      ledger_count: ledgerPart?.ledger_count ?? 0,
+      currencies: ledgerPart?.currencies ?? [],
+      type,
+      settlement_count: settMap.get(row.account_key) ?? 0,
+    };
+  });
 }
 
 export default class MerchantService {
