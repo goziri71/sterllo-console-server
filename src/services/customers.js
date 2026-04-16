@@ -102,6 +102,20 @@ export default class CustomerService {
     return enriched[0];
   }
 
+  async ensureCustomerBelongsToMerchant(identifier, accountKey) {
+    const [row] = await db
+      .select({ account_key: customers.account_key })
+      .from(customers)
+      .where(eq(customers.identifier, identifier))
+      .limit(1);
+    if (!row) {
+      throw new ErrorClass("Customer not found", 404);
+    }
+    if (row.account_key !== accountKey) {
+      throw new ErrorClass("Customer does not belong to this merchant", 400);
+    }
+  }
+
   async getByMerchant(accountKey, { limit, offset, sortBy, order }) {
     const [merchant] = await db
       .select()

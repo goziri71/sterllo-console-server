@@ -1,7 +1,13 @@
 import MerchantService from "../services/merchants.js";
+import CustomerService from "../services/customers.js";
+import TransactionService from "../services/transactions.js";
 import { parsePagination, paginatedResponse } from "../utils/pagination/index.js";
+import { userCanReadFinancial } from "../utils/financialAccess.js";
+import { ErrorClass } from "../utils/errorClass/index.js";
 
 const merchantService = new MerchantService();
+const customerService = new CustomerService();
+const transactionService = new TransactionService();
 
 export const getAllMerchants = async (request, reply) => {
   const { page, limit, offset } = parsePagination(request.query);
@@ -72,6 +78,41 @@ export const getMerchantSettlements = async (request, reply) => {
     code: 200,
     message: "Merchant settlements fetched successfully",
     success: true,
+    ...paginatedResponse(data, page, limit),
+  });
+};
+
+/**
+ * All transactions for a customer under this merchant (unified statement).
+ * Same payload as GET /api/v1/transactions/statement?identifier=&account_key=.
+ */
+export const getMerchantCustomerTransactions = async (request, reply) => {
+  if (!userCanReadFinancial(request.user)) {
+    throw new ErrorClass("Customer transactions require financial.read permission", 403);
+  }
+  const { account_key, identifier } = request.params;
+  await customerService.ensureCustomerBelongsToMerchant(identifier, account_key);
+
+  const { page, limit, offset } = parsePagination(request.query);
+  const data = await transactionService.getStatement({
+    limit,
+    offset,
+    filters: {
+      account_key,
+      identifier,
+      wallet_key: request.query.wallet_key,
+      status: request.query.status,
+      currency_code: request.query.currency_code,
+      search: request.query.search,
+      from_date: request.query.from_date,
+      to_date: request.query.to_date,
+    },
+  });
+
+  return reply.code(200).send({
+    code: 200,
+    success: true,
+    message: "Customer transactions fetched successfully",
     ...paginatedResponse(data, page, limit),
   });
 };

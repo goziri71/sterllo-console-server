@@ -5,6 +5,7 @@ import {
   updateMerchant,
   getMerchantLedgers,
   getMerchantSettlements,
+  getMerchantCustomerTransactions,
 } from "../../controllers/merchants.js";
 import { getMerchantCustomers } from "../../controllers/customers.js";
 import { getMerchantWallets, getMerchantWallet } from "../../controllers/wallets.js";
@@ -19,6 +20,11 @@ export default async function merchantRoutes(fastify) {
 
   fastify.get("/", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getAllMerchants);
   fastify.get("/:account_key", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getMerchant);
+  fastify.get(
+    "/:account_key/customers/:identifier/transactions",
+    { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) },
+    getMerchantCustomerTransactions,
+  );
   fastify.get("/:account_key/customers", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getMerchantCustomers);
   fastify.get("/:account_key/ledgers", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getMerchantLedgers);
   fastify.get("/:account_key/settlements", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getMerchantSettlements);

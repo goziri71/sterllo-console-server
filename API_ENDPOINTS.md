@@ -72,12 +72,21 @@ All routes require JWT + any role.
 | GET | `/api/v1/merchants/stats` | All | Merchant metric cards with month-over-month comparison |
 | GET | `/api/v1/merchants/:account_key` | All | Get single merchant (enriched) |
 | GET | `/api/v1/merchants/:account_key/customers` | All | Get merchant's customers |
+| GET | `/api/v1/merchants/:account_key/customers/:identifier/transactions` | All | All transactions for one customer under this merchant (unified statement; requires `financial.read`) |
 | GET | `/api/v1/merchants/:account_key/ledgers` | All | Get merchant's ledgers |
 | GET | `/api/v1/merchants/:account_key/settlements` | All | Get merchant's settlements |
 | GET | `/api/v1/merchants/:account_key/wallets` | All | Get merchant's wallets (enriched with NGN accounts + crypto addresses) |
 | GET | `/api/v1/merchants/:account_key/wallets/:wallet_key` | All | Get single merchant wallet (enriched) |
 | GET | `/api/v1/merchants/:account_key/fees` | All | Get merchant's BaaS fee schedule (custom + defaults) |
 | PATCH | `/api/v1/merchants/:account_key` | operations, compliance | Update merchant |
+
+### GET `/api/v1/merchants/:account_key/customers/:identifier/transactions`
+
+Returns the same unified transaction payload as `GET /api/v1/transactions/statement` with `identifier` and `account_key` set from the path. Confirms `Customers.identifier` belongs to `Customers.account_key = :account_key` before returning data.
+
+**Permission:** `financial.read` (same as the statement endpoint).
+
+**Query params:** Same as the **Transactions** section statement table (`page`, `limit`, `wallet_key`, `status`, `currency_code`, `search`, `from_date`, `to_date`).
 
 ### GET `/api/v1/merchants` — enriched list response
 
@@ -267,7 +276,7 @@ Use these together on the **merchant → customer detail** screen (profile heade
 | Wallet list + balances | `GET /api/v1/customers/:identifier/wallets` | `search`, `page`, `limit`. Balance fields require `financial.read`; otherwise they are redacted |
 | Selected wallet detail | `GET /api/v1/customers/:identifier/wallets/:wallet_key` | Same permission rules as list |
 | Service history / ledger (right-hand table) | `GET /api/v1/customers/:identifier/wallets/:wallet_key/ledger` | **Requires `financial.read`**. Query: `search`, `from_date`, `to_date`, `page`, `limit` |
-| Recent transactions (all wallets for this customer) | `GET /api/v1/transactions/statement` | **Requires `financial.read`**. Pass `identifier=<customer identifier>`; optional `account_key` must match that customer’s merchant |
+| Recent transactions (all wallets for this customer) | `GET /api/v1/transactions/statement` **or** `GET /api/v1/merchants/:account_key/customers/:identifier/transactions` | **Requires `financial.read`**. Statement: `identifier` + optional `account_key`. Merchant-scoped URL checks the customer belongs to `:account_key` then returns the same unified feed |
 | Disputes tab / count | `GET /api/v1/disputes` and/or `GET /api/v1/disputes/summary` | Pass `identifier=<customer identifier>` to scope to that customer’s wallets |
 
 #### `GET /api/v1/customers/:identifier/metrics`
@@ -913,3 +922,52 @@ Common status codes:
 | 409 | Conflict (e.g. duplicate email) |
 | 429 | Rate limited (100 req/15 min) |
 | 500 | Server error |
+
+---
+
+## Frontend handoff — new & changed APIs (merchant customer view)
+
+Use this section as a single checklist to share with the frontend team. All paths are under the same API base as the rest of this document (e.g. `/api/v1/...`). Every call below needs **`Authorization: Bearer <jwt>`** unless your deployment wraps versioning differently.
+
+### Permissions
+
+| Permission | Where it matters |
+|------------|------------------|
+| **`financial.read`** | Customer wallet **balances** on list/detail; **`GET .../wallets/.../ledger`**; **`GET /transactions/statement`**; **`GET /merchants/.../customers/.../transactions`**. Without it, balance fields are redacted or the call returns **403**. |
+| **`CONSOLE_READ`** (or equivalent JWT access) | All listed routes (standard dashboard read). |
+
+### Endpoints to wire (copy-paste reference)
+
+| What to build on the UI | Method | Path |
+|-------------------------|--------|------|
+| Summary cards (total wallets, sub-accounts, disputes) | `GET` | `/api/v1/customers/:identifier/metrics` |
+| Customer profile row | `GET` | `/api/v1/customers/:identifier` |
+| Wallet list (search + pagination + balances when allowed) | `GET` | `/api/v1/customers/:identifier/wallets` |
+| One wallet (balances when allowed) | `GET` | `/api/v1/customers/:identifier/wallets/:wallet_key` |
+| Service / ledger table for **selected** wallet | `GET` | `/api/v1/customers/:identifier/wallets/:wallet_key/ledger` |
+| **All** customer transactions (scoped by customer; optional filters) | `GET` | `/api/v1/transactions/statement` **or** merchant-scoped shortcut below |
+| Same “all transactions” but URL encodes merchant + customer | `GET` | `/api/v1/merchants/:account_key/customers/:identifier/transactions` |
+| Disputes list for that customer | `GET` | `/api/v1/disputes?identifier=:identifier&...` |
+| Dispute summary counts for that customer | `GET` | `/api/v1/disputes/summary?identifier=:identifier&...` |
+
+### Query parameters the frontend should pass
+
+| Endpoint | Params |
+|----------|--------|
+| `GET .../customers/:identifier/wallets` | `page`, `limit`, **`search`** (filters `wallet_key` / `wallet_id`) |
+| `GET .../wallets/:wallet_key/ledger` | `page`, `limit`, `search`, `from_date`, `to_date` |
+| `GET .../transactions/statement` | **`identifier`** (customer id), optional **`account_key`** (must match that customer’s merchant), plus `page`, `limit`, `wallet_key`, `status`, `currency_code`, `search`, `from_date`, `to_date` |
+| `GET .../merchants/:account_key/customers/:identifier/transactions` | Same as statement **except** `identifier` and `account_key` come from the path; still pass `page`, `limit`, filters as query string |
+| `GET .../disputes` and `.../disputes/summary` | **`identifier`** (customer id) to restrict to that customer’s wallet keys; existing filters still work (`account_key`, `status`, etc.) |
+
+### Response notes (high level)
+
+- **`GET .../metrics`** — JSON `data`: `{ "total_wallets", "sub_accounts", "disputes" }`.
+- **Customer wallets list / detail** — rows include `current_balance`, `balance_last_updated`, `balance_source` when the user has **`financial.read`**; otherwise those fields are redacted.
+- **Ledger** — paginated `records` (or your standard pagination shape): each line has `line_type`, `reference`, `service`, `currency_code`, `amount`, `opening_balance`, `closing_balance`, `status`, `date_created`.
+- **Statement / merchant customer transactions** — same shape as the existing unified statement (transaction types, amounts, dates, etc.).
+- **`GET .../merchants/.../customers/.../transactions`** — returns **404** if customer id is unknown, **400** if that customer is **not** under `:account_key`.
+
+### Optional (already documented elsewhere)
+
+- Unified wallet console UI can still use **`GET /api/v1/wallets/page`** with `owner_type=customer` and `owner_key=<identifier>` if you prefer one endpoint for wallet search/summary across owners.
