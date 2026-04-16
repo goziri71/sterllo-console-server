@@ -1,8 +1,9 @@
-import { eq, and, ne, or, desc, asc, count, sql, gte, lt } from "drizzle-orm";
+import { eq, and, ne, or, desc, asc, count, sql, gte, lt, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { customers, customerWallets } from "../db/schema/customers.js";
 import { merchants } from "../db/schema/merchants.js";
 import { kycs } from "../db/schema/kycs.js";
+import { transactionDisputes } from "../db/schema/disputes.js";
 import { ErrorClass } from "../utils/errorClass/index.js";
 
 const SORTABLE_COLUMNS = {
@@ -387,5 +388,43 @@ export default class CustomerService {
       db.select({ total: count() }).from(customerWallets).where(where),
     ]);
     return { count: Number(total), rows };
+  }
+
+  async getCustomerViewMetrics(identifier) {
+    const [customer] = await db
+      .select()
+      .from(customers)
+      .where(eq(customers.identifier, identifier))
+      .limit(1);
+
+    if (!customer) {
+      throw new ErrorClass("Customer not found", 404);
+    }
+
+    const walletRows = await db
+      .select({ wallet_key: customerWallets.wallet_key })
+      .from(customerWallets)
+      .where(eq(customerWallets.identifier, identifier));
+    const walletKeys = walletRows.map((w) => w.wallet_key).filter(Boolean);
+
+    const [{ total: subAccounts }] = await db
+      .select({ total: count() })
+      .from(customers)
+      .where(eq(customers.parent_identifier, identifier));
+
+    let disputeCount = 0;
+    if (walletKeys.length > 0) {
+      const [{ c }] = await db
+        .select({ c: count() })
+        .from(transactionDisputes)
+        .where(inArray(transactionDisputes.transaction_wallet_key, walletKeys));
+      disputeCount = Number(c || 0);
+    }
+
+    return {
+      total_wallets: walletKeys.length,
+      sub_accounts: Number(subAccounts || 0),
+      disputes: disputeCount,
+    };
   }
 }

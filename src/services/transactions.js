@@ -1,8 +1,10 @@
-import { eq, and, between, gte, lte, desc, count, sql } from "drizzle-orm";
+import { eq, and, or, between, gte, lte, desc, count, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { deposits, withdrawals, transfers, swaps } from "../db/schema/transactions.js";
 import { ngnDeposits, ngnPayouts } from "../db/schema/fiat.js";
 import { cryptoDeposits, cryptoPayouts } from "../db/schema/crypto.js";
+import { customers, customerWallets } from "../db/schema/customers.js";
+import { ErrorClass } from "../utils/errorClass/index.js";
 
 /**
  * Build an array of Drizzle conditions from common transaction filters.
@@ -128,6 +130,27 @@ async function enrichSwapRows(rows = []) {
       nameMap.get(row.target_to_wallet_key) ||
       null,
   }));
+}
+
+async function loadCustomerWalletKeySet(identifier) {
+  const rows = await db
+    .select({ wallet_key: customerWallets.wallet_key })
+    .from(customerWallets)
+    .where(eq(customerWallets.identifier, identifier));
+  return new Set(rows.map((r) => r.wallet_key));
+}
+
+function rowTouchesWalletKeys(row, keys) {
+  if (!keys || keys.size === 0) return false;
+  const ks = [row.wallet_key, row.counterpart_wallet_key, row.swap_wallet_key_3, row.swap_wallet_key_4];
+  return ks.some((k) => k && keys.has(k));
+}
+
+function rowTouchesSingleWallet(row, walletKey) {
+  if (!walletKey) return true;
+  return [row.wallet_key, row.counterpart_wallet_key, row.swap_wallet_key_3, row.swap_wallet_key_4].some(
+    (k) => k === walletKey,
+  );
 }
 
 export default class TransactionService {
@@ -298,6 +321,28 @@ export default class TransactionService {
     const searchTerm = filters.search ? String(filters.search).toLowerCase() : null;
     const currencyFilter = filters.currency_code ? String(filters.currency_code).toUpperCase() : null;
 
+    let customerWalletKeys = null;
+    if (filters.identifier) {
+      const [customer] = await db
+        .select()
+        .from(customers)
+        .where(eq(customers.identifier, filters.identifier))
+        .limit(1);
+      if (!customer) {
+        throw new ErrorClass("Customer not found", 404);
+      }
+      if (filters.account_key && customer.account_key !== filters.account_key) {
+        throw new ErrorClass("account_key does not match this customer", 400);
+      }
+      customerWalletKeys = await loadCustomerWalletKeySet(filters.identifier);
+      if (filters.wallet_key && !customerWalletKeys.has(filters.wallet_key)) {
+        throw new ErrorClass("wallet_key does not belong to this customer", 400);
+      }
+      if (customerWalletKeys.size === 0) {
+        return { count: 0, rows: [] };
+      }
+    }
+
     const [
       depRows,
       wdrRows,
@@ -313,6 +358,7 @@ export default class TransactionService {
         account_key: deposits.account_key,
         reference: deposits.source_reference,
         wallet_key: deposits.source_wallet_key,
+        counterpart_wallet_key: deposits.target_wallet_key,
         currency_code: deposits.currency_code,
         amount: deposits.amount,
         status: deposits.status,
@@ -323,6 +369,7 @@ export default class TransactionService {
         account_key: withdrawals.account_key,
         reference: withdrawals.source_reference,
         wallet_key: withdrawals.source_wallet_key,
+        counterpart_wallet_key: withdrawals.target_wallet_key,
         currency_code: withdrawals.currency_code,
         amount: withdrawals.amount,
         status: withdrawals.status,
@@ -345,6 +392,8 @@ export default class TransactionService {
         reference: swaps.source_from_reference,
         wallet_key: swaps.source_from_wallet_key,
         counterpart_wallet_key: swaps.source_to_wallet_key,
+        swap_wallet_key_3: swaps.target_from_wallet_key,
+        swap_wallet_key_4: swaps.target_to_wallet_key,
         currency_code: swaps.source_currency_code,
         amount: swaps.source_amount,
         status: swaps.status,
@@ -356,6 +405,8 @@ export default class TransactionService {
         reference: ngnDeposits.deposit_reference,
         wallet_key: ngnDeposits.wallet_key,
         counterpart_wallet_key: sql`NULL`.as("counterpart_wallet_key"),
+        swap_wallet_key_3: sql`NULL`.as("swap_wallet_key_3"),
+        swap_wallet_key_4: sql`NULL`.as("swap_wallet_key_4"),
         currency_code: sql`'NGN'`.as("currency_code"),
         amount: ngnDeposits.amount,
         status: ngnDeposits.credit_status,
@@ -367,6 +418,8 @@ export default class TransactionService {
         reference: ngnPayouts.live_reference,
         wallet_key: ngnPayouts.source_wallet_key,
         counterpart_wallet_key: sql`NULL`.as("counterpart_wallet_key"),
+        swap_wallet_key_3: sql`NULL`.as("swap_wallet_key_3"),
+        swap_wallet_key_4: sql`NULL`.as("swap_wallet_key_4"),
         currency_code: sql`'NGN'`.as("currency_code"),
         amount: ngnPayouts.amount,
         status: ngnPayouts.payout_status,
@@ -378,6 +431,8 @@ export default class TransactionService {
         reference: cryptoDeposits.deposit_reference,
         wallet_key: cryptoDeposits.wallet_key,
         counterpart_wallet_key: sql`NULL`.as("counterpart_wallet_key"),
+        swap_wallet_key_3: sql`NULL`.as("swap_wallet_key_3"),
+        swap_wallet_key_4: sql`NULL`.as("swap_wallet_key_4"),
         currency_code: sql`NULL`.as("currency_code"),
         amount: cryptoDeposits.amount,
         status: cryptoDeposits.credit_status,
@@ -389,6 +444,8 @@ export default class TransactionService {
         reference: cryptoPayouts.live_reference,
         wallet_key: cryptoPayouts.source_wallet_key,
         counterpart_wallet_key: sql`NULL`.as("counterpart_wallet_key"),
+        swap_wallet_key_3: sql`NULL`.as("swap_wallet_key_3"),
+        swap_wallet_key_4: sql`NULL`.as("swap_wallet_key_4"),
         currency_code: cryptoPayouts.asset,
         amount: cryptoPayouts.amount,
         status: cryptoPayouts.payout_status,
@@ -400,7 +457,8 @@ export default class TransactionService {
 
     const filtered = allRows.filter((row) => {
       if (filters.account_key && row.account_key !== filters.account_key) return false;
-      if (filters.wallet_key && row.wallet_key !== filters.wallet_key) return false;
+      if (filters.identifier && !rowTouchesWalletKeys(row, customerWalletKeys)) return false;
+      if (filters.wallet_key && !rowTouchesSingleWallet(row, filters.wallet_key)) return false;
       if (filters.status && String(row.status || "").toLowerCase() !== String(filters.status).toLowerCase()) return false;
       if (fromDate && new Date(row.date_created) < fromDate) return false;
       if (toDate && new Date(row.date_created) > toDate) return false;
@@ -413,23 +471,24 @@ export default class TransactionService {
     });
 
     const walletKeysForNames = filtered
-      .flatMap((row) => [row.wallet_key, row.counterpart_wallet_key])
+      .flatMap((row) => [row.wallet_key, row.counterpart_wallet_key, row.swap_wallet_key_3, row.swap_wallet_key_4])
       .filter(Boolean);
     const nameMap = await loadWalletOwnerMap(walletKeysForNames);
 
     const enriched = filtered.map((row) => {
-      const walletName = nameMap.get(row.wallet_key) || null;
-      const counterpartName = nameMap.get(row.counterpart_wallet_key) || null;
+      const { swap_wallet_key_3, swap_wallet_key_4, ...rest } = row;
+      const walletName = nameMap.get(rest.wallet_key) || null;
+      const counterpartName = nameMap.get(rest.counterpart_wallet_key) || null;
       return {
-        ...row,
+        ...rest,
         wallet_name: walletName,
         counterpart_wallet_name: counterpartName,
         sender_name:
-          row.transaction_type === "transfer" || row.transaction_type === "swap"
+          rest.transaction_type === "transfer" || rest.transaction_type === "swap"
             ? walletName
             : null,
         recipient_name:
-          row.transaction_type === "transfer" || row.transaction_type === "swap"
+          rest.transaction_type === "transfer" || rest.transaction_type === "swap"
             ? counterpartName
             : null,
       };
@@ -440,6 +499,287 @@ export default class TransactionService {
     return {
       count: enriched.length,
       rows: enriched.slice(offset, offset + limit),
+    };
+  }
+
+  /**
+   * Wallet-scoped ledger lines for the customer profile UI (service text + balance columns where available).
+   */
+  async getWalletLedger({ limit, offset, filters }) {
+    const walletKey = filters.wallet_key ? String(filters.wallet_key).trim() : "";
+    if (!walletKey) {
+      throw new ErrorClass("wallet_key is required", 400);
+    }
+
+    const fromDate = filters.from_date ? new Date(filters.from_date) : null;
+    const toDate = filters.to_date ? new Date(filters.to_date) : null;
+    const searchTerm = filters.search ? String(filters.search).toLowerCase().trim() : null;
+    const perSource = Math.min(2000, Math.max(limit + offset + 100, 200));
+
+    const dateFilter = (table) => {
+      if (fromDate && toDate) return between(table.date_created, fromDate, toDate);
+      if (fromDate) return gte(table.date_created, fromDate);
+      if (toDate) return lte(table.date_created, toDate);
+      return undefined;
+    };
+
+    const andWalletDate = (table, walletCondition) => {
+      const d = dateFilter(table);
+      return d ? and(walletCondition, d) : walletCondition;
+    };
+
+    const [
+      depRows,
+      wdrRows,
+      trfRows,
+      swpRows,
+      ngnDepRows,
+      ngnPayRows,
+      cDepRows,
+      cPayRows,
+    ] = await Promise.all([
+      db
+        .select()
+        .from(deposits)
+        .where(
+          andWalletDate(
+            deposits,
+            or(eq(deposits.source_wallet_key, walletKey), eq(deposits.target_wallet_key, walletKey)),
+          ),
+        )
+        .orderBy(desc(deposits.date_created))
+        .limit(perSource),
+      db
+        .select()
+        .from(withdrawals)
+        .where(
+          andWalletDate(
+            withdrawals,
+            or(eq(withdrawals.source_wallet_key, walletKey), eq(withdrawals.target_wallet_key, walletKey)),
+          ),
+        )
+        .orderBy(desc(withdrawals.date_created))
+        .limit(perSource),
+      db
+        .select()
+        .from(transfers)
+        .where(
+          andWalletDate(
+            transfers,
+            or(eq(transfers.source_wallet_key, walletKey), eq(transfers.target_wallet_key, walletKey)),
+          ),
+        )
+        .orderBy(desc(transfers.date_created))
+        .limit(perSource),
+      db
+        .select()
+        .from(swaps)
+        .where(
+          andWalletDate(
+            swaps,
+            or(
+              eq(swaps.source_from_wallet_key, walletKey),
+              eq(swaps.source_to_wallet_key, walletKey),
+              eq(swaps.target_from_wallet_key, walletKey),
+              eq(swaps.target_to_wallet_key, walletKey),
+            ),
+          ),
+        )
+        .orderBy(desc(swaps.date_created))
+        .limit(perSource),
+      db
+        .select()
+        .from(ngnDeposits)
+        .where(andWalletDate(ngnDeposits, eq(ngnDeposits.wallet_key, walletKey)))
+        .orderBy(desc(ngnDeposits.date_created))
+        .limit(perSource),
+      db
+        .select()
+        .from(ngnPayouts)
+        .where(andWalletDate(ngnPayouts, eq(ngnPayouts.source_wallet_key, walletKey)))
+        .orderBy(desc(ngnPayouts.date_created))
+        .limit(perSource),
+      db
+        .select()
+        .from(cryptoDeposits)
+        .where(andWalletDate(cryptoDeposits, eq(cryptoDeposits.wallet_key, walletKey)))
+        .orderBy(desc(cryptoDeposits.date_created))
+        .limit(perSource),
+      db
+        .select()
+        .from(cryptoPayouts)
+        .where(andWalletDate(cryptoPayouts, eq(cryptoPayouts.source_wallet_key, walletKey)))
+        .orderBy(desc(cryptoPayouts.date_created))
+        .limit(perSource),
+    ]);
+
+    const lines = [];
+
+    for (const d of depRows) {
+      const isSource = d.source_wallet_key === walletKey;
+      const opening = isSource ? d.source_opening_balance : d.target_opening_balance;
+      const closing = isSource ? d.source_closing_balance : d.target_closing_balance;
+      const service =
+        [d.message, d.source_reference].filter(Boolean).join(" — ") ||
+        `${d.currency_code || ""} deposit`.trim();
+      lines.push({
+        line_type: "deposit",
+        reference: d.source_reference,
+        service,
+        currency_code: d.currency_code,
+        amount: d.amount,
+        opening_balance: opening ?? null,
+        closing_balance: closing ?? null,
+        status: d.status,
+        date_created: d.date_created,
+      });
+    }
+
+    for (const d of wdrRows) {
+      const isSource = d.source_wallet_key === walletKey;
+      const opening = isSource ? d.source_opening_balance : d.target_opening_balance;
+      const closing = isSource ? d.source_closing_balance : d.target_closing_balance;
+      const service = [d.message, d.source_reference].filter(Boolean).join(" — ") || "Withdrawal";
+      lines.push({
+        line_type: "withdrawal",
+        reference: d.source_reference,
+        service,
+        currency_code: d.currency_code,
+        amount: d.amount,
+        opening_balance: opening ?? null,
+        closing_balance: closing ?? null,
+        status: d.status,
+        date_created: d.date_created,
+      });
+    }
+
+    for (const d of trfRows) {
+      const isSource = d.source_wallet_key === walletKey;
+      const opening = isSource ? d.source_opening_balance : d.target_opening_balance;
+      const closing = isSource ? d.source_closing_balance : d.target_closing_balance;
+      const peer = isSource ? d.target_wallet_key : d.source_wallet_key;
+      const service = `Transfer ${isSource ? "out" : "in"}${peer ? ` (${peer})` : ""}`;
+      lines.push({
+        line_type: "transfer",
+        reference: d.source_reference,
+        service,
+        currency_code: d.currency_code,
+        amount: d.amount,
+        opening_balance: opening ?? null,
+        closing_balance: closing ?? null,
+        status: d.status,
+        date_created: d.date_created,
+      });
+    }
+
+    for (const d of swpRows) {
+      let opening = null;
+      let closing = null;
+      let leg = "swap";
+      if (d.source_from_wallet_key === walletKey) {
+        opening = d.source_from_opening_balance;
+        closing = d.source_from_closing_balance;
+        leg = "swap (source from)";
+      } else if (d.source_to_wallet_key === walletKey) {
+        opening = d.source_to_opening_balance;
+        closing = d.source_to_closing_balance;
+        leg = "swap (source to)";
+      } else if (d.target_from_wallet_key === walletKey) {
+        opening = d.target_from_opening_balance;
+        closing = d.target_from_closing_balance;
+        leg = "swap (target from)";
+      } else if (d.target_to_wallet_key === walletKey) {
+        opening = d.target_to_opening_balance;
+        closing = d.target_to_closing_balance;
+        leg = "swap (target to)";
+      }
+      const service = [d.message, d.source_from_reference, leg].filter(Boolean).join(" — ");
+      lines.push({
+        line_type: "swap",
+        reference: d.source_from_reference,
+        service,
+        currency_code: d.source_currency_code,
+        amount: d.source_amount,
+        opening_balance: opening,
+        closing_balance: closing,
+        status: d.status,
+        date_created: d.date_created,
+      });
+    }
+
+    for (const d of ngnDepRows) {
+      const parts = [d.sender_bank_name, d.sender_account_name, d.sender_account_number].filter(Boolean);
+      const service = parts.length ? parts.join(" ") : d.deposit_reference || "NGN deposit";
+      lines.push({
+        line_type: "ngn_deposit",
+        reference: d.deposit_reference,
+        service,
+        currency_code: "NGN",
+        amount: d.amount,
+        opening_balance: d.opening_balance ?? null,
+        closing_balance: d.closing_balance ?? null,
+        status: d.credit_status,
+        date_created: d.date_created,
+      });
+    }
+
+    for (const d of ngnPayRows) {
+      const parts = [d.narration, d.recipient_account_name, d.recipient_account_number].filter(Boolean);
+      const service = parts.length ? parts.join(" ") : d.live_reference || "NGN payout";
+      lines.push({
+        line_type: "ngn_payout",
+        reference: d.live_reference,
+        service,
+        currency_code: "NGN",
+        amount: d.amount,
+        opening_balance: d.opening_balance ?? null,
+        closing_balance: d.closing_balance ?? null,
+        status: d.payout_status,
+        date_created: d.date_created,
+      });
+    }
+
+    for (const d of cDepRows) {
+      lines.push({
+        line_type: "crypto_deposit",
+        reference: d.deposit_reference,
+        service: [d.hash, d.deposit_reference].filter(Boolean).join(" — ") || "Crypto deposit",
+        currency_code: null,
+        amount: d.amount,
+        opening_balance: d.opening_balance ?? null,
+        closing_balance: d.closing_balance ?? null,
+        status: d.credit_status,
+        date_created: d.date_created,
+      });
+    }
+
+    for (const d of cPayRows) {
+      lines.push({
+        line_type: "crypto_payout",
+        reference: d.live_reference,
+        service: d.live_reference || "Crypto payout",
+        currency_code: d.asset || null,
+        amount: d.amount,
+        opening_balance: d.opening_balance ?? null,
+        closing_balance: d.closing_balance ?? null,
+        status: d.payout_status,
+        date_created: d.date_created,
+      });
+    }
+
+    let out = lines;
+    if (searchTerm) {
+      out = out.filter((row) => {
+        const hay = `${row.service || ""} ${row.reference || ""} ${row.line_type || ""}`.toLowerCase();
+        return hay.includes(searchTerm);
+      });
+    }
+
+    out.sort((a, b) => new Date(b.date_created) - new Date(a.date_created));
+
+    return {
+      count: out.length,
+      rows: out.slice(offset, offset + limit),
     };
   }
 }

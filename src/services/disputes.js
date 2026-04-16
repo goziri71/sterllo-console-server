@@ -1,7 +1,7 @@
 import { eq, and, desc, count, gte, lte, asc, inArray, sql, or } from "drizzle-orm";
 import { db, authDb } from "../db/index.js";
 import { transactionDisputes } from "../db/schema/disputes.js";
-import { customers } from "../db/schema/customers.js";
+import { customers, customerWallets } from "../db/schema/customers.js";
 import { users } from "../db/schema/users.js";
 import { transfers } from "../db/schema/transactions.js";
 import { ErrorClass } from "../utils/errorClass/index.js";
@@ -51,7 +51,7 @@ function normalizeSort(sortBy, order) {
   return normalizedOrder === "asc" ? asc(column) : desc(column);
 }
 
-function buildConditions(filters = {}) {
+async function buildConditions(filters = {}) {
   const conditions = [];
 
   if (filters.status) conditions.push(eq(transactionDisputes.status, filters.status));
@@ -71,6 +71,19 @@ function buildConditions(filters = {}) {
     );
   }
 
+  if (filters.identifier) {
+    const walletRows = await db
+      .select({ wallet_key: customerWallets.wallet_key })
+      .from(customerWallets)
+      .where(eq(customerWallets.identifier, filters.identifier));
+    const keys = walletRows.map((r) => r.wallet_key).filter(Boolean);
+    if (keys.length === 0) {
+      conditions.push(sql`1 = 0`);
+    } else {
+      conditions.push(inArray(transactionDisputes.transaction_wallet_key, keys));
+    }
+  }
+
   return conditions;
 }
 
@@ -86,7 +99,7 @@ function formatCustomerName(customer) {
 export default class DisputeService {
   async getAll({ limit, offset, filters }) {
     validateFilters(filters);
-    const conditions = buildConditions(filters);
+    const conditions = await buildConditions(filters);
     const where = conditions.length > 0 ? and(...conditions) : undefined;
     const orderBy = normalizeSort(filters.sort_by, filters.order);
 
@@ -101,7 +114,7 @@ export default class DisputeService {
 
   async getSummary(filters = {}) {
     validateFilters(filters);
-    const conditions = buildConditions(filters);
+    const conditions = await buildConditions(filters);
     const where = conditions.length > 0 ? and(...conditions) : undefined;
 
     const [summary] = await db

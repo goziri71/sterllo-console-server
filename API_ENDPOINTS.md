@@ -157,8 +157,10 @@ All routes require JWT + any role.
 | GET | `/api/v1/customers` | All | List all customers (enriched with wallet_count, currencies, kyc_status) |
 | GET | `/api/v1/customers/stats` | All | Customer metric cards with month-over-month comparison |
 | GET | `/api/v1/customers/:identifier` | All | Get single customer (enriched with wallet_count, currencies, kyc_status) |
-| GET | `/api/v1/customers/:identifier/wallets` | All | Get customer's wallets (enriched with NGN accounts + crypto addresses) |
-| GET | `/api/v1/customers/:identifier/wallets/:wallet_key` | All | Get single customer wallet (enriched) |
+| GET | `/api/v1/customers/:identifier/metrics` | All | Summary counts for profile cards (wallets, sub-accounts, disputes) |
+| GET | `/api/v1/customers/:identifier/wallets` | All | Get customer's wallets (NGN/crypto rails + balances when allowed) |
+| GET | `/api/v1/customers/:identifier/wallets/:wallet_key` | All | Get single customer wallet (balances when allowed) |
+| GET | `/api/v1/customers/:identifier/wallets/:wallet_key/ledger` | All | Per-wallet ledger lines (service text + balances; requires `financial.read`) |
 | GET | `/api/v1/customers/:identifier/fees` | All | Get customer's SaaS fee schedule |
 | GET | `/api/v1/customers/:identifier/kycs` | All | Get customer's KYCs |
 | PATCH | `/api/v1/customers/:identifier` | operations, compliance | Update customer |
@@ -254,6 +256,64 @@ Returns metric card data with month-over-month comparison:
 | `sort_by` | Sort column: `name`, `surname`, `date_created`, `status`, `country`, `type` (default: `date_created`) |
 | `order` | Sort direction: `asc` or `desc` (default: `desc`) |
 
+### Frontend: merchant customer profile
+
+Use these together on the **merchant → customer detail** screen (profile header, summary cards, wallet list, service/ledger table, recent transactions, disputes).
+
+| UI area | Endpoint | Notes |
+|--------|----------|--------|
+| Profile + tier / KYC | `GET /api/v1/customers/:identifier` | Enriched `wallet_count`, `kyc_status`, etc. |
+| Top summary cards (wallets / sub-accounts / disputes) | `GET /api/v1/customers/:identifier/metrics` | See response shape below |
+| Wallet list + balances | `GET /api/v1/customers/:identifier/wallets` | `search`, `page`, `limit`. Balance fields require `financial.read`; otherwise they are redacted |
+| Selected wallet detail | `GET /api/v1/customers/:identifier/wallets/:wallet_key` | Same permission rules as list |
+| Service history / ledger (right-hand table) | `GET /api/v1/customers/:identifier/wallets/:wallet_key/ledger` | **Requires `financial.read`**. Query: `search`, `from_date`, `to_date`, `page`, `limit` |
+| Recent transactions (all wallets for this customer) | `GET /api/v1/transactions/statement` | **Requires `financial.read`**. Pass `identifier=<customer identifier>`; optional `account_key` must match that customer’s merchant |
+| Disputes tab / count | `GET /api/v1/disputes` and/or `GET /api/v1/disputes/summary` | Pass `identifier=<customer identifier>` to scope to that customer’s wallets |
+
+#### `GET /api/v1/customers/:identifier/metrics`
+
+```json
+{
+  "code": 200,
+  "success": true,
+  "message": "Customer view metrics fetched successfully",
+  "data": {
+    "total_wallets": 351,
+    "sub_accounts": 281,
+    "disputes": 1247
+  }
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `total_wallets` | Rows in `CustomerWallets` for this customer |
+| `sub_accounts` | Customers whose `parent_identifier` equals this `:identifier` |
+| `disputes` | Disputes whose `transaction_wallet_key` is one of this customer’s wallet keys |
+
+#### `GET /api/v1/customers/:identifier/wallets` — extra query params
+
+| Param | Description |
+|-------|-------------|
+| `search` | Partial match on `wallet_key` or `wallet_id` |
+
+Response rows include `current_balance`, `balance_last_updated`, `balance_source` when the user has `financial.read` (see RBAC / permissions).
+
+#### `GET /api/v1/customers/:identifier/wallets/:wallet_key/ledger` — response row shape
+
+Each record is one ledger line (deposit, withdrawal, transfer, swap, NGN, crypto, etc.):
+
+| Field | Description |
+|-------|-------------|
+| `line_type` | e.g. `deposit`, `ngn_deposit`, `transfer`, `swap`, … |
+| `reference` | Primary reference for the line |
+| `service` | Human-readable description / narration |
+| `currency_code` | May be `null` for some crypto rows |
+| `amount` | String amount |
+| `opening_balance` / `closing_balance` | When stored on the underlying row |
+| `status` | Line status |
+| `date_created` | Timestamp |
+
 ---
 
 ## KYCs
@@ -309,12 +369,15 @@ All routes require JWT + any role. All are read-only.
 | `page` | Page number (default: 1) |
 | `limit` | Items per page (default: 20) |
 | `account_key` | Filter by merchant account key |
-| `wallet_key` | Filter by wallet key |
+| `identifier` | Customer `identifier` — include all activity for every wallet belonging to that customer (optional `account_key` must match the customer’s merchant) |
+| `wallet_key` | Filter by wallet key (matches source/target and swap legs where applicable) |
 | `status` | Filter by status |
 | `currency_code` | Filter by currency code (where supported) |
 | `search` | Search by reference, wallet key, and transaction-specific identifiers |
 | `from_date` | Start date (ISO format) |
 | `to_date` | End date (ISO format) |
+
+`GET /api/v1/transactions/statement` requires the **`financial.read`** permission (same as other sensitive financial aggregates).
 
 ### Statement response (`GET /api/v1/transactions/statement`)
 
@@ -356,6 +419,7 @@ All routes require JWT + any role.
 
 | Method | Endpoint | Roles | Description |
 |--------|----------|-------|-------------|
+| GET | `/api/v1/disputes/summary` | All | Dispute counts (total, in_review, escalated, resolved) with optional filters |
 | GET | `/api/v1/disputes` | All | List all disputes |
 | GET | `/api/v1/disputes/:dispute_reference` | All | Get single dispute |
 | PATCH | `/api/v1/disputes/:dispute_reference` | operations, compliance | Update dispute |
@@ -369,7 +433,7 @@ All routes require JWT + any role.
 }
 ```
 
-### Query params (GET list)
+### Query params (GET list and GET summary)
 
 | Param | Description |
 |-------|-------------|
@@ -377,7 +441,12 @@ All routes require JWT + any role.
 | `limit` | Items per page (default: 20) |
 | `status` | Filter by dispute status |
 | `account_key` | Filter by merchant account key |
+| `identifier` | Customer `identifier` — only disputes whose `transaction_wallet_key` belongs to one of that customer’s wallets |
+| `user_key` | Filter by user key on the dispute |
 | `settlement_status` | Filter by settlement status |
+| `search` | Search dispute / transaction / settlement references |
+| `from_date` / `to_date` | Date range on `date_created` |
+| `sort_by` / `order` | Sort list (see disputes service) |
 
 ---
 

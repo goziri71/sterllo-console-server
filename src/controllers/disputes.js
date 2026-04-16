@@ -7,6 +7,7 @@ export const getDisputesSummary = async (request, reply) => {
   const filters = {
     status: request.query.status,
     account_key: request.query.account_key,
+    identifier: request.query.identifier,
     settlement_status: request.query.settlement_status,
     user_key: request.query.user_key,
     search: request.query.search,
@@ -23,6 +24,7 @@ export const getAllDisputes = async (request, reply) => {
   const filters = {
     status: request.query.status,
     account_key: request.query.account_key,
+    identifier: request.query.identifier,
     settlement_status: request.query.settlement_status,
     user_key: request.query.user_key,
     search: request.query.search,

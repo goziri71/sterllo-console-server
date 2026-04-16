@@ -1,4 +1,4 @@
-import { eq, and, desc, count, sql } from "drizzle-orm";
+import { eq, and, or, desc, count, sql, like } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { merchants, merchantLedgers } from "../db/schema/merchants.js";
 import { customers, customerWallets } from "../db/schema/customers.js";
@@ -752,7 +752,7 @@ export default class WalletService {
     };
   }
 
-  async getEnrichedCustomerWallets(identifier, { limit, offset }) {
+  async getEnrichedCustomerWallets(identifier, { limit, offset, search, revealFinancial = true }) {
     const [customer] = await db
       .select()
       .from(customers)
@@ -763,7 +763,17 @@ export default class WalletService {
       throw new ErrorClass("Customer not found", 404);
     }
 
-    const where = eq(customerWallets.identifier, identifier);
+    const searchTerm = search ? String(search).trim() : "";
+    const where = searchTerm
+      ? and(
+          eq(customerWallets.identifier, identifier),
+          or(
+            like(customerWallets.wallet_key, `%${searchTerm}%`),
+            like(customerWallets.wallet_id, `%${searchTerm}%`),
+          ),
+        )
+      : eq(customerWallets.identifier, identifier);
+
     const [rows, [{ total }]] = await Promise.all([
       db
         .select()
@@ -776,10 +786,36 @@ export default class WalletService {
     ]);
 
     const enrichedRows = await enrichWalletsByWalletKey(rows);
-    return { count: Number(total), rows: enrichedRows };
+
+    if (!revealFinancial) {
+      return {
+        count: Number(total),
+        rows: enrichedRows.map((w) =>
+          redactWalletBalanceFields({
+            ...w,
+            pending_transactions_count: 0,
+          }),
+        ),
+      };
+    }
+
+    const walletKeys = enrichedRows.map((w) => w.wallet_key);
+    const balanceByWallet = await getLatestClosingBalanceByWallet(walletKeys);
+
+    const rowsWithBalance = enrichedRows.map((w) => {
+      const withBal = {
+        ...w,
+        current_balance: balanceByWallet.get(w.wallet_key)?.current_balance ?? "0.00",
+        balance_last_updated: balanceByWallet.get(w.wallet_key)?.balance_last_updated ?? null,
+        balance_source: "derived_from_latest_closing_balance",
+      };
+      return revealFinancial ? withBal : redactWalletBalanceFields(withBal);
+    });
+
+    return { count: Number(total), rows: rowsWithBalance };
   }
 
-  async getCustomerWalletDetail(identifier, walletKey) {
+  async getCustomerWalletDetail(identifier, walletKey, revealFinancial = true) {
     const [customer] = await db
       .select()
       .from(customers)
@@ -806,6 +842,28 @@ export default class WalletService {
     }
 
     const [enriched] = await enrichWalletsByWalletKey([wallet]);
-    return enriched;
+    if (!revealFinancial) {
+      return redactWalletBalanceFields(enriched);
+    }
+    const balanceByWallet = await getLatestClosingBalanceByWallet([walletKey]);
+    return {
+      ...enriched,
+      current_balance: balanceByWallet.get(walletKey)?.current_balance ?? "0.00",
+      balance_last_updated: balanceByWallet.get(walletKey)?.balance_last_updated ?? null,
+      balance_source: "derived_from_latest_closing_balance",
+    };
+  }
+
+  async ensureCustomerWalletOwnership(identifier, walletKey) {
+    const [row] = await db
+      .select()
+      .from(customerWallets)
+      .where(
+        and(eq(customerWallets.identifier, identifier), eq(customerWallets.wallet_key, walletKey)),
+      )
+      .limit(1);
+    if (!row) {
+      throw new ErrorClass("Wallet not found", 404);
+    }
   }
 }
