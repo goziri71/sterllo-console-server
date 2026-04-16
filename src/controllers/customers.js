@@ -115,3 +115,14 @@ export const getMerchantCustomers = async (request, reply) => {
     ...paginatedResponse(data, page, limit),
   });
 };
+
+export const getCustomerViewMetrics = async (request, reply) => {
+  const data = await customerService.getCustomerViewMetrics(request.params.identifier);
+
+  return reply.code(200).send({
+    code: 200,
+    success: true,
+    message: "Customer view metrics fetched successfully",
+    data,
+  });
+};

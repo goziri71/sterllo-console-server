@@ -1,8 +1,11 @@
 import WalletService from "../services/wallets.js";
+import TransactionService from "../services/transactions.js";
 import { parsePagination, paginatedResponse } from "../utils/pagination/index.js";
 import { userCanReadFinancial } from "../utils/financialAccess.js";
+import { ErrorClass } from "../utils/errorClass/index.js";
 
 const walletService = new WalletService();
+const transactionService = new TransactionService();
 
 export const getWalletPage = async (request, reply) => {
   const { page, limit, offset } = parsePagination(request.query);
@@ -62,7 +65,13 @@ export const getMerchantWallet = async (request, reply) => {
 
 export const getEnrichedCustomerWallets = async (request, reply) => {
   const { page, limit, offset } = parsePagination(request.query);
-  const data = await walletService.getEnrichedCustomerWallets(request.params.identifier, { limit, offset });
+  const revealFinancial = userCanReadFinancial(request.user);
+  const data = await walletService.getEnrichedCustomerWallets(request.params.identifier, {
+    limit,
+    offset,
+    search: request.query.search,
+    revealFinancial,
+  });
 
   return reply.code(200).send({
     code: 200,
@@ -73,9 +82,11 @@ export const getEnrichedCustomerWallets = async (request, reply) => {
 };
 
 export const getCustomerWalletDetail = async (request, reply) => {
+  const revealFinancial = userCanReadFinancial(request.user);
   const wallet = await walletService.getCustomerWalletDetail(
     request.params.identifier,
-    request.params.wallet_key
+    request.params.wallet_key,
+    revealFinancial,
   );
 
   return reply.code(200).send({
@@ -83,5 +94,30 @@ export const getCustomerWalletDetail = async (request, reply) => {
     success: true,
     message: "Customer wallet fetched successfully",
     data: wallet,
+  });
+};
+
+export const getCustomerWalletLedger = async (request, reply) => {
+  if (!userCanReadFinancial(request.user)) {
+    throw new ErrorClass("Wallet ledger requires financial.read permission", 403);
+  }
+  const { page, limit, offset } = parsePagination(request.query);
+  await walletService.ensureCustomerWalletOwnership(request.params.identifier, request.params.wallet_key);
+  const data = await transactionService.getWalletLedger({
+    limit,
+    offset,
+    filters: {
+      wallet_key: request.params.wallet_key,
+      search: request.query.search,
+      from_date: request.query.from_date,
+      to_date: request.query.to_date,
+    },
+  });
+
+  return reply.code(200).send({
+    code: 200,
+    success: true,
+    message: "Wallet ledger fetched successfully",
+    ...paginatedResponse(data, page, limit),
   });
 };
