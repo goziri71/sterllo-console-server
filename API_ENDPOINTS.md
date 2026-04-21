@@ -68,7 +68,7 @@ All routes require JWT + any role.
 
 | Method | Endpoint | Roles | Description |
 |--------|----------|-------|-------------|
-| GET | `/api/v1/merchants` | All | List all merchants (enriched with customer_count, ledger_count, currencies, settlement_count) |
+| GET | `/api/v1/merchants` | All | List all merchants (enriched with ledger_count, currencies, settlement_count) |
 | GET | `/api/v1/merchants/stats` | All | Merchant metric cards with month-over-month comparison |
 | GET | `/api/v1/merchants/:account_key` | All | Get single merchant (enriched) |
 | GET | `/api/v1/merchants/:account_key/customers` | All | Get merchant's customers |
@@ -98,7 +98,6 @@ Each merchant in the list now includes:
   "name": "Redbiller Technologies",
   "trade_name": "Redbiller",
   "default_kyc_tier": 1,
-  "customer_count": 45,
   "ledger_count": 3,
   "currencies": ["NGN", "USD"],
   "settlement_count": 12,
@@ -108,7 +107,6 @@ Each merchant in the list now includes:
 
 | Enriched field | Type | Description |
 |----------------|------|-------------|
-| `customer_count` | number | Total customers under this merchant |
 | `ledger_count` | number | Total ledgers (wallets) for this merchant |
 | `currencies` | string[] | Distinct currency codes across merchant ledgers |
 | `settlement_count` | number | Total settlement ledgers for this merchant |
