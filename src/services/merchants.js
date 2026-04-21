@@ -45,10 +45,7 @@ async function enrichWithCounts(rows) {
   const accountKeys = rows.map((r) => r.account_key);
   const accountKeyList = sql.join(accountKeys.map((k) => sql`${k}`), sql`,`);
 
-  const [customerCounts, ledgerCounts, settlementCounts, customerEnvCounts] = await Promise.all([
-    db.execute(
-      sql`SELECT account_key, COUNT(*) as customer_count FROM Customers WHERE account_key IN (${accountKeyList}) GROUP BY account_key`,
-    ),
+  const [ledgerCounts, settlementCounts, customerEnvCounts] = await Promise.all([
     db.execute(
       sql`SELECT account_key, COUNT(*) as ledger_count, GROUP_CONCAT(DISTINCT currency_code) as currencies, GROUP_CONCAT(DISTINCT NULLIF(TRIM(LOWER(environment)), '')) as environments FROM MerchantLedgers WHERE account_key IN (${accountKeyList}) GROUP BY account_key`,
     ),
@@ -72,13 +69,9 @@ async function enrichWithCounts(rows) {
     `),
   ]);
 
-  const custRows = Array.isArray(customerCounts[0]) ? customerCounts[0] : customerCounts;
   const ledgRows = Array.isArray(ledgerCounts[0]) ? ledgerCounts[0] : ledgerCounts;
   const settRows = Array.isArray(settlementCounts[0]) ? settlementCounts[0] : settlementCounts;
   const custEnvRows = Array.isArray(customerEnvCounts[0]) ? customerEnvCounts[0] : customerEnvCounts;
-
-  const custMap = new Map();
-  for (const c of custRows) custMap.set(c.account_key, Number(c.customer_count));
 
   const ledgMap = new Map();
   for (const l of ledgRows) {
@@ -100,7 +93,6 @@ async function enrichWithCounts(rows) {
     const type = mergeMerchantEnvironments(ledgerPart?.environments, custEnvMap.get(row.account_key));
     return {
       ...row,
-      customer_count: custMap.get(row.account_key) ?? 0,
       ledger_count: ledgerPart?.ledger_count ?? 0,
       currencies: ledgerPart?.currencies ?? [],
       type,
