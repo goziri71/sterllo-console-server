@@ -1,7 +1,9 @@
 import CustomerService from "../services/customers.js";
+import MerchantService from "../services/merchants.js";
 import { parsePagination, paginatedResponse } from "../utils/pagination/index.js";
 
 const customerService = new CustomerService();
+const merchantService = new MerchantService();
 
 export const getAllCustomers = async (request, reply) => {
   const { page, limit, offset } = parsePagination(request.query);
@@ -106,12 +108,16 @@ export const getMerchantCustomers = async (request, reply) => {
   const { page, limit, offset } = parsePagination(request.query);
   const sortBy = request.query.sort_by;
   const order = request.query.order;
-  const data = await customerService.getByMerchant(request.params.account_key, { limit, offset, sortBy, order });
+  const [merchant, data] = await Promise.all([
+    merchantService.getByAccountKey(request.params.account_key),
+    customerService.getByMerchant(request.params.account_key, { limit, offset, sortBy, order }),
+  ]);
 
   return reply.code(200).send({
     code: 200,
     success: true,
     message: "Merchant customers fetched successfully",
+    merchant,
     ...paginatedResponse(data, page, limit),
   });
 };
