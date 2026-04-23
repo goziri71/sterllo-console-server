@@ -34,24 +34,21 @@ async function enrichWithWalletsAndKyc(rows) {
 
   const identifiers = rows.map((r) => r.identifier);
 
-  const [walletCounts, kycStatuses] = await Promise.all([
+  const [walletCurrencies, kycStatuses] = await Promise.all([
     db.execute(
-      sql`SELECT identifier, COUNT(*) as wallet_count, GROUP_CONCAT(DISTINCT currency_code) as currencies FROM CustomerWallets WHERE identifier IN (${sql.join(identifiers.map((id) => sql`${id}`), sql`,`)}) GROUP BY identifier`,
+      sql`SELECT identifier, GROUP_CONCAT(DISTINCT currency_code) as currencies FROM CustomerWallets WHERE identifier IN (${sql.join(identifiers.map((id) => sql`${id}`), sql`,`)}) GROUP BY identifier`,
     ),
     db.execute(
       sql`SELECT identifier, CASE WHEN SUM(CASE WHEN is_compliant = 'Y' THEN 1 ELSE 0 END) > 0 AND SUM(CASE WHEN is_compliant != 'Y' THEN 1 ELSE 0 END) = 0 THEN 'verified' WHEN COUNT(*) = 0 THEN 'none' WHEN SUM(CASE WHEN is_compliant != 'Y' THEN 1 ELSE 0 END) > 0 THEN 'pending' ELSE 'pending' END as kyc_status, COUNT(*) as kyc_count FROM KYCs WHERE identifier IN (${sql.join(identifiers.map((id) => sql`${id}`), sql`,`)}) GROUP BY identifier`,
     ),
   ]);
 
-  const walletRows = Array.isArray(walletCounts[0]) ? walletCounts[0] : walletCounts;
+  const walletRows = Array.isArray(walletCurrencies[0]) ? walletCurrencies[0] : walletCurrencies;
   const kycRows = Array.isArray(kycStatuses[0]) ? kycStatuses[0] : kycStatuses;
 
-  const walletMap = new Map();
+  const currencyMap = new Map();
   for (const w of walletRows) {
-    walletMap.set(w.identifier, {
-      wallet_count: Number(w.wallet_count),
-      currencies: w.currencies ? w.currencies.split(",") : [],
-    });
+    currencyMap.set(w.identifier, w.currencies ? w.currencies.split(",") : []);
   }
 
   const kycMap = new Map();
@@ -61,8 +58,7 @@ async function enrichWithWalletsAndKyc(rows) {
 
   return rows.map((row) => ({
     ...row,
-    wallet_count: walletMap.get(row.identifier)?.wallet_count ?? 0,
-    currencies: walletMap.get(row.identifier)?.currencies ?? [],
+    currencies: currencyMap.get(row.identifier) ?? [],
     kyc_status: kycMap.get(row.identifier) ?? "none",
   }));
 }
