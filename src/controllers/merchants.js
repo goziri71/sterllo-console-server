@@ -82,6 +82,40 @@ export const getMerchantSettlements = async (request, reply) => {
   });
 };
 
+export const linkMerchantBeamerAccount = async (request, reply) => {
+  const data = await merchantService.linkBeamerAccount(request.params.account_key, request.body);
+
+  return reply.code(200).send({
+    code: 200,
+    success: true,
+    message: "Beamer account link completed",
+    data,
+  });
+};
+
+export const updateMerchantBeamerAccount = async (request, reply) => {
+  const data = await merchantService.updateBeamerAccount(request.params.account_key, request.body);
+
+  return reply.code(200).send({
+    code: 200,
+    success: true,
+    message: "Beamer account update completed",
+    data,
+  });
+};
+
+export const getSterlloUsersForBeamerLink = async (request, reply) => {
+  const { page, limit, offset } = parsePagination(request.query);
+  const data = await merchantService.getSterlloUsersForBeamerLink({ limit, offset });
+
+  return reply.code(200).send({
+    code: 200,
+    success: true,
+    message: "Sterllo users fetched successfully",
+    ...paginatedResponse(data, page, limit),
+  });
+};
+
 /**
  * All transactions for a customer under this merchant (unified statement).
  * Same payload as GET /api/v1/transactions/statement?identifier=&account_key=.

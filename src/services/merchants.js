@@ -1,5 +1,7 @@
 import { eq, and, desc, asc, count, ne, or, sql } from "drizzle-orm";
+import axios from "axios";
 import { db } from "../db/index.js";
+import { getSterlloSourceConfig, getSterlloSourcePool } from "../db/sterlloSourceDb.js";
 import { merchants, merchantLedgers, settlementLedgers } from "../db/schema/merchants.js";
 import { customers } from "../db/schema/customers.js";
 import { kycs } from "../db/schema/kycs.js";
@@ -233,5 +235,182 @@ export default class MerchantService {
       db.select({ total: count() }).from(settlementLedgers).where(where),
     ]);
     return { count: Number(total), rows };
+  }
+
+  async linkBeamerAccount(accountKey, payload) {
+    const [merchant] = await db
+      .select()
+      .from(merchants)
+      .where(eq(merchants.account_key, accountKey))
+      .limit(1);
+
+    if (!merchant) {
+      throw new ErrorClass("Merchant not found", 404);
+    }
+
+    const sourceConfig = getSterlloSourceConfig();
+    const headers = payload?.headers;
+    const data = payload?.data;
+    if (!headers || typeof headers !== "object" || Array.isArray(headers)) {
+      throw new ErrorClass("headers object is required", 400);
+    }
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      throw new ErrorClass("data object is required", 400);
+    }
+
+    const requiredHeaders = ["User-Key", "Accout-Key", "Request-Id"];
+    for (const key of requiredHeaders) {
+      if (!String(headers[key] || "").trim()) {
+        throw new ErrorClass(`${key} header is required`, 400);
+      }
+    }
+
+    if (!String(data.account_number || "").trim()) {
+      throw new ErrorClass("data.account_number is required", 400);
+    }
+    if (!data.client || typeof data.client !== "object" || Array.isArray(data.client)) {
+      throw new ErrorClass("data.client object is required", 400);
+    }
+    if (!String(data.client.id || "").trim()) {
+      throw new ErrorClass("data.client.id is required", 400);
+    }
+    if (!String(data.client.key || "").trim()) {
+      throw new ErrorClass("data.client.key is required", 400);
+    }
+
+    const outboundHeaders = {
+      "Target-Product-Key": sourceConfig.targetProductKey,
+      "Source-Product-Key": sourceConfig.sourceProductKey,
+      "User-Key": String(headers["User-Key"]).trim(),
+      "Accout-Key": String(headers["Accout-Key"]).trim(),
+      "Request-Id": String(headers["Request-Id"]).trim(),
+    };
+    if (headers["Request-IP-Address"] !== undefined && headers["Request-IP-Address"] !== null) {
+      outboundHeaders["Request-IP-Address"] = String(headers["Request-IP-Address"]).trim();
+    }
+
+    try {
+      const response = await axios.post(
+        "https://api.isvs.sterllo.com/1.202510.0/Integrations/Beamer/Account/Link",
+        data,
+        { headers: outboundHeaders },
+      );
+      return response.data;
+    } catch (error) {
+      const status = error?.response?.status;
+      const message =
+        error?.response?.data?.message ||
+        error?.message ||
+        "Unable to link account with Beamer integration";
+      throw new ErrorClass(message, status >= 400 && status < 600 ? status : 502);
+    }
+  }
+
+  async getSterlloUsersForBeamerLink({ limit, offset }) {
+    const sourceConfig = getSterlloSourceConfig();
+    const sourcePool = getSterlloSourcePool();
+
+    const productId = String(sourceConfig.sterlloProductId || "").trim();
+    if (!productId) {
+      throw new ErrorClass("STERLLO_PRODUCT_ID is required", 500);
+    }
+
+    const [rows] = await sourcePool.query(
+      `
+        SELECT
+          id,
+          user_key,
+          account_key,
+          name,
+          trade_name,
+          email_address,
+          phone_number,
+          product_id,
+          date_created
+        FROM __accounts
+        WHERE product_id = ?
+        ORDER BY date_created DESC
+        LIMIT ?
+        OFFSET ?
+      `,
+      [productId, Number(limit), Number(offset)],
+    );
+
+    const [countRows] = await sourcePool.query(
+      `
+        SELECT COUNT(*) AS total
+        FROM __accounts
+        WHERE product_id = ?
+      `,
+      [productId],
+    );
+
+    return {
+      count: Number(countRows?.[0]?.total || 0),
+      rows: Array.isArray(rows) ? rows : [],
+    };
+  }
+
+  async updateBeamerAccount(accountKey, payload) {
+    const [merchant] = await db
+      .select()
+      .from(merchants)
+      .where(eq(merchants.account_key, accountKey))
+      .limit(1);
+
+    if (!merchant) {
+      throw new ErrorClass("Merchant not found", 404);
+    }
+
+    const sourceConfig = getSterlloSourceConfig();
+    const headers = payload?.headers;
+    const data = payload?.data;
+    if (!headers || typeof headers !== "object" || Array.isArray(headers)) {
+      throw new ErrorClass("headers object is required", 400);
+    }
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      throw new ErrorClass("data object is required", 400);
+    }
+    if (!String(headers["Request-Id"] || "").trim()) {
+      throw new ErrorClass("Request-Id header is required", 400);
+    }
+
+    if (!String(data.id || "").trim()) {
+      throw new ErrorClass("data.id is required", 400);
+    }
+    if (!String(data.account_number || "").trim()) {
+      throw new ErrorClass("data.account_number is required", 400);
+    }
+    if (!data.client || typeof data.client !== "object" || Array.isArray(data.client)) {
+      throw new ErrorClass("data.client object is required", 400);
+    }
+    if (!String(data.client.id || "").trim()) {
+      throw new ErrorClass("data.client.id is required", 400);
+    }
+    if (!String(data.client.key || "").trim()) {
+      throw new ErrorClass("data.client.key is required", 400);
+    }
+
+    const outboundHeaders = {
+      "Target-Product-Key": sourceConfig.targetProductKey,
+      "Source-Product-Key": sourceConfig.sourceProductKey,
+      "Request-Id": String(headers["Request-Id"]).trim(),
+    };
+
+    try {
+      const response = await axios.post(
+        "https://api.isvs.sterllo.com/1.202510.0/Integrations/Beamer/Account/Update",
+        data,
+        { headers: outboundHeaders },
+      );
+      return response.data;
+    } catch (error) {
+      const status = error?.response?.status;
+      const message =
+        error?.response?.data?.message ||
+        error?.message ||
+        "Unable to update account with Beamer integration";
+      throw new ErrorClass(message, status >= 400 && status < 600 ? status : 502);
+    }
   }
 }
