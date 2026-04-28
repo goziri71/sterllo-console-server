@@ -82,7 +82,7 @@ export const getSterlloSourceConfig = () => {
           keychain: process.env.SOURCE_PRODUCT_KEY_KEYCHAIN,
           name: "SOURCE_PRODUCT_KEY",
         })
-      : required(process.env.SOURCE_PRODUCT_KEY, "SOURCE_PRODUCT_KEY");
+      : stripWrappingQuotes(process.env.SOURCE_PRODUCT_KEY || "");
 
   const targetProductKey =
     process.env.TARGET_PRODUCT_KEY_KEYCHAIN && process.env.TARGET_PRODUCT_KEY
@@ -91,7 +91,7 @@ export const getSterlloSourceConfig = () => {
           keychain: process.env.TARGET_PRODUCT_KEY_KEYCHAIN,
           name: "TARGET_PRODUCT_KEY",
         })
-      : required(process.env.TARGET_PRODUCT_KEY, "TARGET_PRODUCT_KEY");
+      : stripWrappingQuotes(process.env.TARGET_PRODUCT_KEY || "");
 
   return {
     host: dbHost,

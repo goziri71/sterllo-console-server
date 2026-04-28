@@ -249,6 +249,12 @@ export default class MerchantService {
     }
 
     const sourceConfig = getSterlloSourceConfig();
+    if (!String(sourceConfig.targetProductKey || "").trim()) {
+      throw new ErrorClass("TARGET_PRODUCT_KEY is required for beamer link", 500);
+    }
+    if (!String(sourceConfig.sourceProductKey || "").trim()) {
+      throw new ErrorClass("SOURCE_PRODUCT_KEY is required for beamer link", 500);
+    }
     const headers = payload?.headers;
     const data = payload?.data;
     if (!headers || typeof headers !== "object" || Array.isArray(headers)) {
@@ -363,6 +369,12 @@ export default class MerchantService {
     }
 
     const sourceConfig = getSterlloSourceConfig();
+    if (!String(sourceConfig.targetProductKey || "").trim()) {
+      throw new ErrorClass("TARGET_PRODUCT_KEY is required for beamer update", 500);
+    }
+    if (!String(sourceConfig.sourceProductKey || "").trim()) {
+      throw new ErrorClass("SOURCE_PRODUCT_KEY is required for beamer update", 500);
+    }
     const headers = payload?.headers;
     const data = payload?.data;
     if (!headers || typeof headers !== "object" || Array.isArray(headers)) {
