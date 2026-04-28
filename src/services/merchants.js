@@ -313,48 +313,58 @@ export default class MerchantService {
   }
 
   async getSterlloUsersForBeamerLink({ limit, offset }) {
-    const sourceConfig = getSterlloSourceConfig();
-    const sourcePool = getSterlloSourcePool();
+    try {
+      const sourceConfig = getSterlloSourceConfig();
+      const sourcePool = getSterlloSourcePool();
 
-    const productId = String(sourceConfig.sterlloProductId || "").trim();
-    if (!productId) {
-      throw new ErrorClass("STERLLO_PRODUCT_ID is required", 500);
+      const productId = String(sourceConfig.sterlloProductId || "").trim();
+      if (!productId) {
+        throw new ErrorClass("STERLLO_PRODUCT_ID is required", 400);
+      }
+
+      const [rows] = await sourcePool.query(
+        `
+          SELECT
+            id,
+            user_key,
+            account_key,
+            name,
+            trade_name,
+            email_address,
+            phone_number,
+            product_id,
+            date_created
+          FROM __accounts
+          WHERE product_id = ?
+          ORDER BY date_created DESC
+          LIMIT ?
+          OFFSET ?
+        `,
+        [productId, Number(limit), Number(offset)],
+      );
+
+      const [countRows] = await sourcePool.query(
+        `
+          SELECT COUNT(*) AS total
+          FROM __accounts
+          WHERE product_id = ?
+        `,
+        [productId],
+      );
+
+      return {
+        count: Number(countRows?.[0]?.total || 0),
+        rows: Array.isArray(rows) ? rows : [],
+      };
+    } catch (error) {
+      if (error instanceof ErrorClass) {
+        throw error;
+      }
+      throw new ErrorClass(
+        `Unable to fetch Sterllo users from source DB (${error?.code || "UNKNOWN_ERROR"})`,
+        424,
+      );
     }
-
-    const [rows] = await sourcePool.query(
-      `
-        SELECT
-          id,
-          user_key,
-          account_key,
-          name,
-          trade_name,
-          email_address,
-          phone_number,
-          product_id,
-          date_created
-        FROM __accounts
-        WHERE product_id = ?
-        ORDER BY date_created DESC
-        LIMIT ?
-        OFFSET ?
-      `,
-      [productId, Number(limit), Number(offset)],
-    );
-
-    const [countRows] = await sourcePool.query(
-      `
-        SELECT COUNT(*) AS total
-        FROM __accounts
-        WHERE product_id = ?
-      `,
-      [productId],
-    );
-
-    return {
-      count: Number(countRows?.[0]?.total || 0),
-      rows: Array.isArray(rows) ? rows : [],
-    };
   }
 
   async updateBeamerAccount(accountKey, payload) {
