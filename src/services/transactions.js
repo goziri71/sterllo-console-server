@@ -1,4 +1,4 @@
-import { eq, and, or, between, gte, lte, desc, count, sql } from "drizzle-orm";
+import { eq, and, or, between, gte, lte, desc, count, sql, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { deposits, withdrawals, transfers, swaps } from "../db/schema/transactions.js";
 import { ngnDeposits, ngnPayouts } from "../db/schema/fiat.js";
@@ -343,6 +343,17 @@ export default class TransactionService {
       }
     }
 
+    const customerWalletKeysArr = customerWalletKeys ? [...customerWalletKeys] : null;
+    const applyDate = (table, conditions) => {
+      if (fromDate && toDate) {
+        conditions.push(between(table.date_created, fromDate, toDate));
+      } else if (fromDate) {
+        conditions.push(gte(table.date_created, fromDate));
+      } else if (toDate) {
+        conditions.push(lte(table.date_created, toDate));
+      }
+    };
+
     const [
       depRows,
       wdrRows,
@@ -353,104 +364,220 @@ export default class TransactionService {
       cDepRows,
       cPayRows,
     ] = await Promise.all([
-      db.select({
-        transaction_type: sql`'deposit'`.as("transaction_type"),
-        account_key: deposits.account_key,
-        reference: deposits.source_reference,
-        wallet_key: deposits.source_wallet_key,
-        counterpart_wallet_key: deposits.target_wallet_key,
-        currency_code: deposits.currency_code,
-        amount: deposits.amount,
-        status: deposits.status,
-        date_created: deposits.date_created,
-      }).from(deposits).orderBy(desc(deposits.date_created)).limit(perSource),
-      db.select({
-        transaction_type: sql`'withdrawal'`.as("transaction_type"),
-        account_key: withdrawals.account_key,
-        reference: withdrawals.source_reference,
-        wallet_key: withdrawals.source_wallet_key,
-        counterpart_wallet_key: withdrawals.target_wallet_key,
-        currency_code: withdrawals.currency_code,
-        amount: withdrawals.amount,
-        status: withdrawals.status,
-        date_created: withdrawals.date_created,
-      }).from(withdrawals).orderBy(desc(withdrawals.date_created)).limit(perSource),
-      db.select({
-        transaction_type: sql`'transfer'`.as("transaction_type"),
-        account_key: transfers.account_key,
-        reference: transfers.source_reference,
-        wallet_key: transfers.source_wallet_key,
-        counterpart_wallet_key: transfers.target_wallet_key,
-        currency_code: transfers.currency_code,
-        amount: transfers.amount,
-        status: transfers.status,
-        date_created: transfers.date_created,
-      }).from(transfers).orderBy(desc(transfers.date_created)).limit(perSource),
-      db.select({
-        transaction_type: sql`'swap'`.as("transaction_type"),
-        account_key: swaps.account_key,
-        reference: swaps.source_from_reference,
-        wallet_key: swaps.source_from_wallet_key,
-        counterpart_wallet_key: swaps.source_to_wallet_key,
-        swap_wallet_key_3: swaps.target_from_wallet_key,
-        swap_wallet_key_4: swaps.target_to_wallet_key,
-        currency_code: swaps.source_currency_code,
-        amount: swaps.source_amount,
-        status: swaps.status,
-        date_created: swaps.date_created,
-      }).from(swaps).orderBy(desc(swaps.date_created)).limit(perSource),
-      db.select({
-        transaction_type: sql`'ngn_deposit'`.as("transaction_type"),
-        account_key: sql`NULL`.as("account_key"),
-        reference: ngnDeposits.deposit_reference,
-        wallet_key: ngnDeposits.wallet_key,
-        counterpart_wallet_key: sql`NULL`.as("counterpart_wallet_key"),
-        swap_wallet_key_3: sql`NULL`.as("swap_wallet_key_3"),
-        swap_wallet_key_4: sql`NULL`.as("swap_wallet_key_4"),
-        currency_code: sql`'NGN'`.as("currency_code"),
-        amount: ngnDeposits.amount,
-        status: ngnDeposits.credit_status,
-        date_created: ngnDeposits.date_created,
-      }).from(ngnDeposits).orderBy(desc(ngnDeposits.date_created)).limit(perSource),
-      db.select({
-        transaction_type: sql`'ngn_payout'`.as("transaction_type"),
-        account_key: ngnPayouts.account_key,
-        reference: ngnPayouts.live_reference,
-        wallet_key: ngnPayouts.source_wallet_key,
-        counterpart_wallet_key: sql`NULL`.as("counterpart_wallet_key"),
-        swap_wallet_key_3: sql`NULL`.as("swap_wallet_key_3"),
-        swap_wallet_key_4: sql`NULL`.as("swap_wallet_key_4"),
-        currency_code: sql`'NGN'`.as("currency_code"),
-        amount: ngnPayouts.amount,
-        status: ngnPayouts.payout_status,
-        date_created: ngnPayouts.date_created,
-      }).from(ngnPayouts).orderBy(desc(ngnPayouts.date_created)).limit(perSource),
-      db.select({
-        transaction_type: sql`'crypto_deposit'`.as("transaction_type"),
-        account_key: sql`NULL`.as("account_key"),
-        reference: cryptoDeposits.deposit_reference,
-        wallet_key: cryptoDeposits.wallet_key,
-        counterpart_wallet_key: sql`NULL`.as("counterpart_wallet_key"),
-        swap_wallet_key_3: sql`NULL`.as("swap_wallet_key_3"),
-        swap_wallet_key_4: sql`NULL`.as("swap_wallet_key_4"),
-        currency_code: sql`NULL`.as("currency_code"),
-        amount: cryptoDeposits.amount,
-        status: cryptoDeposits.credit_status,
-        date_created: cryptoDeposits.date_created,
-      }).from(cryptoDeposits).orderBy(desc(cryptoDeposits.date_created)).limit(perSource),
-      db.select({
-        transaction_type: sql`'crypto_payout'`.as("transaction_type"),
-        account_key: cryptoPayouts.account_key,
-        reference: cryptoPayouts.live_reference,
-        wallet_key: cryptoPayouts.source_wallet_key,
-        counterpart_wallet_key: sql`NULL`.as("counterpart_wallet_key"),
-        swap_wallet_key_3: sql`NULL`.as("swap_wallet_key_3"),
-        swap_wallet_key_4: sql`NULL`.as("swap_wallet_key_4"),
-        currency_code: cryptoPayouts.asset,
-        amount: cryptoPayouts.amount,
-        status: cryptoPayouts.payout_status,
-        date_created: cryptoPayouts.date_created,
-      }).from(cryptoPayouts).orderBy(desc(cryptoPayouts.date_created)).limit(perSource),
+      (() => {
+        const conditions = [];
+        if (filters.account_key) conditions.push(eq(deposits.account_key, filters.account_key));
+        if (filters.wallet_key) {
+          conditions.push(or(eq(deposits.source_wallet_key, filters.wallet_key), eq(deposits.target_wallet_key, filters.wallet_key)));
+        }
+        if (customerWalletKeysArr) {
+          conditions.push(
+            or(
+              inArray(deposits.source_wallet_key, customerWalletKeysArr),
+              inArray(deposits.target_wallet_key, customerWalletKeysArr),
+            ),
+          );
+        }
+        applyDate(deposits, conditions);
+        const where = conditions.length > 0 ? and(...conditions) : undefined;
+        return db.select({
+          transaction_type: sql`'deposit'`.as("transaction_type"),
+          account_key: deposits.account_key,
+          reference: deposits.source_reference,
+          wallet_key: deposits.source_wallet_key,
+          counterpart_wallet_key: deposits.target_wallet_key,
+          currency_code: deposits.currency_code,
+          amount: deposits.amount,
+          status: deposits.status,
+          date_created: deposits.date_created,
+        }).from(deposits).where(where).orderBy(desc(deposits.date_created)).limit(perSource);
+      })(),
+      (() => {
+        const conditions = [];
+        if (filters.account_key) conditions.push(eq(withdrawals.account_key, filters.account_key));
+        if (filters.wallet_key) {
+          conditions.push(or(eq(withdrawals.source_wallet_key, filters.wallet_key), eq(withdrawals.target_wallet_key, filters.wallet_key)));
+        }
+        if (customerWalletKeysArr) {
+          conditions.push(
+            or(
+              inArray(withdrawals.source_wallet_key, customerWalletKeysArr),
+              inArray(withdrawals.target_wallet_key, customerWalletKeysArr),
+            ),
+          );
+        }
+        applyDate(withdrawals, conditions);
+        const where = conditions.length > 0 ? and(...conditions) : undefined;
+        return db.select({
+          transaction_type: sql`'withdrawal'`.as("transaction_type"),
+          account_key: withdrawals.account_key,
+          reference: withdrawals.source_reference,
+          wallet_key: withdrawals.source_wallet_key,
+          counterpart_wallet_key: withdrawals.target_wallet_key,
+          currency_code: withdrawals.currency_code,
+          amount: withdrawals.amount,
+          status: withdrawals.status,
+          date_created: withdrawals.date_created,
+        }).from(withdrawals).where(where).orderBy(desc(withdrawals.date_created)).limit(perSource);
+      })(),
+      (() => {
+        const conditions = [];
+        if (filters.account_key) conditions.push(eq(transfers.account_key, filters.account_key));
+        if (filters.wallet_key) {
+          conditions.push(or(eq(transfers.source_wallet_key, filters.wallet_key), eq(transfers.target_wallet_key, filters.wallet_key)));
+        }
+        if (customerWalletKeysArr) {
+          conditions.push(
+            or(
+              inArray(transfers.source_wallet_key, customerWalletKeysArr),
+              inArray(transfers.target_wallet_key, customerWalletKeysArr),
+            ),
+          );
+        }
+        applyDate(transfers, conditions);
+        const where = conditions.length > 0 ? and(...conditions) : undefined;
+        return db.select({
+          transaction_type: sql`'transfer'`.as("transaction_type"),
+          account_key: transfers.account_key,
+          reference: transfers.source_reference,
+          wallet_key: transfers.source_wallet_key,
+          counterpart_wallet_key: transfers.target_wallet_key,
+          currency_code: transfers.currency_code,
+          amount: transfers.amount,
+          status: transfers.status,
+          date_created: transfers.date_created,
+        }).from(transfers).where(where).orderBy(desc(transfers.date_created)).limit(perSource);
+      })(),
+      (() => {
+        const conditions = [];
+        if (filters.account_key) conditions.push(eq(swaps.account_key, filters.account_key));
+        if (filters.wallet_key) {
+          conditions.push(
+            or(
+              eq(swaps.source_from_wallet_key, filters.wallet_key),
+              eq(swaps.source_to_wallet_key, filters.wallet_key),
+              eq(swaps.target_from_wallet_key, filters.wallet_key),
+              eq(swaps.target_to_wallet_key, filters.wallet_key),
+            ),
+          );
+        }
+        if (customerWalletKeysArr) {
+          conditions.push(
+            or(
+              inArray(swaps.source_from_wallet_key, customerWalletKeysArr),
+              inArray(swaps.source_to_wallet_key, customerWalletKeysArr),
+              inArray(swaps.target_from_wallet_key, customerWalletKeysArr),
+              inArray(swaps.target_to_wallet_key, customerWalletKeysArr),
+            ),
+          );
+        }
+        applyDate(swaps, conditions);
+        const where = conditions.length > 0 ? and(...conditions) : undefined;
+        return db.select({
+          transaction_type: sql`'swap'`.as("transaction_type"),
+          account_key: swaps.account_key,
+          reference: swaps.source_from_reference,
+          wallet_key: swaps.source_from_wallet_key,
+          counterpart_wallet_key: swaps.source_to_wallet_key,
+          swap_wallet_key_3: swaps.target_from_wallet_key,
+          swap_wallet_key_4: swaps.target_to_wallet_key,
+          currency_code: swaps.source_currency_code,
+          amount: swaps.source_amount,
+          status: swaps.status,
+          date_created: swaps.date_created,
+        }).from(swaps).where(where).orderBy(desc(swaps.date_created)).limit(perSource);
+      })(),
+      (() => {
+        const conditions = [];
+        if (filters.wallet_key) conditions.push(eq(ngnDeposits.wallet_key, filters.wallet_key));
+        if (customerWalletKeysArr) {
+          conditions.push(inArray(ngnDeposits.wallet_key, customerWalletKeysArr));
+        }
+        applyDate(ngnDeposits, conditions);
+        const where = conditions.length > 0 ? and(...conditions) : undefined;
+        return db.select({
+          transaction_type: sql`'ngn_deposit'`.as("transaction_type"),
+          account_key: sql`NULL`.as("account_key"),
+          reference: ngnDeposits.deposit_reference,
+          wallet_key: ngnDeposits.wallet_key,
+          counterpart_wallet_key: sql`NULL`.as("counterpart_wallet_key"),
+          swap_wallet_key_3: sql`NULL`.as("swap_wallet_key_3"),
+          swap_wallet_key_4: sql`NULL`.as("swap_wallet_key_4"),
+          currency_code: sql`'NGN'`.as("currency_code"),
+          amount: ngnDeposits.amount,
+          status: ngnDeposits.credit_status,
+          date_created: ngnDeposits.date_created,
+        }).from(ngnDeposits).where(where).orderBy(desc(ngnDeposits.date_created)).limit(perSource);
+      })(),
+      (() => {
+        const conditions = [];
+        if (filters.account_key) conditions.push(eq(ngnPayouts.account_key, filters.account_key));
+        if (filters.wallet_key) conditions.push(eq(ngnPayouts.source_wallet_key, filters.wallet_key));
+        if (customerWalletKeysArr) {
+          conditions.push(
+            or(
+              inArray(ngnPayouts.source_wallet_key, customerWalletKeysArr),
+              filters.identifier ? eq(ngnPayouts.source_identifier, filters.identifier) : undefined,
+            ),
+          );
+        }
+        applyDate(ngnPayouts, conditions);
+        const where = conditions.filter(Boolean).length > 0 ? and(...conditions.filter(Boolean)) : undefined;
+        return db.select({
+          transaction_type: sql`'ngn_payout'`.as("transaction_type"),
+          account_key: ngnPayouts.account_key,
+          reference: ngnPayouts.live_reference,
+          wallet_key: ngnPayouts.source_wallet_key,
+          counterpart_wallet_key: sql`NULL`.as("counterpart_wallet_key"),
+          swap_wallet_key_3: sql`NULL`.as("swap_wallet_key_3"),
+          swap_wallet_key_4: sql`NULL`.as("swap_wallet_key_4"),
+          currency_code: sql`'NGN'`.as("currency_code"),
+          amount: ngnPayouts.amount,
+          status: ngnPayouts.payout_status,
+          date_created: ngnPayouts.date_created,
+        }).from(ngnPayouts).where(where).orderBy(desc(ngnPayouts.date_created)).limit(perSource);
+      })(),
+      (() => {
+        const conditions = [];
+        if (filters.wallet_key) conditions.push(eq(cryptoDeposits.wallet_key, filters.wallet_key));
+        if (customerWalletKeysArr) conditions.push(inArray(cryptoDeposits.wallet_key, customerWalletKeysArr));
+        applyDate(cryptoDeposits, conditions);
+        const where = conditions.length > 0 ? and(...conditions) : undefined;
+        return db.select({
+          transaction_type: sql`'crypto_deposit'`.as("transaction_type"),
+          account_key: sql`NULL`.as("account_key"),
+          reference: cryptoDeposits.deposit_reference,
+          wallet_key: cryptoDeposits.wallet_key,
+          counterpart_wallet_key: sql`NULL`.as("counterpart_wallet_key"),
+          swap_wallet_key_3: sql`NULL`.as("swap_wallet_key_3"),
+          swap_wallet_key_4: sql`NULL`.as("swap_wallet_key_4"),
+          currency_code: sql`NULL`.as("currency_code"),
+          amount: cryptoDeposits.amount,
+          status: cryptoDeposits.credit_status,
+          date_created: cryptoDeposits.date_created,
+        }).from(cryptoDeposits).where(where).orderBy(desc(cryptoDeposits.date_created)).limit(perSource);
+      })(),
+      (() => {
+        const conditions = [];
+        if (filters.account_key) conditions.push(eq(cryptoPayouts.account_key, filters.account_key));
+        if (filters.wallet_key) conditions.push(eq(cryptoPayouts.source_wallet_key, filters.wallet_key));
+        if (customerWalletKeysArr) conditions.push(inArray(cryptoPayouts.source_wallet_key, customerWalletKeysArr));
+        applyDate(cryptoPayouts, conditions);
+        const where = conditions.length > 0 ? and(...conditions) : undefined;
+        return db.select({
+          transaction_type: sql`'crypto_payout'`.as("transaction_type"),
+          account_key: cryptoPayouts.account_key,
+          reference: cryptoPayouts.live_reference,
+          wallet_key: cryptoPayouts.source_wallet_key,
+          counterpart_wallet_key: sql`NULL`.as("counterpart_wallet_key"),
+          swap_wallet_key_3: sql`NULL`.as("swap_wallet_key_3"),
+          swap_wallet_key_4: sql`NULL`.as("swap_wallet_key_4"),
+          currency_code: cryptoPayouts.asset,
+          amount: cryptoPayouts.amount,
+          status: cryptoPayouts.payout_status,
+          date_created: cryptoPayouts.date_created,
+        }).from(cryptoPayouts).where(where).orderBy(desc(cryptoPayouts.date_created)).limit(perSource);
+      })(),
     ]);
 
     const allRows = [...depRows, ...wdrRows, ...trfRows, ...swpRows, ...ngnDepRows, ...ngnPayRows, ...cDepRows, ...cPayRows];
