@@ -104,18 +104,6 @@ export const updateMerchantBeamerAccount = async (request, reply) => {
   });
 };
 
-export const getSterlloUsersForBeamerLink = async (request, reply) => {
-  const { page, limit, offset } = parsePagination(request.query);
-  const data = await merchantService.getSterlloUsersForBeamerLink({ limit, offset });
-
-  return reply.code(200).send({
-    code: 200,
-    success: true,
-    message: "Sterllo users fetched successfully",
-    ...paginatedResponse(data, page, limit),
-  });
-};
-
 /**
  * All transactions for a customer under this merchant (unified statement).
  * Same payload as GET /api/v1/transactions/statement?identifier=&account_key=.

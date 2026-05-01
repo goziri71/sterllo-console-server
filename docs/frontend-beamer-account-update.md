@@ -2,53 +2,32 @@
 
 This document explains how frontend should call the Beamer account update endpoint exposed by this backend.
 
-## List Users To Link (Second DB)
+## Credentials For Link / Update (Merchants List)
 
-Use this endpoint to fetch users from the second DB (`__accounts`) before calling link/update actions.
+There is no separate “second database” user list. Use the main merchants listing (or single merchant fetch); each row includes optional **`udara360`** details joined from `Udara360APICredentials` on `account_key` (latest credential row per merchant when several exist).
 
 - **Method:** `GET`
-- **URL:** `/api/v1/merchants/integrations/beamer/accounts`
-- **Auth:** Same auth flow used for merchant read endpoints
-- **Permission required:** `CONSOLE_READ`
-- **Query params (optional):**
-  - `page` (default pagination behavior)
-  - `limit` (default pagination behavior)
+- **URL:** `/api/v1/merchants` (paginated list) or `/api/v1/merchants/:account_key`
+- **Permission:** `CONSOLE_READ`
 
-### Response Shape
+Each merchant object may include:
 
 ```json
-{
-  "code": 200,
-  "success": true,
-  "message": "Sterllo users fetched successfully",
-  "data": {
-    "count": 210,
-    "rows": [
-      {
-        "id": 32574,
-        "user_key": "string",
-        "account_key": "string",
-        "name": "string",
-        "trade_name": "string|null",
-        "email_address": "string|null",
-        "phone_number": "string|null",
-        "product_id": "string",
-        "date_created": "2026-04-24T12:53:21.000Z"
-      }
-    ]
-  },
-  "meta": {
-    "page": 1,
-    "limit": 20,
-    "total_pages": 11
-  }
+"udara360": {
+  "id": 1,
+  "identifier": "string",
+  "account_number": "string",
+  "auth_type": "BEARER",
+  "client_id": "string",
+  "expiry_date": "2026-01-01T00:00:00.000Z",
+  "date_created": "2026-01-01T00:00:00.000Z",
+  "date_modified": null
 }
 ```
 
-### Notes
+Or `"udara360": null` when no credential row exists. Secrets (`client_secret`, tokens) are **not** returned.
 
-- Results are filtered server-side by `STERLLO_PRODUCT_ID` from env.
-- Use values from each row (`id`, `account_key`, and client data from your flow) to build the body for update/link calls.
+Use `udara360.client_id`, `udara360.account_number`, and merchant `user_key` / `account_key` as needed when building Beamer link/update payloads.
 
 ## Endpoint
 
