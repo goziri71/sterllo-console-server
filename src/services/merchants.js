@@ -1,4 +1,4 @@
-import { eq, and, desc, asc, count, ne, or, sql, max, getTableColumns } from "drizzle-orm";
+import { eq, and, desc, asc, count, ne, or, sql, max, inArray } from "drizzle-orm";
 import axios from "axios";
 import { db } from "../db/index.js";
 import { merchants, merchantLedgers, settlementLedgers } from "../db/schema/merchants.js";
@@ -71,56 +71,85 @@ function getBeamerProductKeys() {
   return { sourceProductKey, targetProductKey };
 }
 
-function udaraLatestSubquery() {
-  return db
-    .select({
-      account_key: udara360APICredentials.account_key,
-      max_id: max(udara360APICredentials.id),
-    })
-    .from(udara360APICredentials)
-    .groupBy(udara360APICredentials.account_key)
-    .as("udara_latest");
-}
-
-const UDARA360_LIST_FIELDS = {
-  udara360_id: udara360APICredentials.id,
-  udara360_identifier: udara360APICredentials.identifier,
-  udara360_account_number: udara360APICredentials.account_number,
-  udara360_auth_type: udara360APICredentials.auth_type,
-  udara360_client_id: udara360APICredentials.client_id,
-  udara360_expiry_date: udara360APICredentials.expiry_date,
-  udara360_date_created: udara360APICredentials.date_created,
-  udara360_date_modified: udara360APICredentials.date_modified,
+const UDARA360_PUBLIC = {
+  id: udara360APICredentials.id,
+  identifier: udara360APICredentials.identifier,
+  account_number: udara360APICredentials.account_number,
+  auth_type: udara360APICredentials.auth_type,
+  client_id: udara360APICredentials.client_id,
+  expiry_date: udara360APICredentials.expiry_date,
+  date_created: udara360APICredentials.date_created,
+  date_modified: udara360APICredentials.date_modified,
+  account_key: udara360APICredentials.account_key,
 };
 
-function shapeMerchantWithUdara(row) {
-  const {
-    udara360_id,
-    udara360_identifier,
-    udara360_account_number,
-    udara360_auth_type,
-    udara360_client_id,
-    udara360_expiry_date,
-    udara360_date_created,
-    udara360_date_modified,
-    ...merchant
-  } = row;
+function shapeUdaraPublic(row) {
+  if (!row) return null;
+  return {
+    id: Number(row.id),
+    identifier: row.identifier,
+    account_number: row.account_number,
+    auth_type: row.auth_type,
+    client_id: row.client_id,
+    expiry_date: row.expiry_date,
+    date_created: row.date_created,
+    date_modified: row.date_modified,
+  };
+}
 
-  const udara360 =
-    udara360_id != null
-      ? {
-          id: udara360_id,
-          identifier: udara360_identifier,
-          account_number: udara360_account_number,
-          auth_type: udara360_auth_type,
-          client_id: udara360_client_id,
-          expiry_date: udara360_expiry_date,
-          date_created: udara360_date_created,
-          date_modified: udara360_date_modified,
-        }
-      : null;
+function isMissingUdaraTableError(e) {
+  return e?.code === "ER_NO_SUCH_TABLE" || e?.errno === 1146;
+}
 
-  return { ...merchant, udara360 };
+/** Latest credential row per account_key (for listing/detail); avoids fragile nested LEFT JOIN SQL. */
+async function fetchLatestUdaraMap(accountKeys) {
+  const map = new Map();
+  const unique = [...new Set(accountKeys.filter(Boolean))];
+  if (unique.length === 0) return map;
+
+  try {
+    const grouped = await db
+      .select({
+        account_key: udara360APICredentials.account_key,
+        max_id: max(udara360APICredentials.id),
+      })
+      .from(udara360APICredentials)
+      .where(inArray(udara360APICredentials.account_key, unique))
+      .groupBy(udara360APICredentials.account_key);
+
+    if (grouped.length === 0) return map;
+
+    const ids = grouped.map((g) => g.max_id).filter((id) => id != null);
+    if (ids.length === 0) return map;
+
+    const detailRows = await db
+      .select(UDARA360_PUBLIC)
+      .from(udara360APICredentials)
+      .where(inArray(udara360APICredentials.id, ids));
+
+    for (const row of detailRows) {
+      map.set(row.account_key, shapeUdaraPublic(row));
+    }
+    return map;
+  } catch (e) {
+    if (isMissingUdaraTableError(e)) return map;
+    throw e;
+  }
+}
+
+async function fetchLatestUdaraOne(accountKey) {
+  try {
+    const [row] = await db
+      .select(UDARA360_PUBLIC)
+      .from(udara360APICredentials)
+      .where(eq(udara360APICredentials.account_key, accountKey))
+      .orderBy(desc(udara360APICredentials.id))
+      .limit(1);
+    return shapeUdaraPublic(row);
+  } catch (e) {
+    if (isMissingUdaraTableError(e)) return null;
+    throw e;
+  }
 }
 
 async function enrichWithCounts(rows) {
@@ -194,50 +223,34 @@ export default class MerchantService {
 
     const orderClause = buildOrderBy(sortBy, order);
 
-    const udaraLatest = udaraLatestSubquery();
-
-    const [rowsRaw, [{ total }]] = await Promise.all([
-      db
-        .select({
-          ...getTableColumns(merchants),
-          ...UDARA360_LIST_FIELDS,
-        })
-        .from(merchants)
-        .leftJoin(udaraLatest, eq(merchants.account_key, udaraLatest.account_key))
-        .leftJoin(udara360APICredentials, eq(udara360APICredentials.id, udaraLatest.max_id))
-        .where(where)
-        .orderBy(orderClause)
-        .limit(limit)
-        .offset(offset),
+    const [merchantRows, [{ total }]] = await Promise.all([
+      db.select().from(merchants).where(where).limit(limit).offset(offset).orderBy(orderClause),
       db.select({ total: count() }).from(merchants).where(where),
     ]);
 
-    const rows = rowsRaw.map(shapeMerchantWithUdara);
+    const udaraMap = await fetchLatestUdaraMap(merchantRows.map((r) => r.account_key));
+    const rows = merchantRows.map((r) => ({
+      ...r,
+      udara360: udaraMap.get(r.account_key) ?? null,
+    }));
     const enriched = await enrichWithCounts(rows);
 
     return { count: Number(total), rows: enriched };
   }
 
   async getByAccountKey(accountKey) {
-    const udaraLatest = udaraLatestSubquery();
-
-    const [rowRaw] = await db
-      .select({
-        ...getTableColumns(merchants),
-        ...UDARA360_LIST_FIELDS,
-      })
+    const [merchant] = await db
+      .select()
       .from(merchants)
-      .leftJoin(udaraLatest, eq(merchants.account_key, udaraLatest.account_key))
-      .leftJoin(udara360APICredentials, eq(udara360APICredentials.id, udaraLatest.max_id))
       .where(eq(merchants.account_key, accountKey))
       .limit(1);
 
-    if (!rowRaw) {
+    if (!merchant) {
       throw new ErrorClass("Merchant not found", 404);
     }
 
-    const merchant = shapeMerchantWithUdara(rowRaw);
-    const enriched = await enrichWithCounts([merchant]);
+    const udara360 = await fetchLatestUdaraOne(accountKey);
+    const enriched = await enrichWithCounts([{ ...merchant, udara360 }]);
     return enriched[0];
   }
 
