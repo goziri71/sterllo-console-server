@@ -1,8 +1,9 @@
-import { eq, and, desc, asc, count, ne, or, sql } from "drizzle-orm";
+import { eq, and, desc, asc, count, ne, or, sql, max, getTableColumns } from "drizzle-orm";
 import axios from "axios";
 import { db } from "../db/index.js";
-import { getSterlloSourceConfig, getSterlloSourcePool } from "../db/sterlloSourceDb.js";
 import { merchants, merchantLedgers, settlementLedgers } from "../db/schema/merchants.js";
+import { udara360APICredentials } from "../db/schema/vendor.js";
+import { decryptFromPlainPair, stripWrappingQuotes } from "../utils/decryptProdSecret.js";
 import { customers } from "../db/schema/customers.js";
 import { kycs } from "../db/schema/kycs.js";
 import { ErrorClass } from "../utils/errorClass/index.js";
@@ -39,6 +40,87 @@ function merchantTypeFromEnvironments(environmentsCsv) {
 function mergeMerchantEnvironments(ledgerEnvsCsv, customerEnvsCsv) {
   const merged = [ledgerEnvsCsv, customerEnvsCsv].filter(Boolean).join(",");
   return merchantTypeFromEnvironments(merged || null);
+}
+
+function getBeamerProductKeys() {
+  const decryptPair = ({ encrypted, keychain, name }) =>
+    decryptFromPlainPair(
+      stripWrappingQuotes(String(encrypted ?? "")),
+      stripWrappingQuotes(String(keychain ?? "")),
+      { valueName: name },
+    );
+
+  const sourceProductKey =
+    process.env.SOURCE_PRODUCT_KEY_KEYCHAIN && process.env.SOURCE_PRODUCT_KEY
+      ? decryptPair({
+          encrypted: process.env.SOURCE_PRODUCT_KEY,
+          keychain: process.env.SOURCE_PRODUCT_KEY_KEYCHAIN,
+          name: "SOURCE_PRODUCT_KEY",
+        })
+      : stripWrappingQuotes(process.env.SOURCE_PRODUCT_KEY || "");
+
+  const targetProductKey =
+    process.env.TARGET_PRODUCT_KEY_KEYCHAIN && process.env.TARGET_PRODUCT_KEY
+      ? decryptPair({
+          encrypted: process.env.TARGET_PRODUCT_KEY,
+          keychain: process.env.TARGET_PRODUCT_KEY_KEYCHAIN,
+          name: "TARGET_PRODUCT_KEY",
+        })
+      : stripWrappingQuotes(process.env.TARGET_PRODUCT_KEY || "");
+
+  return { sourceProductKey, targetProductKey };
+}
+
+function udaraLatestSubquery() {
+  return db
+    .select({
+      account_key: udara360APICredentials.account_key,
+      max_id: max(udara360APICredentials.id),
+    })
+    .from(udara360APICredentials)
+    .groupBy(udara360APICredentials.account_key)
+    .as("udara_latest");
+}
+
+const UDARA360_LIST_FIELDS = {
+  udara360_id: udara360APICredentials.id,
+  udara360_identifier: udara360APICredentials.identifier,
+  udara360_account_number: udara360APICredentials.account_number,
+  udara360_auth_type: udara360APICredentials.auth_type,
+  udara360_client_id: udara360APICredentials.client_id,
+  udara360_expiry_date: udara360APICredentials.expiry_date,
+  udara360_date_created: udara360APICredentials.date_created,
+  udara360_date_modified: udara360APICredentials.date_modified,
+};
+
+function shapeMerchantWithUdara(row) {
+  const {
+    udara360_id,
+    udara360_identifier,
+    udara360_account_number,
+    udara360_auth_type,
+    udara360_client_id,
+    udara360_expiry_date,
+    udara360_date_created,
+    udara360_date_modified,
+    ...merchant
+  } = row;
+
+  const udara360 =
+    udara360_id != null
+      ? {
+          id: udara360_id,
+          identifier: udara360_identifier,
+          account_number: udara360_account_number,
+          auth_type: udara360_auth_type,
+          client_id: udara360_client_id,
+          expiry_date: udara360_expiry_date,
+          date_created: udara360_date_created,
+          date_modified: udara360_date_modified,
+        }
+      : null;
+
+  return { ...merchant, udara360 };
 }
 
 async function enrichWithCounts(rows) {
@@ -112,27 +194,49 @@ export default class MerchantService {
 
     const orderClause = buildOrderBy(sortBy, order);
 
-    const [rows, [{ total }]] = await Promise.all([
-      db.select().from(merchants).where(where).limit(limit).offset(offset).orderBy(orderClause),
+    const udaraLatest = udaraLatestSubquery();
+
+    const [rowsRaw, [{ total }]] = await Promise.all([
+      db
+        .select({
+          ...getTableColumns(merchants),
+          ...UDARA360_LIST_FIELDS,
+        })
+        .from(merchants)
+        .leftJoin(udaraLatest, eq(merchants.account_key, udaraLatest.account_key))
+        .leftJoin(udara360APICredentials, eq(udara360APICredentials.id, udaraLatest.max_id))
+        .where(where)
+        .orderBy(orderClause)
+        .limit(limit)
+        .offset(offset),
       db.select({ total: count() }).from(merchants).where(where),
     ]);
 
+    const rows = rowsRaw.map(shapeMerchantWithUdara);
     const enriched = await enrichWithCounts(rows);
 
     return { count: Number(total), rows: enriched };
   }
 
   async getByAccountKey(accountKey) {
-    const [merchant] = await db
-      .select()
+    const udaraLatest = udaraLatestSubquery();
+
+    const [rowRaw] = await db
+      .select({
+        ...getTableColumns(merchants),
+        ...UDARA360_LIST_FIELDS,
+      })
       .from(merchants)
+      .leftJoin(udaraLatest, eq(merchants.account_key, udaraLatest.account_key))
+      .leftJoin(udara360APICredentials, eq(udara360APICredentials.id, udaraLatest.max_id))
       .where(eq(merchants.account_key, accountKey))
       .limit(1);
 
-    if (!merchant) {
+    if (!rowRaw) {
       throw new ErrorClass("Merchant not found", 404);
     }
 
+    const merchant = shapeMerchantWithUdara(rowRaw);
     const enriched = await enrichWithCounts([merchant]);
     return enriched[0];
   }
@@ -248,11 +352,11 @@ export default class MerchantService {
       throw new ErrorClass("Merchant not found", 404);
     }
 
-    const sourceConfig = getSterlloSourceConfig();
-    if (!String(sourceConfig.targetProductKey || "").trim()) {
+    const { targetProductKey, sourceProductKey } = getBeamerProductKeys();
+    if (!String(targetProductKey || "").trim()) {
       throw new ErrorClass("TARGET_PRODUCT_KEY is required for beamer link", 500);
     }
-    if (!String(sourceConfig.sourceProductKey || "").trim()) {
+    if (!String(sourceProductKey || "").trim()) {
       throw new ErrorClass("SOURCE_PRODUCT_KEY is required for beamer link", 500);
     }
     const headers = payload?.headers;
@@ -285,8 +389,8 @@ export default class MerchantService {
     }
 
     const outboundHeaders = {
-      "Target-Product-Key": sourceConfig.targetProductKey,
-      "Source-Product-Key": sourceConfig.sourceProductKey,
+      "Target-Product-Key": targetProductKey,
+      "Source-Product-Key": sourceProductKey,
       "User-Key": String(headers["User-Key"]).trim(),
       "Accout-Key": String(headers["Accout-Key"]).trim(),
       "Request-Id": String(headers["Request-Id"]).trim(),
@@ -312,61 +416,6 @@ export default class MerchantService {
     }
   }
 
-  async getSterlloUsersForBeamerLink({ limit, offset }) {
-    try {
-      const sourceConfig = getSterlloSourceConfig();
-      const sourcePool = getSterlloSourcePool();
-
-      const productId = String(sourceConfig.sterlloProductId || "").trim();
-      if (!productId) {
-        throw new ErrorClass("STERLLO_PRODUCT_ID is required", 400);
-      }
-
-      const [rows] = await sourcePool.query(
-        `
-          SELECT
-            id,
-            user_key,
-            account_key,
-            name,
-            trade_name,
-            email_address,
-            phone_number,
-            product_id,
-            date_created
-          FROM __accounts
-          WHERE product_id = ?
-          ORDER BY date_created DESC
-          LIMIT ?
-          OFFSET ?
-        `,
-        [productId, Number(limit), Number(offset)],
-      );
-
-      const [countRows] = await sourcePool.query(
-        `
-          SELECT COUNT(*) AS total
-          FROM __accounts
-          WHERE product_id = ?
-        `,
-        [productId],
-      );
-
-      return {
-        count: Number(countRows?.[0]?.total || 0),
-        rows: Array.isArray(rows) ? rows : [],
-      };
-    } catch (error) {
-      if (error instanceof ErrorClass) {
-        throw error;
-      }
-      throw new ErrorClass(
-        `Unable to fetch Sterllo users from source DB (${error?.code || "UNKNOWN_ERROR"})`,
-        424,
-      );
-    }
-  }
-
   async updateBeamerAccount(accountKey, payload) {
     const [merchant] = await db
       .select()
@@ -378,11 +427,11 @@ export default class MerchantService {
       throw new ErrorClass("Merchant not found", 404);
     }
 
-    const sourceConfig = getSterlloSourceConfig();
-    if (!String(sourceConfig.targetProductKey || "").trim()) {
+    const { targetProductKey, sourceProductKey } = getBeamerProductKeys();
+    if (!String(targetProductKey || "").trim()) {
       throw new ErrorClass("TARGET_PRODUCT_KEY is required for beamer update", 500);
     }
-    if (!String(sourceConfig.sourceProductKey || "").trim()) {
+    if (!String(sourceProductKey || "").trim()) {
       throw new ErrorClass("SOURCE_PRODUCT_KEY is required for beamer update", 500);
     }
     const headers = payload?.headers;
@@ -414,8 +463,8 @@ export default class MerchantService {
     }
 
     const outboundHeaders = {
-      "Target-Product-Key": sourceConfig.targetProductKey,
-      "Source-Product-Key": sourceConfig.sourceProductKey,
+      "Target-Product-Key": targetProductKey,
+      "Source-Product-Key": sourceProductKey,
       "Request-Id": String(headers["Request-Id"]).trim(),
     };
 

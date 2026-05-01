@@ -7,7 +7,6 @@ import {
   getMerchantSettlements,
   linkMerchantBeamerAccount,
   updateMerchantBeamerAccount,
-  getSterlloUsersForBeamerLink,
   getMerchantCustomerTransactions,
 } from "../../controllers/merchants.js";
 import { getMerchantCustomers } from "../../controllers/customers.js";
@@ -20,12 +19,6 @@ export default async function merchantRoutes(fastify) {
   fastify.addHook("preHandler", authenticate);
 
   fastify.get("/stats", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getMerchantStats);
-  fastify.get(
-    "/integrations/beamer/accounts",
-    { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) },
-    getSterlloUsersForBeamerLink,
-  );
-
   fastify.get("/", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getAllMerchants);
   fastify.get("/:account_key", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getMerchant);
   fastify.get(
