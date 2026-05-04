@@ -165,6 +165,108 @@ function rowTouchesSingleWallet(row, walletKey) {
   );
 }
 
+const STMT_EXT_KEYS = [
+  "stmt_ext_sender_name",
+  "stmt_ext_sender_bank",
+  "stmt_ext_sender_account",
+  "stmt_ext_recipient_name",
+  "stmt_ext_recipient_bank",
+  "stmt_ext_recipient_account",
+];
+
+function stmtExtSelectNulls() {
+  return {
+    stmt_ext_sender_name: sql`NULL`,
+    stmt_ext_sender_bank: sql`NULL`,
+    stmt_ext_sender_account: sql`NULL`,
+    stmt_ext_recipient_name: sql`NULL`,
+    stmt_ext_recipient_bank: sql`NULL`,
+    stmt_ext_recipient_account: sql`NULL`,
+  };
+}
+
+function trimJoinNameBank(name, bank) {
+  const n = String(name ?? "").trim();
+  const b = String(bank ?? "").trim();
+  if (!n && !b) return null;
+  if (n && b) return `${n} (${b})`;
+  return n || b || null;
+}
+
+function normalizeAcct(value) {
+  const s = String(value ?? "").trim();
+  return s.length > 0 ? s : null;
+}
+
+/** Short label when only a chain/crypto address exists (not a legal name). */
+function formatAddressSnippet(addr) {
+  const s = String(addr ?? "").trim();
+  if (!s) return null;
+  if (s.length <= 14) return s;
+  return `${s.slice(0, 6)}…${s.slice(-4)}`;
+}
+
+function stripStmtExtFields(row) {
+  const out = { ...row };
+  for (const k of STMT_EXT_KEYS) delete out[k];
+  return out;
+}
+
+function resolveStatementPartyLabels(row, walletName, counterpartName) {
+  const sn = row.stmt_ext_sender_name;
+  const sb = row.stmt_ext_sender_bank;
+  const sa = row.stmt_ext_sender_account;
+  const rn = row.stmt_ext_recipient_name;
+  const rb = row.stmt_ext_recipient_bank;
+  const ra = row.stmt_ext_recipient_account;
+
+  let sender_name = null;
+  let recipient_name = null;
+  let sender_account_number = null;
+  let recipient_account_number = null;
+
+  switch (row.transaction_type) {
+    case "ngn_deposit":
+      sender_name = trimJoinNameBank(sn, sb);
+      sender_account_number = normalizeAcct(sa);
+      recipient_name = walletName;
+      recipient_account_number = normalizeAcct(ra);
+      break;
+    case "ngn_payout":
+      sender_name = walletName || trimJoinNameBank(sn, null);
+      sender_account_number = normalizeAcct(sa);
+      recipient_name = trimJoinNameBank(rn, rb);
+      recipient_account_number = normalizeAcct(ra);
+      break;
+    case "deposit":
+    case "withdrawal":
+      sender_name = walletName;
+      recipient_name = counterpartName;
+      break;
+    case "transfer":
+    case "swap":
+      sender_name = walletName;
+      recipient_name = counterpartName;
+      break;
+    case "crypto_deposit":
+      sender_account_number = normalizeAcct(sa);
+      recipient_account_number = normalizeAcct(ra);
+      sender_name = formatAddressSnippet(sa);
+      recipient_name = walletName;
+      break;
+    case "crypto_payout":
+      sender_name = walletName;
+      sender_account_number = normalizeAcct(sa);
+      recipient_account_number = normalizeAcct(ra);
+      recipient_name = formatAddressSnippet(ra);
+      break;
+    default:
+      break;
+  }
+
+  return { sender_name, recipient_name, sender_account_number, recipient_account_number };
+}
+
 export default class TransactionService {
   async getDeposits({ limit, offset, filters }) {
     return paginated(deposits, {
@@ -402,6 +504,7 @@ export default class TransactionService {
           amount: deposits.amount,
           status: deposits.status,
           date_created: deposits.date_created,
+          ...stmtExtSelectNulls(),
         }).from(deposits).where(where).orderBy(desc(deposits.date_created)).limit(perSource);
       })(),
       (() => {
@@ -430,6 +533,7 @@ export default class TransactionService {
           amount: withdrawals.amount,
           status: withdrawals.status,
           date_created: withdrawals.date_created,
+          ...stmtExtSelectNulls(),
         }).from(withdrawals).where(where).orderBy(desc(withdrawals.date_created)).limit(perSource);
       })(),
       (() => {
@@ -458,6 +562,7 @@ export default class TransactionService {
           amount: transfers.amount,
           status: transfers.status,
           date_created: transfers.date_created,
+          ...stmtExtSelectNulls(),
         }).from(transfers).where(where).orderBy(desc(transfers.date_created)).limit(perSource);
       })(),
       (() => {
@@ -497,6 +602,7 @@ export default class TransactionService {
           amount: swaps.source_amount,
           status: swaps.status,
           date_created: swaps.date_created,
+          ...stmtExtSelectNulls(),
         }).from(swaps).where(where).orderBy(desc(swaps.date_created)).limit(perSource);
       })(),
       (() => {
@@ -519,6 +625,12 @@ export default class TransactionService {
           amount: ngnDeposits.amount,
           status: ngnDeposits.credit_status,
           date_created: ngnDeposits.date_created,
+          stmt_ext_sender_name: ngnDeposits.sender_account_name,
+          stmt_ext_sender_bank: ngnDeposits.sender_bank_name,
+          stmt_ext_sender_account: ngnDeposits.sender_account_number,
+          stmt_ext_recipient_name: sql`NULL`,
+          stmt_ext_recipient_bank: sql`NULL`,
+          stmt_ext_recipient_account: ngnDeposits.recipient_account_number,
         }).from(ngnDeposits).where(where).orderBy(desc(ngnDeposits.date_created)).limit(perSource);
       })(),
       (() => {
@@ -547,6 +659,12 @@ export default class TransactionService {
           amount: ngnPayouts.amount,
           status: ngnPayouts.payout_status,
           date_created: ngnPayouts.date_created,
+          stmt_ext_sender_name: ngnPayouts.source_account_name,
+          stmt_ext_sender_bank: sql`NULL`,
+          stmt_ext_sender_account: ngnPayouts.source_account_number,
+          stmt_ext_recipient_name: ngnPayouts.recipient_account_name,
+          stmt_ext_recipient_bank: ngnPayouts.recipient_institution_name,
+          stmt_ext_recipient_account: ngnPayouts.recipient_account_number,
         }).from(ngnPayouts).where(where).orderBy(desc(ngnPayouts.date_created)).limit(perSource);
       })(),
       (() => {
@@ -567,6 +685,12 @@ export default class TransactionService {
           amount: cryptoDeposits.amount,
           status: cryptoDeposits.credit_status,
           date_created: cryptoDeposits.date_created,
+          stmt_ext_sender_name: sql`NULL`,
+          stmt_ext_sender_bank: sql`NULL`,
+          stmt_ext_sender_account: cryptoDeposits.sender_address,
+          stmt_ext_recipient_name: sql`NULL`,
+          stmt_ext_recipient_bank: sql`NULL`,
+          stmt_ext_recipient_account: cryptoDeposits.recipient_address,
         }).from(cryptoDeposits).where(where).orderBy(desc(cryptoDeposits.date_created)).limit(perSource);
       })(),
       (() => {
@@ -588,6 +712,12 @@ export default class TransactionService {
           amount: cryptoPayouts.amount,
           status: cryptoPayouts.payout_status,
           date_created: cryptoPayouts.date_created,
+          stmt_ext_sender_name: sql`NULL`,
+          stmt_ext_sender_bank: sql`NULL`,
+          stmt_ext_sender_account: cryptoPayouts.source_address,
+          stmt_ext_recipient_name: sql`NULL`,
+          stmt_ext_recipient_bank: sql`NULL`,
+          stmt_ext_recipient_account: cryptoPayouts.recipient_address,
         }).from(cryptoPayouts).where(where).orderBy(desc(cryptoPayouts.date_created)).limit(perSource);
       })(),
     ]);
@@ -603,7 +733,20 @@ export default class TransactionService {
       if (toDate && new Date(row.date_created) > toDate) return false;
       if (currencyFilter && String(row.currency_code || "").toUpperCase() !== currencyFilter) return false;
       if (searchTerm) {
-        const haystack = `${row.reference || ""} ${row.wallet_key || ""} ${row.transaction_type || ""}`.toLowerCase();
+        const haystack = [
+          row.reference,
+          row.wallet_key,
+          row.transaction_type,
+          row.stmt_ext_sender_name,
+          row.stmt_ext_sender_bank,
+          row.stmt_ext_sender_account,
+          row.stmt_ext_recipient_name,
+          row.stmt_ext_recipient_bank,
+          row.stmt_ext_recipient_account,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
         if (!haystack.includes(searchTerm)) return false;
       }
       return true;
@@ -618,18 +761,16 @@ export default class TransactionService {
       const { swap_wallet_key_3, swap_wallet_key_4, ...rest } = row;
       const walletName = nameMap.get(rest.wallet_key) || null;
       const counterpartName = nameMap.get(rest.counterpart_wallet_key) || null;
+      const parties = resolveStatementPartyLabels(rest, walletName, counterpartName);
+      const base = stripStmtExtFields(rest);
       return {
-        ...rest,
+        ...base,
         wallet_name: walletName,
         counterpart_wallet_name: counterpartName,
-        sender_name:
-          rest.transaction_type === "transfer" || rest.transaction_type === "swap"
-            ? walletName
-            : null,
-        recipient_name:
-          rest.transaction_type === "transfer" || rest.transaction_type === "swap"
-            ? counterpartName
-            : null,
+        sender_name: parties.sender_name,
+        recipient_name: parties.recipient_name,
+        sender_account_number: parties.sender_account_number,
+        recipient_account_number: parties.recipient_account_number,
       };
     });
 
