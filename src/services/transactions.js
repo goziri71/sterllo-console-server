@@ -56,12 +56,27 @@ function buildConditions(
   return conditions.length > 0 ? and(...conditions) : undefined;
 }
 
+function isMissingMysqlTableError(e) {
+  return e?.code === "ER_NO_SUCH_TABLE" || e?.errno === 1146;
+}
+
 async function paginated(table, { where, limit, offset }) {
-  const [rows, [{ total }]] = await Promise.all([
+  const [rows, countRows] = await Promise.all([
     db.select().from(table).where(where).limit(limit).offset(offset).orderBy(desc(table.date_created)),
     db.select({ total: count() }).from(table).where(where),
   ]);
-  return { count: Number(total), rows };
+  const rawTotal = countRows[0]?.total ?? 0;
+  return { count: Number(rawTotal), rows };
+}
+
+/** Same as paginated, but returns an empty page when the physical table is absent (env without fiat/crypto ledger tables). */
+async function paginatedOrEmpty(table, opts) {
+  try {
+    return await paginated(table, opts);
+  } catch (e) {
+    if (isMissingMysqlTableError(e)) return { count: 0, rows: [] };
+    throw e;
+  }
 }
 
 async function loadWalletOwnerMap(walletKeys = []) {
@@ -222,7 +237,7 @@ export default class TransactionService {
     }
     const where = conditions.length > 0 ? and(...conditions) : undefined;
 
-    return paginated(ngnDeposits, { where, limit, offset });
+    return paginatedOrEmpty(ngnDeposits, { where, limit, offset });
   }
 
   async getNGNPayouts({ limit, offset, filters }) {
@@ -251,7 +266,7 @@ export default class TransactionService {
     }
     const where = conditions.length > 0 ? and(...conditions) : undefined;
 
-    return paginated(ngnPayouts, {
+    return paginatedOrEmpty(ngnPayouts, {
       where,
       limit,
       offset,
@@ -280,7 +295,7 @@ export default class TransactionService {
     }
     const where = conditions.length > 0 ? and(...conditions) : undefined;
 
-    return paginated(cryptoDeposits, { where, limit, offset });
+    return paginatedOrEmpty(cryptoDeposits, { where, limit, offset });
   }
 
   async getCryptoPayouts({ limit, offset, filters }) {
@@ -307,7 +322,7 @@ export default class TransactionService {
     }
     const where = conditions.length > 0 ? and(...conditions) : undefined;
 
-    return paginated(cryptoPayouts, {
+    return paginatedOrEmpty(cryptoPayouts, {
       where,
       limit,
       offset,
