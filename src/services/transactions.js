@@ -5,6 +5,7 @@ import { ngnDeposits, ngnPayouts } from "../db/schema/fiat.js";
 import { cryptoDeposits, cryptoPayouts } from "../db/schema/crypto.js";
 import { customers, customerWallets } from "../db/schema/customers.js";
 import { ErrorClass } from "../utils/errorClass/index.js";
+import { isMissingMysqlTableError } from "../utils/mysqlErrors.js";
 
 /**
  * Build an array of Drizzle conditions from common transaction filters.
@@ -54,10 +55,6 @@ function buildConditions(
   }
 
   return conditions.length > 0 ? and(...conditions) : undefined;
-}
-
-function isMissingMysqlTableError(e) {
-  return e?.code === "ER_NO_SUCH_TABLE" || e?.errno === 1146;
 }
 
 async function paginated(table, { where, limit, offset }) {

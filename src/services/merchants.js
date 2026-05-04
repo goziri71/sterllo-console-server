@@ -7,6 +7,7 @@ import { decryptFromPlainPair, stripWrappingQuotes } from "../utils/decryptProdS
 import { customers } from "../db/schema/customers.js";
 import { kycs } from "../db/schema/kycs.js";
 import { ErrorClass } from "../utils/errorClass/index.js";
+import { isMissingMysqlTableError } from "../utils/mysqlErrors.js";
 
 const SORTABLE_COLUMNS = {
   name: merchants.name,
@@ -98,7 +99,7 @@ function shapeUdaraPublic(row) {
 }
 
 function isMissingUdaraTableError(e) {
-  return e?.code === "ER_NO_SUCH_TABLE" || e?.errno === 1146;
+  return isMissingMysqlTableError(e);
 }
 
 /** Latest credential row per account_key (for listing/detail); avoids fragile nested LEFT JOIN SQL. */
