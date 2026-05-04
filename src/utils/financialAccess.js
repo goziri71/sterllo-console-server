@@ -17,8 +17,10 @@ export function shouldRedactFinancialKey(key) {
 
 export function redactFinancialDeep(value) {
   if (value === null || value === undefined) return value;
+  if (typeof value === "bigint") return Number(value);
   if (Array.isArray(value)) return value.map((v) => redactFinancialDeep(v));
-  if (typeof value === "object" && value.constructor === Object) {
+  if (value instanceof Date) return value;
+  if (typeof value === "object") {
     const out = {};
     for (const [k, v] of Object.entries(value)) {
       if (shouldRedactFinancialKey(k)) {

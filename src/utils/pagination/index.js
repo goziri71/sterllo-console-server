@@ -25,6 +25,22 @@ export function parsePagination(query) {
   return { page, limit, offset };
 }
 
+/** Avoid Fastify/JSON `Do not know how to serialize a BigInt` on aggregated IDs etc. */
+function jsonSafeDeep(value) {
+  if (value === null || value === undefined) return value;
+  if (typeof value === "bigint") return Number(value);
+  if (Array.isArray(value)) return value.map((item) => jsonSafeDeep(item));
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "object") {
+    const out = {};
+    for (const [k, v] of Object.entries(value)) {
+      out[k] = jsonSafeDeep(v);
+    }
+    return out;
+  }
+  return value;
+}
+
 /**
  * Build a standardized paginated response
  * @param {object} data - Sequelize findAndCountAll result { count, rows }
@@ -33,12 +49,13 @@ export function parsePagination(query) {
  * @returns {object}
  */
 export function paginatedResponse(data, page, limit) {
-  const totalPages = Math.ceil(data.count / limit);
+  const total = Number(data.count ?? 0);
+  const totalPages = Math.ceil(total / limit);
 
   return {
-    records: data.rows,
+    records: Array.isArray(data.rows) ? data.rows.map((row) => jsonSafeDeep(row)) : data.rows,
     pagination: {
-      total: data.count,
+      total,
       page,
       limit,
       total_pages: totalPages,
