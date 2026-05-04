@@ -6,6 +6,10 @@ import {
   updateCustomerByHeaders,
   getCustomerByHeaders,
   getCustomerViewMetrics,
+  patchCustomerTier,
+  patchCustomerRestrictions,
+  freezeCustomer,
+  unfreezeCustomer,
 } from "../../controllers/customers.js";
 import { getEnrichedCustomerWallets, getCustomerWalletDetail, getCustomerWalletLedger } from "../../controllers/wallets.js";
 import { getCustomerFees } from "../../controllers/fees.js";
@@ -26,6 +30,10 @@ export default async function customerRoutes(fastify) {
 
     f.get("/", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getAllCustomers);
     f.get("/:identifier/metrics", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getCustomerViewMetrics);
+    f.patch("/:identifier/tier", { preHandler: requirePermission(PERMISSIONS.CUSTOMER_UPDATE) }, patchCustomerTier);
+    f.patch("/:identifier/restrictions", { preHandler: requirePermission(PERMISSIONS.CUSTOMER_UPDATE) }, patchCustomerRestrictions);
+    f.post("/:identifier/freeze", { preHandler: requirePermission(PERMISSIONS.CUSTOMER_UPDATE) }, freezeCustomer);
+    f.post("/:identifier/unfreeze", { preHandler: requirePermission(PERMISSIONS.CUSTOMER_UPDATE) }, unfreezeCustomer);
     f.get("/:identifier", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getCustomer);
     f.get("/:identifier/wallets", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getEnrichedCustomerWallets);
     f.get("/:identifier/wallets/:wallet_key/ledger", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getCustomerWalletLedger);

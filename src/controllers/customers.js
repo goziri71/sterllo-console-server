@@ -45,6 +45,47 @@ export const updateCustomer = async (request, reply) => {
   });
 };
 
+export const patchCustomerTier = async (request, reply) => {
+  const customer = await customerService.setTier(request.params.identifier, request.body?.tier);
+
+  return reply.code(200).send({
+    success: true,
+    message: "Customer tier updated successfully",
+    data: customer,
+  });
+};
+
+export const patchCustomerRestrictions = async (request, reply) => {
+  const customer = await customerService.setRestrictions(request.params.identifier, request.body);
+
+  return reply.code(200).send({
+    success: true,
+    message: "Customer restrictions updated successfully",
+    data: customer,
+  });
+};
+
+export const freezeCustomer = async (request, reply) => {
+  const scope = request.body?.scope ?? "full";
+  const customer = await customerService.freeze(request.params.identifier, { scope });
+
+  return reply.code(200).send({
+    success: true,
+    message: "Customer restrictions applied",
+    data: customer,
+  });
+};
+
+export const unfreezeCustomer = async (request, reply) => {
+  const customer = await customerService.unfreeze(request.params.identifier);
+
+  return reply.code(200).send({
+    success: true,
+    message: "Customer posting restrictions cleared",
+    data: customer,
+  });
+};
+
 export const updateCustomerByHeaders = async (request, reply) => {
   const userKey = request.headers["x-user-key"];
   const accountKey = request.headers["x-account-key"];

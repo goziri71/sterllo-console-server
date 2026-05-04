@@ -20,6 +20,69 @@ function buildOrderBy(sortBy, order) {
   return order === "asc" ? asc(column) : desc(column);
 }
 
+const CUSTOMER_PATCH_FIELDS = [
+  "status",
+  "is_pnd",
+  "is_pnc",
+  "is_personal_compliant",
+  "is_business_compliant",
+  "tier",
+];
+
+const ALLOWED_STATUS = new Set(["PENDING", "ACTIVE", "FAILED", "REJECTED"]);
+const ALLOWED_TIERS = new Set([1, 2, 3]);
+
+/** Normalize boolean-ish flags to Y/N (accepts Y/N and 1/0). */
+function normalizeYN(value, fieldName, errorCode) {
+  if (value === undefined) return undefined;
+  const s = String(value).trim().toUpperCase();
+  if (s === "Y" || s === "1" || s === "TRUE") return "Y";
+  if (s === "N" || s === "0" || s === "FALSE") return "N";
+  throw new ErrorClass(`${fieldName} must be Y or N`, errorCode);
+}
+
+/**
+ * Shared validation for JWT and header-based customer updates.
+ * @param {object} data - Raw request body
+ * @param {number} errorCode - ErrorClass code (400 for console JWT, 4000 for header clients)
+ */
+function normalizeCustomerPatchData(data, errorCode = 400) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw new ErrorClass("Invalid request body", errorCode);
+  }
+
+  const updateData = {};
+  for (const field of CUSTOMER_PATCH_FIELDS) {
+    if (data[field] === undefined) continue;
+
+    if (field === "tier") {
+      const n = Number(data[field]);
+      if (!Number.isInteger(n) || !ALLOWED_TIERS.has(n)) {
+        throw new ErrorClass("tier must be 1, 2, or 3", errorCode);
+      }
+      updateData[field] = n;
+      continue;
+    }
+
+    if (field === "status") {
+      const normalizedStatus = String(data[field]).trim().toUpperCase();
+      if (!ALLOWED_STATUS.has(normalizedStatus)) {
+        throw new ErrorClass("status must be one of: PENDING, ACTIVE, FAILED, REJECTED", errorCode);
+      }
+      updateData[field] = normalizedStatus;
+      continue;
+    }
+
+    updateData[field] = normalizeYN(data[field], field, errorCode);
+  }
+
+  if (Object.keys(updateData).length === 0) {
+    throw new ErrorClass("No valid fields to update", errorCode);
+  }
+
+  return updateData;
+}
+
 function startOfMonth(date = new Date()) {
   return new Date(date.getFullYear(), date.getMonth(), 1);
 }
@@ -226,24 +289,7 @@ export default class CustomerService {
       throw new ErrorClass("Customer not found", 404);
     }
 
-    const allowedFields = [
-      "status",
-      "is_pnd",
-      "is_pnc",
-      "is_personal_compliant",
-      "is_business_compliant",
-      "tier",
-    ];
-    const updateData = {};
-    for (const field of allowedFields) {
-      if (data[field] !== undefined) {
-        updateData[field] = data[field];
-      }
-    }
-
-    if (Object.keys(updateData).length === 0) {
-      throw new ErrorClass("No valid fields to update", 400);
-    }
+    const updateData = normalizeCustomerPatchData(data, 400);
 
     updateData.date_modified = new Date();
     await db
@@ -258,6 +304,49 @@ export default class CustomerService {
       .limit(1);
 
     return updated;
+  }
+
+  /** Sets customer KYC tier (1–3). Delegates to `update`. */
+  async setTier(identifier, tier) {
+    if (tier === undefined) {
+      throw new ErrorClass("tier is required", 400);
+    }
+    return this.update(identifier, { tier });
+  }
+
+  /**
+   * Updates posting restrictions (`is_pnd` / `is_pnc`). At least one field required.
+   */
+  async setRestrictions(identifier, body) {
+    const { is_pnd: pnd, is_pnc: pnc } = body || {};
+    if (pnd === undefined && pnc === undefined) {
+      throw new ErrorClass("At least one of is_pnd, is_pnc is required", 400);
+    }
+    const payload = {};
+    if (pnd !== undefined) payload.is_pnd = pnd;
+    if (pnc !== undefined) payload.is_pnc = pnc;
+    return this.update(identifier, payload);
+  }
+
+  /**
+   * Freeze-style restrictions: `full` (debit + credit block), `debit_only` (PND), `credit_only` (PNC).
+   */
+  async freeze(identifier, { scope = "full" } = {}) {
+    const map = {
+      full: { is_pnd: "Y", is_pnc: "Y" },
+      debit_only: { is_pnd: "Y", is_pnc: "N" },
+      credit_only: { is_pnd: "N", is_pnc: "Y" },
+    };
+    const payload = map[scope];
+    if (!payload) {
+      throw new ErrorClass("scope must be one of: full, debit_only, credit_only", 400);
+    }
+    return this.update(identifier, payload);
+  }
+
+  /** Clears both PND and PNC (typical unfreeze). */
+  async unfreeze(identifier) {
+    return this.update(identifier, { is_pnd: "N", is_pnc: "N" });
   }
 
   async updateByUserAndAccountHeaders({ userKey, accountKey, reference, data }) {
@@ -290,53 +379,7 @@ export default class CustomerService {
       throw new ErrorClass("Customer not found", 4004);
     }
 
-    const allowedFields = [
-      "is_personal_compliant",
-      "is_business_compliant",
-      "status",
-      "is_pnd",
-      "is_pnc",
-      "tier",
-    ];
-    const yn = new Set(["Y", "N"]);
-    const allowedStatuses = new Set(["PENDING", "ACTIVE", "FAILED", "REJECTED"]);
-    const allowedTiers = new Set([1, 2, 3]);
-
-    const updateData = {};
-    for (const field of allowedFields) {
-      if (data[field] === undefined) continue;
-
-      if (field === "tier") {
-        const n = Number(data[field]);
-        if (!Number.isInteger(n) || !allowedTiers.has(n)) {
-          throw new ErrorClass("tier must be 1, 2, or 3", 4000);
-        }
-        updateData[field] = n;
-        continue;
-      }
-
-      if (field === "status") {
-        const normalizedStatus = String(data[field]).trim().toUpperCase();
-        if (!allowedStatuses.has(normalizedStatus)) {
-          throw new ErrorClass(
-            "status must be one of: PENDING, ACTIVE, FAILED, REJECTED",
-            4000,
-          );
-        }
-        updateData[field] = normalizedStatus;
-        continue;
-      }
-
-      const v = String(data[field]).trim().toUpperCase();
-      if (!yn.has(v)) {
-        throw new ErrorClass(`${field} must be Y or N`, 4000);
-      }
-      updateData[field] = v;
-    }
-
-    if (Object.keys(updateData).length === 0) {
-      throw new ErrorClass("No valid fields to update", 4000);
-    }
+    const updateData = normalizeCustomerPatchData(data, 4000);
 
     updateData.date_modified = new Date();
     await db

@@ -170,7 +170,22 @@ All routes require JWT + any role.
 | GET | `/api/v1/customers/:identifier/wallets/:wallet_key/ledger` | All | Per-wallet ledger lines (service text + balances; requires `financial.read`) |
 | GET | `/api/v1/customers/:identifier/fees` | All | Get customer's SaaS fee schedule |
 | GET | `/api/v1/customers/:identifier/kycs` | All | Get customer's KYCs |
-| PATCH | `/api/v1/customers/:identifier` | operations, compliance | Update customer |
+| PATCH | `/api/v1/customers/:identifier` | `customer.update` | Update customer (status, compliance flags, tier, PND/PNC) |
+| PATCH | `/api/v1/customers/:identifier/tier` | `customer.update` | Set KYC tier only (`{ "tier": 2 }`) |
+| PATCH | `/api/v1/customers/:identifier/restrictions` | `customer.update` | Set PND/PNC only (posting restrictions) |
+| POST | `/api/v1/customers/:identifier/freeze` | `customer.update` | Apply freeze presets (`scope`: `full` \| `debit_only` \| `credit_only`) |
+| POST | `/api/v1/customers/:identifier/unfreeze` | `customer.update` | Clear PND and PNC (`is_pnd`/`is_pnc` → N) |
+
+> **KYC, freeze, and tier — aligned map** (see also **KYCs** and **Config → customer-tiers** below).
+
+| Goal | Endpoint(s) |
+|------|----------------|
+| View KYC for one customer | `GET /api/v1/customers/:identifier/kycs` (paginated list); optional summary on `GET /api/v1/customers/:identifier` (`kyc_status`) |
+| Review / approve KYC record | `GET /api/v1/kycs/:reference`, `PATCH /api/v1/kycs/:reference` (`kyc.update`) |
+| Read tier labels | `GET /api/v1/config/customer-tiers` |
+| Upgrade / set tier | `PATCH /api/v1/customers/:identifier/tier` or same fields on `PATCH /api/v1/customers/:identifier` |
+| Freeze (restrict debits/credits) | `POST /api/v1/customers/:identifier/freeze` or `PATCH .../restrictions` or `PATCH /api/v1/customers/:identifier` with `is_pnd` / `is_pnc` |
+| Unfreeze | `POST /api/v1/customers/:identifier/unfreeze` or set both to N via `PATCH .../restrictions` / general `PATCH` |
 
 ### GET `/api/v1/customers` — enriched list response
 
@@ -240,16 +255,52 @@ Returns metric card data with month-over-month comparison:
 
 ### PATCH `/api/v1/customers/:identifier`
 
+Same validation as the focused routes below. Boolean flags are stored as **`Y` / `N`**; **`1` / `0`** are also accepted in the body and normalized.
+
 ```json
 {
-  "status": "active",
-  "is_pnd": "0",
-  "is_pnc": "0",
-  "is_personal_compliant": "1",
-  "is_business_compliant": "1",
+  "status": "ACTIVE",
+  "is_pnd": "N",
+  "is_pnc": "N",
+  "is_personal_compliant": "Y",
+  "is_business_compliant": "Y",
   "tier": 2
 }
 ```
+
+### PATCH `/api/v1/customers/:identifier/tier`
+
+```json
+{ "tier": 2 }
+```
+
+`tier` must be **1**, **2**, or **3**.
+
+### PATCH `/api/v1/customers/:identifier/restrictions`
+
+Update posting flags only (at least one field):
+
+```json
+{ "is_pnd": "Y", "is_pnc": "N" }
+```
+
+### POST `/api/v1/customers/:identifier/freeze`
+
+Optional body (defaults to full freeze):
+
+```json
+{ "scope": "full" }
+```
+
+| `scope` | Effect |
+|---------|--------|
+| `full` | `is_pnd` and `is_pnc` → `Y` |
+| `debit_only` | Post no debit (PND) — `is_pnd` → `Y`, `is_pnc` → `N` |
+| `credit_only` | Post no credit (PNC) — `is_pnd` → `N`, `is_pnc` → `Y` |
+
+### POST `/api/v1/customers/:identifier/unfreeze`
+
+No body. Sets **`is_pnd`** and **`is_pnc`** to **`N`**.
 
 ### Query params (GET list)
 
@@ -270,6 +321,9 @@ Use these together on the **merchant → customer detail** screen (profile heade
 | UI area | Endpoint | Notes |
 |--------|----------|--------|
 | Profile + tier / KYC | `GET /api/v1/customers/:identifier` | Enriched `wallet_count`, `kyc_status`, etc. |
+| KYC records (detail) | `GET /api/v1/customers/:identifier/kycs` | Paginated KYC rows for this customer |
+| Tier upgrade | `PATCH /api/v1/customers/:identifier/tier` | Requires `customer.update` |
+| Freeze / unfreeze | `POST .../freeze`, `POST .../unfreeze` | Presets; or `PATCH .../restrictions` |
 | Top summary cards (wallets / sub-accounts / disputes) | `GET /api/v1/customers/:identifier/metrics` | See response shape below |
 | Wallet list + balances | `GET /api/v1/customers/:identifier/wallets` | `search`, `page`, `limit`. Balance fields require `financial.read`; otherwise they are redacted |
 | Selected wallet detail | `GET /api/v1/customers/:identifier/wallets/:wallet_key` | Same permission rules as list |
