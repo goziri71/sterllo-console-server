@@ -3,6 +3,7 @@ import {
   getMerchant,
   getMerchantStats,
   updateMerchant,
+  patchMerchantTier,
   getMerchantLedgers,
   getMerchantSettlements,
   linkMerchantBeamerAccount,
@@ -33,6 +34,7 @@ export default async function merchantRoutes(fastify) {
   fastify.get("/:account_key/wallets/:wallet_key", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getMerchantWallet);
   fastify.get("/:account_key/fees", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getMerchantFees);
 
+  fastify.patch("/:account_key/tier", { preHandler: requirePermission(PERMISSIONS.MERCHANT_UPDATE) }, patchMerchantTier);
   fastify.patch("/:account_key", { preHandler: requirePermission(PERMISSIONS.MERCHANT_UPDATE) }, updateMerchant);
   fastify.post(
     "/:account_key/integrations/beamer/account-link",

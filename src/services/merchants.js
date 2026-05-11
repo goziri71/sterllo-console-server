@@ -293,9 +293,16 @@ export default class MerchantService {
     const allowedFields = ["name", "trade_name", "default_kyc_tier"];
     const updateData = {};
     for (const field of allowedFields) {
-      if (data[field] !== undefined) {
-        updateData[field] = data[field];
+      if (data[field] === undefined) continue;
+      if (field === "default_kyc_tier") {
+        const n = Number(data[field]);
+        if (!Number.isInteger(n) || n < 1 || n > 3) {
+          throw new ErrorClass("default_kyc_tier must be 1, 2, or 3", 400);
+        }
+        updateData[field] = n;
+        continue;
       }
+      updateData[field] = data[field];
     }
 
     if (Object.keys(updateData).length === 0) {
@@ -315,6 +322,14 @@ export default class MerchantService {
       .limit(1);
 
     return updated;
+  }
+
+  /** Sets merchant default KYC tier for new/onboarding flows (1–3). Column: `Merchants.default_kyc_tier`. */
+  async setDefaultKycTier(accountKey, tier) {
+    if (tier === undefined) {
+      throw new ErrorClass("tier is required", 400);
+    }
+    return this.update(accountKey, { default_kyc_tier: tier });
   }
 
   async getLedgers(accountKey, { limit, offset }) {
