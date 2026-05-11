@@ -39,10 +39,13 @@ export const updateKYC = async (request, reply) => {
 
 export const getCustomerKYCs = async (request, reply) => {
   const { page, limit, offset } = parsePagination(request.query);
-  const data = await kycService.getByCustomer(request.params.identifier, { limit, offset });
+  const { customer, count, rows } = await kycService.getByCustomer(request.params.identifier, { limit, offset });
 
   return reply.code(200).send({
+    code: 200,
     success: true,
-    ...paginatedResponse(data, page, limit),
+    message: "Customer KYC records fetched successfully",
+    customer,
+    ...paginatedResponse({ count, rows }, page, limit),
   });
 };
