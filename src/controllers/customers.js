@@ -46,12 +46,28 @@ export const updateCustomer = async (request, reply) => {
 };
 
 export const patchCustomerTier = async (request, reply) => {
-  const customer = await customerService.setTier(request.params.identifier, request.body?.tier);
+  const { customer, merchant } = await customerService.setTierAndOptionalMerchantDefault(
+    request.params.identifier,
+    request.body,
+  );
+
+  const customerUpdated = request.body?.tier !== undefined;
+  const merchantUpdated =
+    request.body?.merchant_default_kyc_tier !== undefined || request.body?.merchant_tier !== undefined;
+
+  let message = "Customer tier updated successfully";
+  if (customerUpdated && merchantUpdated) {
+    message = "Customer and merchant default KYC tier updated successfully";
+  } else if (merchantUpdated) {
+    message = "Merchant default KYC tier updated successfully";
+  }
 
   return reply.code(200).send({
+    code: 200,
     success: true,
-    message: "Customer tier updated successfully",
+    message,
     data: customer,
+    merchant,
   });
 };
 

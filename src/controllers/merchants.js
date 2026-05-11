@@ -58,6 +58,17 @@ export const updateMerchant = async (request, reply) => {
   });
 };
 
+export const patchMerchantTier = async (request, reply) => {
+  const merchant = await merchantService.setDefaultKycTier(request.params.account_key, request.body?.tier);
+
+  return reply.code(200).send({
+    code: 200,
+    success: true,
+    message: "Merchant default KYC tier updated successfully",
+    data: merchant,
+  });
+};
+
 export const getMerchantLedgers = async (request, reply) => {
   const { page, limit, offset } = parsePagination(request.query);
   const data = await merchantService.getLedgers(request.params.account_key, { limit, offset });

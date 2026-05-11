@@ -5,6 +5,7 @@ import { merchants } from "../db/schema/merchants.js";
 import { kycs } from "../db/schema/kycs.js";
 import { transactionDisputes } from "../db/schema/disputes.js";
 import { ErrorClass } from "../utils/errorClass/index.js";
+import MerchantService from "./merchants.js";
 
 const SORTABLE_COLUMNS = {
   name: customers.first_name,
@@ -21,7 +22,6 @@ function buildOrderBy(sortBy, order) {
 }
 
 const CUSTOMER_PATCH_FIELDS = [
-  "status",
   "is_pnd",
   "is_pnc",
   "is_personal_compliant",
@@ -29,7 +29,6 @@ const CUSTOMER_PATCH_FIELDS = [
   "tier",
 ];
 
-const ALLOWED_STATUS = new Set(["PENDING", "ACTIVE", "FAILED", "REJECTED"]);
 const ALLOWED_TIERS = new Set([1, 2, 3]);
 
 /** Normalize boolean-ish flags to Y/N (accepts Y/N and 1/0). */
@@ -51,6 +50,13 @@ function normalizeCustomerPatchData(data, errorCode = 400) {
     throw new ErrorClass("Invalid request body", errorCode);
   }
 
+  if (data.status !== undefined) {
+    throw new ErrorClass(
+      "Customer status cannot be updated via this API; use freeze/unfreeze for posting restrictions and PATCH .../tier for tier.",
+      errorCode,
+    );
+  }
+
   const updateData = {};
   for (const field of CUSTOMER_PATCH_FIELDS) {
     if (data[field] === undefined) continue;
@@ -61,15 +67,6 @@ function normalizeCustomerPatchData(data, errorCode = 400) {
         throw new ErrorClass("tier must be 1, 2, or 3", errorCode);
       }
       updateData[field] = n;
-      continue;
-    }
-
-    if (field === "status") {
-      const normalizedStatus = String(data[field]).trim().toUpperCase();
-      if (!ALLOWED_STATUS.has(normalizedStatus)) {
-        throw new ErrorClass("status must be one of: PENDING, ACTIVE, FAILED, REJECTED", errorCode);
-      }
-      updateData[field] = normalizedStatus;
       continue;
     }
 
@@ -306,12 +303,71 @@ export default class CustomerService {
     return updated;
   }
 
+  /**
+   * Updates customer `tier` and/or the linked merchant's `default_kyc_tier` (same merchant as `customer.account_key`).
+   * Body: `tier` (customer), `merchant_default_kyc_tier` or `merchant_tier` (merchant) — at least one required.
+   */
+  async setTierAndOptionalMerchantDefault(identifier, body = {}) {
+    const hasCustomerTier = body.tier !== undefined;
+    const merchantRaw = body.merchant_default_kyc_tier ?? body.merchant_tier;
+    const hasMerchantTier = merchantRaw !== undefined;
+
+    if (!hasCustomerTier && !hasMerchantTier) {
+      throw new ErrorClass(
+        "Provide `tier` (customer), `merchant_default_kyc_tier` (or `merchant_tier`), or both.",
+        400,
+      );
+    }
+
+    let customerTier;
+    if (hasCustomerTier) {
+      const n = Number(body.tier);
+      if (!Number.isInteger(n) || !ALLOWED_TIERS.has(n)) {
+        throw new ErrorClass("tier must be 1, 2, or 3", 400);
+      }
+      customerTier = n;
+    }
+
+    let merchantTier;
+    if (hasMerchantTier) {
+      const n = Number(merchantRaw);
+      if (!Number.isInteger(n) || !ALLOWED_TIERS.has(n)) {
+        throw new ErrorClass("merchant_default_kyc_tier must be 1, 2, or 3", 400);
+      }
+      merchantTier = n;
+    }
+
+    const [customer] = await db
+      .select()
+      .from(customers)
+      .where(eq(customers.identifier, identifier))
+      .limit(1);
+
+    if (!customer) {
+      throw new ErrorClass("Customer not found", 404);
+    }
+
+    let updatedCustomer = customer;
+    if (hasCustomerTier) {
+      updatedCustomer = await this.update(identifier, { tier: customerTier });
+    }
+
+    let updatedMerchant = null;
+    if (hasMerchantTier) {
+      const merchantService = new MerchantService();
+      updatedMerchant = await merchantService.setDefaultKycTier(customer.account_key, merchantTier);
+    }
+
+    return { customer: updatedCustomer, merchant: updatedMerchant };
+  }
+
   /** Sets customer KYC tier (1–3). Delegates to `update`. */
   async setTier(identifier, tier) {
     if (tier === undefined) {
       throw new ErrorClass("tier is required", 400);
     }
-    return this.update(identifier, { tier });
+    const { customer } = await this.setTierAndOptionalMerchantDefault(identifier, { tier });
+    return customer;
   }
 
   /**
