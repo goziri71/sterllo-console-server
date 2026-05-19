@@ -2,6 +2,8 @@
 
 Base URL: `http://localhost:5000`
 
+**Path prefix:** All routes below use `/<API_VERSION>/…` where `API_VERSION` is exported from `src/services/centralizedversion.js` (currently `1.202602.0`). If you get `Route not found`, the path is often wrong (for example a legacy `/api/v1/…` prefix is not how this app mounts routes).
+
 All protected routes require a `Bearer` token in the `Authorization` header:
 
 ```
@@ -16,7 +18,7 @@ Roles: `finance`, `operations`, `ops_support`, `compliance`, `growth`
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| GET | `/api/v1/health` | None | Service health check |
+| GET | `/1.202602.0/health` | None | Service health check |
 
 ---
 
@@ -24,13 +26,13 @@ Roles: `finance`, `operations`, `ops_support`, `compliance`, `growth`
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| POST | `/api/v1/auth/register` | None | Register a new user |
-| POST | `/api/v1/auth/login` | None | Login and get JWT token |
-| POST | `/api/v1/auth/logout` | JWT | Logout (invalidates current token) |
-| GET | `/api/v1/auth/profile` | JWT | Get current user profile |
-| PATCH | `/api/v1/auth/change-password` | JWT | Change password |
+| POST | `/1.202602.0/auth/register` | None | Register a new user |
+| POST | `/1.202602.0/auth/login` | None | Login and get JWT token |
+| POST | `/1.202602.0/auth/logout` | JWT | Logout (invalidates current token) |
+| GET | `/1.202602.0/auth/profile` | JWT | Get current user profile |
+| PATCH | `/1.202602.0/auth/change-password` | JWT | Change password |
 
-### POST `/api/v1/auth/register`
+### POST `/1.202602.0/auth/register`
 
 ```json
 {
@@ -42,7 +44,7 @@ Roles: `finance`, `operations`, `ops_support`, `compliance`, `growth`
 }
 ```
 
-### POST `/api/v1/auth/login`
+### POST `/1.202602.0/auth/login`
 
 ```json
 {
@@ -51,7 +53,7 @@ Roles: `finance`, `operations`, `ops_support`, `compliance`, `growth`
 }
 ```
 
-### PATCH `/api/v1/auth/change-password`
+### PATCH `/1.202602.0/auth/change-password`
 
 ```json
 {
@@ -68,27 +70,29 @@ All routes require JWT + any role.
 
 | Method | Endpoint | Roles | Description |
 |--------|----------|-------|-------------|
-| GET | `/api/v1/merchants` | All | List all merchants (enriched with ledger_count, currencies, settlement_count) |
-| GET | `/api/v1/merchants/stats` | All | Merchant metric cards with month-over-month comparison |
-| GET | `/api/v1/merchants/:account_key` | All | Get single merchant (enriched) |
-| GET | `/api/v1/merchants/:account_key/customers` | All | Get merchant's customers |
-| GET | `/api/v1/merchants/:account_key/customers/:identifier/transactions` | All | All transactions for one customer under this merchant (unified statement; requires `financial.read`) |
-| GET | `/api/v1/merchants/:account_key/ledgers` | All | Get merchant's ledgers |
-| GET | `/api/v1/merchants/:account_key/settlements` | All | Get merchant's settlements |
-| GET | `/api/v1/merchants/:account_key/wallets` | All | Get merchant's wallets (enriched with NGN accounts + crypto addresses) |
-| GET | `/api/v1/merchants/:account_key/wallets/:wallet_key` | All | Get single merchant wallet (enriched) |
-| GET | `/api/v1/merchants/:account_key/fees` | All | Get merchant's BaaS fee schedule (custom + defaults) |
-| PATCH | `/api/v1/merchants/:account_key` | operations, compliance | Update merchant |
+| GET | `/1.202602.0/merchants` | All | List all merchants (enriched with ledger_count, currencies, settlement_count) |
+| GET | `/1.202602.0/merchants/stats` | All | Merchant metric cards with month-over-month comparison |
+| GET | `/1.202602.0/merchants/:account_key` | All | Get single merchant (enriched) |
+| GET | `/1.202602.0/merchants/:account_key/customers` | All | Get merchant's customers |
+| GET | `/1.202602.0/merchants/:account_key/customers/:identifier/transactions` | All | All transactions for one customer under this merchant (unified statement; requires `financial.read`) |
+| GET | `/1.202602.0/merchants/:account_key/ledgers` | All | Get merchant's ledgers |
+| GET | `/1.202602.0/merchants/:account_key/settlements` | All | Get merchant's settlements |
+| GET | `/1.202602.0/merchants/:account_key/wallets` | All | Get merchant's wallets (enriched with NGN accounts + crypto addresses) |
+| GET | `/1.202602.0/merchants/:account_key/wallets/:wallet_key` | All | Get single merchant wallet (enriched) |
+| GET | `/1.202602.0/merchants/:account_key/fees` | All | Get merchant's BaaS fee schedule (custom + defaults) |
+| GET | `/1.202602.0/merchants/:account_key/kycs` | All | List merchant's own KYC records (not customer KYCs) |
+| POST | `/1.202602.0/merchants/:account_key/kyc/approve` | `kyc.update` | Approve merchant KYC (`is_compliant` → `Y`) |
+| PATCH | `/1.202602.0/merchants/:account_key` | operations, compliance | Update merchant |
 
-### GET `/api/v1/merchants/:account_key/customers/:identifier/transactions`
+### GET `/1.202602.0/merchants/:account_key/customers/:identifier/transactions`
 
-Returns the same unified transaction payload as `GET /api/v1/transactions/statement` with `identifier` and `account_key` set from the path. Confirms `Customers.identifier` belongs to `Customers.account_key = :account_key` before returning data.
+Returns the same unified transaction payload as `GET /1.202602.0/transactions/statement` with `identifier` and `account_key` set from the path. Confirms `Customers.identifier` belongs to `Customers.account_key = :account_key` before returning data.
 
 **Permission:** `financial.read` (same as the statement endpoint).
 
 **Query params:** Same as the **Transactions** section statement table (`page`, `limit`, `wallet_key`, `status`, `currency_code`, `search`, `from_date`, `to_date`).
 
-### GET `/api/v1/merchants` — enriched list response
+### GET `/1.202602.0/merchants` — enriched list response
 
 Each merchant in the list now includes:
 
@@ -111,7 +115,7 @@ Each merchant in the list now includes:
 | `currencies` | string[] | Distinct currency codes across merchant ledgers |
 | `settlement_count` | number | Total settlement ledgers for this merchant |
 
-### GET `/api/v1/merchants/stats`
+### GET `/1.202602.0/merchants/stats`
 
 Returns merchant metric cards with month-over-month comparison:
 
@@ -132,13 +136,40 @@ Returns merchant metric cards with month-over-month comparison:
 }
 ```
 
-### PATCH `/api/v1/merchants/:account_key`
+### PATCH `/1.202602.0/merchants/:account_key`
 
 ```json
 {
   "name": "New Name",
   "trade_name": "New Trade Name",
   "default_kyc_tier": 2
+}
+```
+
+### GET `/1.202602.0/merchants/:account_key/kycs`
+
+Returns KYC rows for the **merchant entity** (matched by `wallet_identifier`, `ledger_identifier`, or `account_key` on the merchant row — not end-customer `identifier` values).
+
+Response includes a `merchant` summary with `kyc_status` (`none` | `pending` | `verified`) plus paginated `records`.
+
+### POST `/1.202602.0/merchants/:account_key/kyc/approve`
+
+Requires **`kyc.update`** (same as customer KYC approval).
+
+Approve one record by reference:
+
+```json
+{
+  "reference": "kyc-reference-here"
+}
+```
+
+Omit `reference` to approve **all** pending merchant KYC rows for that merchant.
+
+```json
+{
+  "approved_count": 1,
+  "records": [ { "...kyc row...", "compliance_status": "compliant" } ]
 }
 ```
 
@@ -161,33 +192,33 @@ All routes require JWT + any role.
 
 | Method | Endpoint | Roles | Description |
 |--------|----------|-------|-------------|
-| GET | `/api/v1/customers` | All | List all customers (enriched with wallet_count, currencies, kyc_status) |
-| GET | `/api/v1/customers/stats` | All | Customer metric cards with month-over-month comparison |
-| GET | `/api/v1/customers/:identifier` | All | Get single customer (enriched with wallet_count, currencies, kyc_status) |
-| GET | `/api/v1/customers/:identifier/metrics` | All | Summary counts for profile cards (wallets, sub-accounts, disputes) |
-| GET | `/api/v1/customers/:identifier/wallets` | All | Get customer's wallets (NGN/crypto rails + balances when allowed) |
-| GET | `/api/v1/customers/:identifier/wallets/:wallet_key` | All | Get single customer wallet (balances when allowed) |
-| GET | `/api/v1/customers/:identifier/wallets/:wallet_key/ledger` | All | Per-wallet ledger lines (service text + balances; requires `financial.read`) |
-| GET | `/api/v1/customers/:identifier/fees` | All | Get customer's SaaS fee schedule |
-| GET | `/api/v1/customers/:identifier/kycs` | All | Get customer's KYCs |
-| PATCH | `/api/v1/customers/:identifier` | `customer.update` | Update customer (status, compliance flags, tier, PND/PNC) |
-| PATCH | `/api/v1/customers/:identifier/tier` | `customer.update` | Set KYC tier only (`{ "tier": 2 }`) |
-| PATCH | `/api/v1/customers/:identifier/restrictions` | `customer.update` | Set PND/PNC only (posting restrictions) |
-| POST | `/api/v1/customers/:identifier/freeze` | `customer.update` | Apply freeze presets (`scope`: `full` \| `debit_only` \| `credit_only`) |
-| POST | `/api/v1/customers/:identifier/unfreeze` | `customer.update` | Clear PND and PNC (`is_pnd`/`is_pnc` → N) |
+| GET | `/1.202602.0/customers` | All | List all customers (enriched with wallet_count, currencies, kyc_status) |
+| GET | `/1.202602.0/customers/stats` | All | Customer metric cards with month-over-month comparison |
+| GET | `/1.202602.0/customers/:identifier` | All | Get single customer (enriched with wallet_count, currencies, kyc_status) |
+| GET | `/1.202602.0/customers/:identifier/metrics` | All | Summary counts for profile cards (wallets, sub-accounts, disputes) |
+| GET | `/1.202602.0/customers/:identifier/wallets` | All | Get customer's wallets (NGN/crypto rails + balances when allowed) |
+| GET | `/1.202602.0/customers/:identifier/wallets/:wallet_key` | All | Get single customer wallet (balances when allowed) |
+| GET | `/1.202602.0/customers/:identifier/wallets/:wallet_key/ledger` | All | Per-wallet ledger lines (service text + balances; requires `financial.read`) |
+| GET | `/1.202602.0/customers/:identifier/fees` | All | Get customer's SaaS fee schedule |
+| GET | `/1.202602.0/customers/:identifier/kycs` | All | Get customer's KYCs |
+| PATCH | `/1.202602.0/customers/:identifier` | `customer.update` | Update customer (status, compliance flags, tier, PND/PNC) |
+| PATCH | `/1.202602.0/customers/:identifier/tier` | `customer.update` | Set KYC tier only (`{ "tier": 2 }`) |
+| PATCH | `/1.202602.0/customers/:identifier/restrictions` | `customer.update` | Set PND/PNC only (posting restrictions) |
+| POST | `/1.202602.0/customers/:identifier/freeze` | `customer.update` | Apply freeze presets (`scope`: `full` \| `debit_only` \| `credit_only`) |
+| POST | `/1.202602.0/customers/:identifier/unfreeze` | `customer.update` | Clear PND and PNC (`is_pnd`/`is_pnc` → N) |
 
 > **KYC, freeze, and tier — aligned map** (see also **KYCs** and **Config → customer-tiers** below).
 
 | Goal | Endpoint(s) |
 |------|----------------|
-| View KYC for one customer | `GET /api/v1/customers/:identifier/kycs` (paginated list); optional summary on `GET /api/v1/customers/:identifier` (`kyc_status`) |
-| Review / approve KYC record | `GET /api/v1/kycs/:reference`, `PATCH /api/v1/kycs/:reference` (`kyc.update`) |
-| Read tier labels | `GET /api/v1/config/customer-tiers` |
-| Upgrade / set tier | `PATCH /api/v1/customers/:identifier/tier` or same fields on `PATCH /api/v1/customers/:identifier` |
-| Freeze (restrict debits/credits) | `POST /api/v1/customers/:identifier/freeze` or `PATCH .../restrictions` or `PATCH /api/v1/customers/:identifier` with `is_pnd` / `is_pnc` |
-| Unfreeze | `POST /api/v1/customers/:identifier/unfreeze` or set both to N via `PATCH .../restrictions` / general `PATCH` |
+| View KYC for one customer | `GET /1.202602.0/customers/:identifier/kycs` (paginated list); optional summary on `GET /1.202602.0/customers/:identifier` (`kyc_status`) |
+| Review / approve KYC record | `GET /1.202602.0/kycs/:reference`, `PATCH /1.202602.0/kycs/:reference` (`kyc.update`) |
+| Read tier labels | `GET /1.202602.0/config/customer-tiers` |
+| Upgrade / set tier | `PATCH /1.202602.0/customers/:identifier/tier` or same fields on `PATCH /1.202602.0/customers/:identifier` |
+| Freeze (restrict debits/credits) | `POST /1.202602.0/customers/:identifier/freeze` or `PATCH .../restrictions` or `PATCH /1.202602.0/customers/:identifier` with `is_pnd` / `is_pnc` |
+| Unfreeze | `POST /1.202602.0/customers/:identifier/unfreeze` or set both to N via `PATCH .../restrictions` / general `PATCH` |
 
-### GET `/api/v1/customers` — enriched list response
+### GET `/1.202602.0/customers` — enriched list response
 
 Each customer in the list now includes:
 
@@ -215,7 +246,7 @@ Each customer in the list now includes:
 | `currencies` | string[] | Distinct currency codes across wallets |
 | `kyc_status` | string | `"verified"`, `"pending"`, or `"none"` — derived from KYCs table |
 
-### GET `/api/v1/customers/stats`
+### GET `/1.202602.0/customers/stats`
 
 Returns metric card data with month-over-month comparison:
 
@@ -253,7 +284,7 @@ Returns metric card data with month-over-month comparison:
 
 `change_pct` = percentage change in new records this month vs last month. Positive = growth, negative = decline.
 
-### PATCH `/api/v1/customers/:identifier`
+### PATCH `/1.202602.0/customers/:identifier`
 
 Same validation as the focused routes below. Boolean flags are stored as **`Y` / `N`**; **`1` / `0`** are also accepted in the body and normalized.
 
@@ -268,7 +299,7 @@ Same validation as the focused routes below. Boolean flags are stored as **`Y` /
 }
 ```
 
-### PATCH `/api/v1/customers/:identifier/tier`
+### PATCH `/1.202602.0/customers/:identifier/tier`
 
 ```json
 { "tier": 2 }
@@ -276,7 +307,7 @@ Same validation as the focused routes below. Boolean flags are stored as **`Y` /
 
 `tier` must be **1**, **2**, or **3**.
 
-### PATCH `/api/v1/customers/:identifier/restrictions`
+### PATCH `/1.202602.0/customers/:identifier/restrictions`
 
 Update posting flags only (at least one field):
 
@@ -284,7 +315,7 @@ Update posting flags only (at least one field):
 { "is_pnd": "Y", "is_pnc": "N" }
 ```
 
-### POST `/api/v1/customers/:identifier/freeze`
+### POST `/1.202602.0/customers/:identifier/freeze`
 
 Optional body (defaults to full freeze):
 
@@ -298,7 +329,7 @@ Optional body (defaults to full freeze):
 | `debit_only` | Post no debit (PND) — `is_pnd` → `Y`, `is_pnc` → `N` |
 | `credit_only` | Post no credit (PNC) — `is_pnd` → `N`, `is_pnc` → `Y` |
 
-### POST `/api/v1/customers/:identifier/unfreeze`
+### POST `/1.202602.0/customers/:identifier/unfreeze`
 
 No body. Sets **`is_pnd`** and **`is_pnc`** to **`N`**.
 
@@ -320,18 +351,18 @@ Use these together on the **merchant → customer detail** screen (profile heade
 
 | UI area | Endpoint | Notes |
 |--------|----------|--------|
-| Profile + tier / KYC | `GET /api/v1/customers/:identifier` | Enriched `wallet_count`, `kyc_status`, etc. |
-| KYC records (detail) | `GET /api/v1/customers/:identifier/kycs` | Paginated KYC rows for this customer |
-| Tier upgrade | `PATCH /api/v1/customers/:identifier/tier` | Requires `customer.update` |
+| Profile + tier / KYC | `GET /1.202602.0/customers/:identifier` | Enriched `wallet_count`, `kyc_status`, etc. |
+| KYC records (detail) | `GET /1.202602.0/customers/:identifier/kycs` | Paginated KYC rows for this customer |
+| Tier upgrade | `PATCH /1.202602.0/customers/:identifier/tier` | Requires `customer.update` |
 | Freeze / unfreeze | `POST .../freeze`, `POST .../unfreeze` | Presets; or `PATCH .../restrictions` |
-| Top summary cards (wallets / sub-accounts / disputes) | `GET /api/v1/customers/:identifier/metrics` | See response shape below |
-| Wallet list + balances | `GET /api/v1/customers/:identifier/wallets` | `search`, `page`, `limit`. Balance fields require `financial.read`; otherwise they are redacted |
-| Selected wallet detail | `GET /api/v1/customers/:identifier/wallets/:wallet_key` | Same permission rules as list |
-| Service history / ledger (right-hand table) | `GET /api/v1/customers/:identifier/wallets/:wallet_key/ledger` | **Requires `financial.read`**. Query: `search`, `from_date`, `to_date`, `page`, `limit` |
-| Recent transactions (all wallets for this customer) | `GET /api/v1/transactions/statement` **or** `GET /api/v1/merchants/:account_key/customers/:identifier/transactions` | **Requires `financial.read`**. Statement: `identifier` + optional `account_key`. Merchant-scoped URL checks the customer belongs to `:account_key` then returns the same unified feed |
-| Disputes tab / count | `GET /api/v1/disputes` and/or `GET /api/v1/disputes/summary` | Pass `identifier=<customer identifier>` to scope to that customer’s wallets |
+| Top summary cards (wallets / sub-accounts / disputes) | `GET /1.202602.0/customers/:identifier/metrics` | See response shape below |
+| Wallet list + balances | `GET /1.202602.0/customers/:identifier/wallets` | `search`, `page`, `limit`. Balance fields require `financial.read`; otherwise they are redacted |
+| Selected wallet detail | `GET /1.202602.0/customers/:identifier/wallets/:wallet_key` | Same permission rules as list |
+| Service history / ledger (right-hand table) | `GET /1.202602.0/customers/:identifier/wallets/:wallet_key/ledger` | **Requires `financial.read`**. Query: `search`, `from_date`, `to_date`, `page`, `limit` |
+| Recent transactions (all wallets for this customer) | `GET /1.202602.0/transactions/statement` **or** `GET /1.202602.0/merchants/:account_key/customers/:identifier/transactions` | **Requires `financial.read`**. Statement: `identifier` + optional `account_key`. Merchant-scoped URL checks the customer belongs to `:account_key` then returns the same unified feed |
+| Disputes tab / count | `GET /1.202602.0/disputes` and/or `GET /1.202602.0/disputes/summary` | Pass `identifier=<customer identifier>` to scope to that customer’s wallets |
 
-#### `GET /api/v1/customers/:identifier/metrics`
+#### `GET /1.202602.0/customers/:identifier/metrics`
 
 ```json
 {
@@ -352,7 +383,7 @@ Use these together on the **merchant → customer detail** screen (profile heade
 | `sub_accounts` | Customers whose `parent_identifier` equals this `:identifier` |
 | `disputes` | Disputes whose `transaction_wallet_key` is one of this customer’s wallet keys |
 
-#### `GET /api/v1/customers/:identifier/wallets` — extra query params
+#### `GET /1.202602.0/customers/:identifier/wallets` — extra query params
 
 | Param | Description |
 |-------|-------------|
@@ -360,7 +391,7 @@ Use these together on the **merchant → customer detail** screen (profile heade
 
 Response rows include `current_balance`, `balance_last_updated`, `balance_source` when the user has `financial.read` (see RBAC / permissions).
 
-#### `GET /api/v1/customers/:identifier/wallets/:wallet_key/ledger` — response row shape
+#### `GET /1.202602.0/customers/:identifier/wallets/:wallet_key/ledger` — response row shape
 
 Each record is one ledger line (deposit, withdrawal, transfer, swap, NGN, crypto, etc.):
 
@@ -383,11 +414,11 @@ All routes require JWT + any role.
 
 | Method | Endpoint | Roles | Description |
 |--------|----------|-------|-------------|
-| GET | `/api/v1/kycs` | All | List all KYCs |
-| GET | `/api/v1/kycs/:reference` | All | Get single KYC |
-| PATCH | `/api/v1/kycs/:reference` | compliance | Update KYC |
+| GET | `/1.202602.0/kycs` | All | List all KYCs |
+| GET | `/1.202602.0/kycs/:reference` | All | Get single KYC |
+| PATCH | `/1.202602.0/kycs/:reference` | compliance | Update KYC |
 
-### PATCH `/api/v1/kycs/:reference`
+### PATCH `/1.202602.0/kycs/:reference`
 
 ```json
 {
@@ -413,15 +444,15 @@ All routes require JWT + any role. All are read-only.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/v1/transactions/deposits` | List deposits |
-| GET | `/api/v1/transactions/withdrawals` | List withdrawals |
-| GET | `/api/v1/transactions/transfers` | List transfers |
-| GET | `/api/v1/transactions/swaps` | List swaps |
-| GET | `/api/v1/transactions/ngn-deposits` | List NGN deposits |
-| GET | `/api/v1/transactions/ngn-payouts` | List NGN payouts |
-| GET | `/api/v1/transactions/crypto-deposits` | List crypto deposits |
-| GET | `/api/v1/transactions/crypto-payouts` | List crypto payouts |
-| GET | `/api/v1/transactions/statement` | Unified statement feed across all transaction types |
+| GET | `/1.202602.0/transactions/deposits` | List deposits |
+| GET | `/1.202602.0/transactions/withdrawals` | List withdrawals |
+| GET | `/1.202602.0/transactions/transfers` | List transfers |
+| GET | `/1.202602.0/transactions/swaps` | List swaps |
+| GET | `/1.202602.0/transactions/ngn-deposits` | List NGN deposits |
+| GET | `/1.202602.0/transactions/ngn-payouts` | List NGN payouts |
+| GET | `/1.202602.0/transactions/crypto-deposits` | List crypto deposits |
+| GET | `/1.202602.0/transactions/crypto-payouts` | List crypto payouts |
+| GET | `/1.202602.0/transactions/statement` | Unified statement feed across all transaction types |
 
 ### Query params (all transaction endpoints)
 
@@ -438,9 +469,9 @@ All routes require JWT + any role. All are read-only.
 | `from_date` | Start date (ISO format) |
 | `to_date` | End date (ISO format) |
 
-`GET /api/v1/transactions/statement` requires the **`financial.read`** permission (same as other sensitive financial aggregates).
+`GET /1.202602.0/transactions/statement` requires the **`financial.read`** permission (same as other sensitive financial aggregates).
 
-### Statement response (`GET /api/v1/transactions/statement`)
+### Statement response (`GET /1.202602.0/transactions/statement`)
 
 Returns a unified, paginated timeline with normalized fields:
 
@@ -480,12 +511,12 @@ All routes require JWT + any role.
 
 | Method | Endpoint | Roles | Description |
 |--------|----------|-------|-------------|
-| GET | `/api/v1/disputes/summary` | All | Dispute counts (total, in_review, escalated, resolved) with optional filters |
-| GET | `/api/v1/disputes` | All | List all disputes |
-| GET | `/api/v1/disputes/:dispute_reference` | All | Get single dispute |
-| PATCH | `/api/v1/disputes/:dispute_reference` | operations, compliance | Update dispute |
+| GET | `/1.202602.0/disputes/summary` | All | Dispute counts (total, in_review, escalated, resolved) with optional filters |
+| GET | `/1.202602.0/disputes` | All | List all disputes |
+| GET | `/1.202602.0/disputes/:dispute_reference` | All | Get single dispute |
+| PATCH | `/1.202602.0/disputes/:dispute_reference` | operations, compliance | Update dispute |
 
-### PATCH `/api/v1/disputes/:dispute_reference`
+### PATCH `/1.202602.0/disputes/:dispute_reference`
 
 ```json
 {
@@ -517,11 +548,11 @@ All routes require JWT + any role.
 
 | Method | Endpoint | Roles | Description |
 |--------|----------|-------|-------------|
-| GET | `/api/v1/overdrafts` | All | List all overdraft requests |
-| GET | `/api/v1/overdrafts/:reference` | All | Get single overdraft |
-| PATCH | `/api/v1/overdrafts/:reference` | operations | Update overdraft |
+| GET | `/1.202602.0/overdrafts` | All | List all overdraft requests |
+| GET | `/1.202602.0/overdrafts/:reference` | All | Get single overdraft |
+| PATCH | `/1.202602.0/overdrafts/:reference` | operations | Update overdraft |
 
-### PATCH `/api/v1/overdrafts/:reference`
+### PATCH `/1.202602.0/overdrafts/:reference`
 
 ```json
 {
@@ -546,13 +577,13 @@ All routes require JWT + any role (except whitelisted IPs).
 
 | Method | Endpoint | Roles | Description |
 |--------|----------|-------|-------------|
-| GET | `/api/v1/config/currencies` | All | List currencies |
-| GET | `/api/v1/config/vats` | All | List VAT rates |
-| GET | `/api/v1/config/customer-tiers` | All | List customer tiers |
-| GET | `/api/v1/config/financial-institutions` | All | List Nigerian financial institutions |
-| GET | `/api/v1/config/crypto-assets` | All | List supported crypto assets |
-| GET | `/api/v1/config/deposit-methods` | All | List deposit methods |
-| GET | `/api/v1/config/whitelisted-ips` | operations, compliance | List whitelisted IPs |
+| GET | `/1.202602.0/config/currencies` | All | List currencies |
+| GET | `/1.202602.0/config/vats` | All | List VAT rates |
+| GET | `/1.202602.0/config/customer-tiers` | All | List customer tiers |
+| GET | `/1.202602.0/config/financial-institutions` | All | List Nigerian financial institutions |
+| GET | `/1.202602.0/config/crypto-assets` | All | List supported crypto assets |
+| GET | `/1.202602.0/config/deposit-methods` | All | List deposit methods |
+| GET | `/1.202602.0/config/whitelisted-ips` | operations, compliance | List whitelisted IPs |
 
 ### Query params
 
@@ -582,7 +613,7 @@ All routes require JWT + any role.
 
 | Method | Endpoint | Roles | Description |
 |--------|----------|-------|-------------|
-| GET | `/api/v1/fees/defaults` | All | Get all default (platform-wide) fee schedules |
+| GET | `/1.202602.0/fees/defaults` | All | Get all default (platform-wide) fee schedules |
 
 ### Response structure for fee endpoints
 
@@ -603,7 +634,7 @@ Fee responses are grouped by type:
 }
 ```
 
-### Merchant fees (`GET /api/v1/merchants/:account_key/fees`)
+### Merchant fees (`GET /1.202602.0/merchants/:account_key/fees`)
 
 Returns both custom (merchant-specific) BaaS fees and platform defaults:
 
@@ -633,7 +664,7 @@ Returns both custom (merchant-specific) BaaS fees and platform defaults:
 }
 ```
 
-### Customer fees (`GET /api/v1/customers/:identifier/fees`)
+### Customer fees (`GET /1.202602.0/customers/:identifier/fees`)
 
 Returns the SaaS fee schedule set by the customer's parent merchant:
 
@@ -656,7 +687,7 @@ Returns the SaaS fee schedule set by the customer's parent merchant:
 
 Wallet endpoints return the base wallet/ledger data enriched with linked NGN deposit accounts, crypto deposit addresses, and a derived `current_balance` (from the most recent `closing_balance` seen for that wallet across transaction tables).
 
-### Merchant wallets (`GET /api/v1/merchants/:account_key/wallets`)
+### Merchant wallets (`GET /1.202602.0/merchants/:account_key/wallets`)
 
 Paginated. Each wallet includes:
 
@@ -711,7 +742,7 @@ Paginated. Each wallet includes:
 
 ### Wallet page endpoint (merchant + customer)
 
-`GET /api/v1/wallets/page` is a unified endpoint tailored for the console wallet page UI. It supports both merchant and customer contexts with the same response shape.
+`GET /1.202602.0/wallets/page` is a unified endpoint tailored for the console wallet page UI. It supports both merchant and customer contexts with the same response shape.
 
 #### Query params
 
@@ -782,10 +813,10 @@ All routes require JWT + any role. Summary data is cached for 60 seconds. The re
 
 | Method | Endpoint | Roles | Description |
 |--------|----------|-------|-------------|
-| GET | `/api/v1/dashboard/summary` | All | Role-aware aggregate stats (shared overview + department-specific metrics) |
-| GET | `/api/v1/dashboard/activities` | All | Role-aware recent activities feed |
+| GET | `/1.202602.0/dashboard/summary` | All | Role-aware aggregate stats (shared overview + department-specific metrics) |
+| GET | `/1.202602.0/dashboard/activities` | All | Role-aware recent activities feed |
 
-### GET `/api/v1/dashboard/summary`
+### GET `/1.202602.0/dashboard/summary`
 
 Returns a shared `overview` for all roles, plus a `department` object whose contents depend on the authenticated user's role.
 
@@ -899,7 +930,7 @@ Returns a shared `overview` for all roles, plus a `department` object whose cont
 }
 ```
 
-### GET `/api/v1/dashboard/activities`
+### GET `/1.202602.0/dashboard/activities`
 
 Returns recent activities filtered by role relevance. The activity types returned depend on the authenticated user's role.
 
@@ -979,7 +1010,7 @@ Common status codes:
 
 ## Frontend handoff — new & changed APIs (merchant customer view)
 
-Use this section as a single checklist to share with the frontend team. All paths are under the same API base as the rest of this document (e.g. `/api/v1/...`). Every call below needs **`Authorization: Bearer <jwt>`** unless your deployment wraps versioning differently.
+Use this section as a single checklist to share with the frontend team. All paths are under the same API base as the rest of this document (e.g. `/1.202602.0/...`). Every call below needs **`Authorization: Bearer <jwt>`** unless your deployment wraps versioning differently.
 
 ### Permissions
 
@@ -992,15 +1023,15 @@ Use this section as a single checklist to share with the frontend team. All path
 
 | What to build on the UI | Method | Path |
 |-------------------------|--------|------|
-| Summary cards (total wallets, sub-accounts, disputes) | `GET` | `/api/v1/customers/:identifier/metrics` |
-| Customer profile row | `GET` | `/api/v1/customers/:identifier` |
-| Wallet list (search + pagination + balances when allowed) | `GET` | `/api/v1/customers/:identifier/wallets` |
-| One wallet (balances when allowed) | `GET` | `/api/v1/customers/:identifier/wallets/:wallet_key` |
-| Service / ledger table for **selected** wallet | `GET` | `/api/v1/customers/:identifier/wallets/:wallet_key/ledger` |
-| **All** customer transactions (scoped by customer; optional filters) | `GET` | `/api/v1/transactions/statement` **or** merchant-scoped shortcut below |
-| Same “all transactions” but URL encodes merchant + customer | `GET` | `/api/v1/merchants/:account_key/customers/:identifier/transactions` |
-| Disputes list for that customer | `GET` | `/api/v1/disputes?identifier=:identifier&...` |
-| Dispute summary counts for that customer | `GET` | `/api/v1/disputes/summary?identifier=:identifier&...` |
+| Summary cards (total wallets, sub-accounts, disputes) | `GET` | `/1.202602.0/customers/:identifier/metrics` |
+| Customer profile row | `GET` | `/1.202602.0/customers/:identifier` |
+| Wallet list (search + pagination + balances when allowed) | `GET` | `/1.202602.0/customers/:identifier/wallets` |
+| One wallet (balances when allowed) | `GET` | `/1.202602.0/customers/:identifier/wallets/:wallet_key` |
+| Service / ledger table for **selected** wallet | `GET` | `/1.202602.0/customers/:identifier/wallets/:wallet_key/ledger` |
+| **All** customer transactions (scoped by customer; optional filters) | `GET` | `/1.202602.0/transactions/statement` **or** merchant-scoped shortcut below |
+| Same “all transactions” but URL encodes merchant + customer | `GET` | `/1.202602.0/merchants/:account_key/customers/:identifier/transactions` |
+| Disputes list for that customer | `GET` | `/1.202602.0/disputes?identifier=:identifier&...` |
+| Dispute summary counts for that customer | `GET` | `/1.202602.0/disputes/summary?identifier=:identifier&...` |
 
 ### Query parameters the frontend should pass
 
@@ -1022,4 +1053,4 @@ Use this section as a single checklist to share with the frontend team. All path
 
 ### Optional (already documented elsewhere)
 
-- Unified wallet console UI can still use **`GET /api/v1/wallets/page`** with `owner_type=customer` and `owner_key=<identifier>` if you prefer one endpoint for wallet search/summary across owners.
+- Unified wallet console UI can still use **`GET /1.202602.0/wallets/page`** with `owner_type=customer` and `owner_key=<identifier>` if you prefer one endpoint for wallet search/summary across owners.

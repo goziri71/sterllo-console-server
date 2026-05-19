@@ -4,6 +4,8 @@ import {
   getMerchantStats,
   updateMerchant,
   patchMerchantTier,
+  getMerchantKYCs,
+  approveMerchantKYC,
   getMerchantLedgers,
   getMerchantSettlements,
   linkMerchantBeamerAccount,
@@ -33,6 +35,12 @@ export default async function merchantRoutes(fastify) {
   fastify.get("/:account_key/wallets", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getMerchantWallets);
   fastify.get("/:account_key/wallets/:wallet_key", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getMerchantWallet);
   fastify.get("/:account_key/fees", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getMerchantFees);
+  fastify.get("/:account_key/kycs", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getMerchantKYCs);
+  fastify.post(
+    "/:account_key/kyc/approve",
+    { preHandler: requirePermission(PERMISSIONS.KYC_UPDATE) },
+    approveMerchantKYC,
+  );
 
   fastify.patch("/:account_key/tier", { preHandler: requirePermission(PERMISSIONS.MERCHANT_UPDATE) }, patchMerchantTier);
   fastify.patch("/:account_key", { preHandler: requirePermission(PERMISSIONS.MERCHANT_UPDATE) }, updateMerchant);
