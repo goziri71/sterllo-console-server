@@ -1,6 +1,7 @@
 import MerchantService from "../services/merchants.js";
 import CustomerService from "../services/customers.js";
 import TransactionService from "../services/transactions.js";
+import KYCService from "../services/kycs.js";
 import { parsePagination, paginatedResponse } from "../utils/pagination/index.js";
 import { userCanReadFinancial } from "../utils/financialAccess.js";
 import { ErrorClass } from "../utils/errorClass/index.js";
@@ -8,6 +9,7 @@ import { ErrorClass } from "../utils/errorClass/index.js";
 const merchantService = new MerchantService();
 const customerService = new CustomerService();
 const transactionService = new TransactionService();
+const kycService = new KYCService();
 
 export const getAllMerchants = async (request, reply) => {
   const { page, limit, offset } = parsePagination(request.query);
@@ -66,6 +68,30 @@ export const patchMerchantTier = async (request, reply) => {
     success: true,
     message: "Merchant default KYC tier updated successfully",
     data: merchant,
+  });
+};
+
+export const getMerchantKYCs = async (request, reply) => {
+  const { page, limit, offset } = parsePagination(request.query);
+  const data = await kycService.getByMerchant(request.params.account_key, { limit, offset });
+
+  return reply.code(200).send({
+    code: 200,
+    success: true,
+    message: "Merchant KYC records fetched successfully",
+    merchant: data.merchant,
+    ...paginatedResponse({ count: data.count, rows: data.rows }, page, limit),
+  });
+};
+
+export const approveMerchantKYC = async (request, reply) => {
+  const data = await kycService.approveMerchant(request.params.account_key, request.body ?? {});
+
+  return reply.code(200).send({
+    code: 200,
+    success: true,
+    message: "Merchant KYC approved successfully",
+    data,
   });
 };
 
