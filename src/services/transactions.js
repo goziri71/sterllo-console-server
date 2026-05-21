@@ -7,56 +7,6 @@ import { customers, customerWallets } from "../db/schema/customers.js";
 import { ErrorClass } from "../utils/errorClass/index.js";
 import { isMissingMysqlTableError } from "../utils/mysqlErrors.js";
 
-/**
- * Build an array of Drizzle conditions from common transaction filters.
- */
-function buildConditions(
-  table,
-  filters,
-  {
-    hasAccountKey = true,
-    walletColumn = "source_wallet_key",
-    statusColumn = "status",
-    currencyColumn = "currency_code",
-    searchColumns = ["source_wallet_key", "source_reference", "target_reference"],
-  } = {},
-) {
-  const conditions = [];
-
-  if (hasAccountKey && filters.account_key && table.account_key) {
-    conditions.push(eq(table.account_key, filters.account_key));
-  }
-  if (filters.wallet_key && table[walletColumn]) {
-    conditions.push(eq(table[walletColumn], filters.wallet_key));
-  }
-  if (filters.status && table[statusColumn]) {
-    conditions.push(eq(table[statusColumn], filters.status));
-  }
-  if (filters.currency_code && table[currencyColumn]) {
-    conditions.push(eq(table[currencyColumn], filters.currency_code));
-  }
-  if (filters.search) {
-    const pattern = `%${filters.search}%`;
-    const parts = searchColumns
-      .filter((col) => table[col])
-      .map((col) => sql`${table[col]} LIKE ${pattern}`);
-    if (parts.length > 0) {
-      conditions.push(sql`(${sql.join(parts, sql` OR `)})`);
-    }
-  }
-  if (filters.from_date && filters.to_date) {
-    conditions.push(
-      between(table.date_created, new Date(filters.from_date), new Date(filters.to_date))
-    );
-  } else if (filters.from_date) {
-    conditions.push(gte(table.date_created, new Date(filters.from_date)));
-  } else if (filters.to_date) {
-    conditions.push(lte(table.date_created, new Date(filters.to_date)));
-  }
-
-  return conditions.length > 0 ? and(...conditions) : undefined;
-}
-
 async function paginated(table, { where, limit, offset }) {
   const [rows, countRows] = await Promise.all([
     db.select().from(table).where(where).limit(limit).offset(offset).orderBy(desc(table.date_created)),
@@ -150,6 +100,106 @@ async function loadCustomerWalletKeySet(identifier) {
     .from(customerWallets)
     .where(eq(customerWallets.identifier, identifier));
   return new Set(rows.map((r) => r.wallet_key));
+}
+
+/**
+ * When `filters.identifier` is set, resolve the customer's wallets (and validate
+ * optional account_key / wallet_key). Matches GET /transactions/statement behavior.
+ * @returns {{ walletKeys: string[] | null, empty: boolean, identifier: string | null }}
+ */
+async function resolveCustomerWalletScope(filters) {
+  if (!filters?.identifier) {
+    return { walletKeys: null, empty: false, identifier: null };
+  }
+
+  const identifier = String(filters.identifier).trim();
+  const [customer] = await db
+    .select({ account_key: customers.account_key })
+    .from(customers)
+    .where(eq(customers.identifier, identifier))
+    .limit(1);
+
+  if (!customer) {
+    throw new ErrorClass("Customer not found", 404);
+  }
+  if (filters.account_key && customer.account_key !== filters.account_key) {
+    throw new ErrorClass("account_key does not match this customer", 400);
+  }
+
+  const keySet = await loadCustomerWalletKeySet(identifier);
+  if (filters.wallet_key && !keySet.has(filters.wallet_key)) {
+    throw new ErrorClass("wallet_key does not belong to this customer", 400);
+  }
+  if (keySet.size === 0) {
+    return { walletKeys: [], empty: true, identifier };
+  }
+
+  return { walletKeys: [...keySet], empty: false, identifier };
+}
+
+function emptyTxPage() {
+  return { count: 0, rows: [] };
+}
+
+function walletKeysTouchCondition(columns, walletKeys) {
+  if (!walletKeys?.length) return null;
+  const parts = columns.filter(Boolean).map((col) => inArray(col, walletKeys));
+  if (parts.length === 0) return null;
+  return parts.length === 1 ? parts[0] : or(...parts);
+}
+
+function appendPayoutCustomerScope(conditions, sourceWalletCol, sourceIdentifierCol, scope) {
+  if (!scope?.walletKeys?.length && !scope?.identifier) return;
+  const parts = [];
+  if (scope.walletKeys?.length) {
+    parts.push(inArray(sourceWalletCol, scope.walletKeys));
+  }
+  if (scope.identifier && sourceIdentifierCol) {
+    parts.push(eq(sourceIdentifierCol, scope.identifier));
+  }
+  if (parts.length === 0) return;
+  conditions.push(parts.length === 1 ? parts[0] : or(...parts));
+}
+
+function appendDateRange(conditions, table, filters) {
+  if (filters.from_date && filters.to_date) {
+    conditions.push(
+      between(table.date_created, new Date(filters.from_date), new Date(filters.to_date)),
+    );
+  } else if (filters.from_date) {
+    conditions.push(gte(table.date_created, new Date(filters.from_date)));
+  } else if (filters.to_date) {
+    conditions.push(lte(table.date_created, new Date(filters.to_date)));
+  }
+}
+
+function appendWalletKeyFilter(conditions, sourceCol, targetCol, filters) {
+  if (!filters.wallet_key) return;
+  if (targetCol) {
+    conditions.push(
+      or(eq(sourceCol, filters.wallet_key), eq(targetCol, filters.wallet_key)),
+    );
+  } else {
+    conditions.push(eq(sourceCol, filters.wallet_key));
+  }
+}
+
+function appendSwapWalletKeyFilter(conditions, filters) {
+  if (!filters.wallet_key) return;
+  const w = filters.wallet_key;
+  conditions.push(
+    or(
+      eq(swaps.source_from_wallet_key, w),
+      eq(swaps.source_to_wallet_key, w),
+      eq(swaps.target_from_wallet_key, w),
+      eq(swaps.target_to_wallet_key, w),
+    ),
+  );
+}
+
+function whereFromConditions(conditions) {
+  const parts = conditions.filter(Boolean);
+  return parts.length > 0 ? and(...parts) : undefined;
 }
 
 function rowTouchesWalletKeys(row, keys) {
@@ -269,54 +319,129 @@ function resolveStatementPartyLabels(row, walletName, counterpartName) {
 
 export default class TransactionService {
   async getDeposits({ limit, offset, filters }) {
-    return paginated(deposits, {
-      where: buildConditions(deposits, filters),
-      limit,
-      offset,
-    });
+    const scope = await resolveCustomerWalletScope(filters);
+    if (scope.empty) return emptyTxPage();
+
+    const conditions = [];
+    if (filters.account_key) conditions.push(eq(deposits.account_key, filters.account_key));
+    appendWalletKeyFilter(conditions, deposits.source_wallet_key, deposits.target_wallet_key, filters);
+    const touch = walletKeysTouchCondition(
+      [deposits.source_wallet_key, deposits.target_wallet_key],
+      scope.walletKeys,
+    );
+    if (touch) conditions.push(touch);
+    if (filters.status) conditions.push(eq(deposits.status, filters.status));
+    if (filters.currency_code) conditions.push(eq(deposits.currency_code, filters.currency_code));
+    if (filters.search) {
+      const pattern = `%${filters.search}%`;
+      conditions.push(
+        sql`(${deposits.source_wallet_key} LIKE ${pattern} OR ${deposits.source_reference} LIKE ${pattern} OR ${deposits.target_reference} LIKE ${pattern})`,
+      );
+    }
+    appendDateRange(conditions, deposits, filters);
+
+    return paginated(deposits, { where: whereFromConditions(conditions), limit, offset });
   }
 
   async getWithdrawals({ limit, offset, filters }) {
-    return paginated(withdrawals, {
-      where: buildConditions(withdrawals, filters),
-      limit,
-      offset,
-    });
+    const scope = await resolveCustomerWalletScope(filters);
+    if (scope.empty) return emptyTxPage();
+
+    const conditions = [];
+    if (filters.account_key) conditions.push(eq(withdrawals.account_key, filters.account_key));
+    appendWalletKeyFilter(conditions, withdrawals.source_wallet_key, withdrawals.target_wallet_key, filters);
+    const touch = walletKeysTouchCondition(
+      [withdrawals.source_wallet_key, withdrawals.target_wallet_key],
+      scope.walletKeys,
+    );
+    if (touch) conditions.push(touch);
+    if (filters.status) conditions.push(eq(withdrawals.status, filters.status));
+    if (filters.currency_code) conditions.push(eq(withdrawals.currency_code, filters.currency_code));
+    if (filters.search) {
+      const pattern = `%${filters.search}%`;
+      conditions.push(
+        sql`(${withdrawals.source_wallet_key} LIKE ${pattern} OR ${withdrawals.source_reference} LIKE ${pattern} OR ${withdrawals.target_reference} LIKE ${pattern})`,
+      );
+    }
+    appendDateRange(conditions, withdrawals, filters);
+
+    return paginated(withdrawals, { where: whereFromConditions(conditions), limit, offset });
   }
 
   async getTransfers({ limit, offset, filters }) {
-    const data = await paginated(transfers, {
-      where: buildConditions(transfers, filters),
-      limit,
-      offset,
-    });
+    const scope = await resolveCustomerWalletScope(filters);
+    if (scope.empty) return emptyTxPage();
+
+    const conditions = [];
+    if (filters.account_key) conditions.push(eq(transfers.account_key, filters.account_key));
+    appendWalletKeyFilter(conditions, transfers.source_wallet_key, transfers.target_wallet_key, filters);
+    const touch = walletKeysTouchCondition(
+      [transfers.source_wallet_key, transfers.target_wallet_key],
+      scope.walletKeys,
+    );
+    if (touch) conditions.push(touch);
+    if (filters.status) conditions.push(eq(transfers.status, filters.status));
+    if (filters.currency_code) conditions.push(eq(transfers.currency_code, filters.currency_code));
+    if (filters.search) {
+      const pattern = `%${filters.search}%`;
+      conditions.push(
+        sql`(${transfers.source_wallet_key} LIKE ${pattern} OR ${transfers.source_reference} LIKE ${pattern} OR ${transfers.target_reference} LIKE ${pattern})`,
+      );
+    }
+    appendDateRange(conditions, transfers, filters);
+
+    const data = await paginated(transfers, { where: whereFromConditions(conditions), limit, offset });
     return { ...data, rows: await enrichTransferRows(data.rows) };
   }
 
   async getSwaps({ limit, offset, filters }) {
-    const data = await paginated(swaps, {
-      where: buildConditions(swaps, filters, {
-        walletColumn: "source_from_wallet_key",
-        currencyColumn: "source_currency_code",
-        searchColumns: [
-          "source_from_wallet_key",
-          "source_to_wallet_key",
-          "source_from_reference",
-          "source_to_reference",
-        ],
-      }),
-      limit,
-      offset,
-    });
+    const scope = await resolveCustomerWalletScope(filters);
+    if (scope.empty) return emptyTxPage();
+
+    const conditions = [];
+    if (filters.account_key) conditions.push(eq(swaps.account_key, filters.account_key));
+    appendSwapWalletKeyFilter(conditions, filters);
+    const touch = walletKeysTouchCondition(
+      [
+        swaps.source_from_wallet_key,
+        swaps.source_to_wallet_key,
+        swaps.target_from_wallet_key,
+        swaps.target_to_wallet_key,
+      ],
+      scope.walletKeys,
+    );
+    if (touch) conditions.push(touch);
+    if (filters.status) conditions.push(eq(swaps.status, filters.status));
+    if (filters.currency_code) conditions.push(eq(swaps.source_currency_code, filters.currency_code));
+    if (filters.search) {
+      const pattern = `%${filters.search}%`;
+      conditions.push(
+        sql`(
+          ${swaps.source_from_wallet_key} LIKE ${pattern}
+          OR ${swaps.source_to_wallet_key} LIKE ${pattern}
+          OR ${swaps.source_from_reference} LIKE ${pattern}
+          OR ${swaps.source_to_reference} LIKE ${pattern}
+        )`,
+      );
+    }
+    appendDateRange(conditions, swaps, filters);
+
+    const data = await paginated(swaps, { where: whereFromConditions(conditions), limit, offset });
     return { ...data, rows: await enrichSwapRows(data.rows) };
   }
 
   async getNGNDeposits({ limit, offset, filters }) {
     if (filters.currency_code && String(filters.currency_code).toUpperCase() !== "NGN") {
-      return { count: 0, rows: [] };
+      return emptyTxPage();
     }
+
+    const scope = await resolveCustomerWalletScope(filters);
+    if (scope.empty) return emptyTxPage();
+
     const conditions = [];
-    if (filters.wallet_key) conditions.push(eq(ngnDeposits.wallet_key, filters.wallet_key));
+    appendWalletKeyFilter(conditions, ngnDeposits.wallet_key, null, filters);
+    const touch = walletKeysTouchCondition([ngnDeposits.wallet_key], scope.walletKeys);
+    if (touch) conditions.push(touch);
     if (filters.status) conditions.push(eq(ngnDeposits.credit_status, filters.status));
     if (filters.search) {
       conditions.push(
@@ -327,25 +452,23 @@ export default class TransactionService {
         )`,
       );
     }
-    if (filters.from_date && filters.to_date) {
-      conditions.push(between(ngnDeposits.date_created, new Date(filters.from_date), new Date(filters.to_date)));
-    } else if (filters.from_date) {
-      conditions.push(gte(ngnDeposits.date_created, new Date(filters.from_date)));
-    } else if (filters.to_date) {
-      conditions.push(lte(ngnDeposits.date_created, new Date(filters.to_date)));
-    }
-    const where = conditions.length > 0 ? and(...conditions) : undefined;
+    appendDateRange(conditions, ngnDeposits, filters);
 
-    return paginatedOrEmpty(ngnDeposits, { where, limit, offset });
+    return paginatedOrEmpty(ngnDeposits, { where: whereFromConditions(conditions), limit, offset });
   }
 
   async getNGNPayouts({ limit, offset, filters }) {
     if (filters.currency_code && String(filters.currency_code).toUpperCase() !== "NGN") {
-      return { count: 0, rows: [] };
+      return emptyTxPage();
     }
+
+    const scope = await resolveCustomerWalletScope(filters);
+    if (scope.empty) return emptyTxPage();
+
     const conditions = [];
     if (filters.account_key) conditions.push(eq(ngnPayouts.account_key, filters.account_key));
     if (filters.wallet_key) conditions.push(eq(ngnPayouts.source_wallet_key, filters.wallet_key));
+    appendPayoutCustomerScope(conditions, ngnPayouts.source_wallet_key, ngnPayouts.source_identifier, scope);
     if (filters.status) conditions.push(eq(ngnPayouts.payout_status, filters.status));
     if (filters.search) {
       conditions.push(
@@ -356,25 +479,19 @@ export default class TransactionService {
         )`,
       );
     }
-    if (filters.from_date && filters.to_date) {
-      conditions.push(between(ngnPayouts.date_created, new Date(filters.from_date), new Date(filters.to_date)));
-    } else if (filters.from_date) {
-      conditions.push(gte(ngnPayouts.date_created, new Date(filters.from_date)));
-    } else if (filters.to_date) {
-      conditions.push(lte(ngnPayouts.date_created, new Date(filters.to_date)));
-    }
-    const where = conditions.length > 0 ? and(...conditions) : undefined;
+    appendDateRange(conditions, ngnPayouts, filters);
 
-    return paginatedOrEmpty(ngnPayouts, {
-      where,
-      limit,
-      offset,
-    });
+    return paginatedOrEmpty(ngnPayouts, { where: whereFromConditions(conditions), limit, offset });
   }
 
   async getCryptoDeposits({ limit, offset, filters }) {
+    const scope = await resolveCustomerWalletScope(filters);
+    if (scope.empty) return emptyTxPage();
+
     const conditions = [];
-    if (filters.wallet_key) conditions.push(eq(cryptoDeposits.wallet_key, filters.wallet_key));
+    appendWalletKeyFilter(conditions, cryptoDeposits.wallet_key, null, filters);
+    const touch = walletKeysTouchCondition([cryptoDeposits.wallet_key], scope.walletKeys);
+    if (touch) conditions.push(touch);
     if (filters.status) conditions.push(eq(cryptoDeposits.credit_status, filters.status));
     if (filters.search) {
       conditions.push(
@@ -385,22 +502,19 @@ export default class TransactionService {
         )`,
       );
     }
-    if (filters.from_date && filters.to_date) {
-      conditions.push(between(cryptoDeposits.date_created, new Date(filters.from_date), new Date(filters.to_date)));
-    } else if (filters.from_date) {
-      conditions.push(gte(cryptoDeposits.date_created, new Date(filters.from_date)));
-    } else if (filters.to_date) {
-      conditions.push(lte(cryptoDeposits.date_created, new Date(filters.to_date)));
-    }
-    const where = conditions.length > 0 ? and(...conditions) : undefined;
+    appendDateRange(conditions, cryptoDeposits, filters);
 
-    return paginatedOrEmpty(cryptoDeposits, { where, limit, offset });
+    return paginatedOrEmpty(cryptoDeposits, { where: whereFromConditions(conditions), limit, offset });
   }
 
   async getCryptoPayouts({ limit, offset, filters }) {
+    const scope = await resolveCustomerWalletScope(filters);
+    if (scope.empty) return emptyTxPage();
+
     const conditions = [];
     if (filters.account_key) conditions.push(eq(cryptoPayouts.account_key, filters.account_key));
     if (filters.wallet_key) conditions.push(eq(cryptoPayouts.source_wallet_key, filters.wallet_key));
+    appendPayoutCustomerScope(conditions, cryptoPayouts.source_wallet_key, cryptoPayouts.source_identifier, scope);
     if (filters.status) conditions.push(eq(cryptoPayouts.payout_status, filters.status));
     if (filters.currency_code) conditions.push(eq(cryptoPayouts.asset, filters.currency_code));
     if (filters.search) {
@@ -412,20 +526,9 @@ export default class TransactionService {
         )`,
       );
     }
-    if (filters.from_date && filters.to_date) {
-      conditions.push(between(cryptoPayouts.date_created, new Date(filters.from_date), new Date(filters.to_date)));
-    } else if (filters.from_date) {
-      conditions.push(gte(cryptoPayouts.date_created, new Date(filters.from_date)));
-    } else if (filters.to_date) {
-      conditions.push(lte(cryptoPayouts.date_created, new Date(filters.to_date)));
-    }
-    const where = conditions.length > 0 ? and(...conditions) : undefined;
+    appendDateRange(conditions, cryptoPayouts, filters);
 
-    return paginatedOrEmpty(cryptoPayouts, {
-      where,
-      limit,
-      offset,
-    });
+    return paginatedOrEmpty(cryptoPayouts, { where: whereFromConditions(conditions), limit, offset });
   }
 
   async getStatement({ limit, offset, filters }) {
@@ -435,29 +538,13 @@ export default class TransactionService {
     const searchTerm = filters.search ? String(filters.search).toLowerCase() : null;
     const currencyFilter = filters.currency_code ? String(filters.currency_code).toUpperCase() : null;
 
-    let customerWalletKeys = null;
-    if (filters.identifier) {
-      const [customer] = await db
-        .select()
-        .from(customers)
-        .where(eq(customers.identifier, filters.identifier))
-        .limit(1);
-      if (!customer) {
-        throw new ErrorClass("Customer not found", 404);
-      }
-      if (filters.account_key && customer.account_key !== filters.account_key) {
-        throw new ErrorClass("account_key does not match this customer", 400);
-      }
-      customerWalletKeys = await loadCustomerWalletKeySet(filters.identifier);
-      if (filters.wallet_key && !customerWalletKeys.has(filters.wallet_key)) {
-        throw new ErrorClass("wallet_key does not belong to this customer", 400);
-      }
-      if (customerWalletKeys.size === 0) {
-        return { count: 0, rows: [] };
-      }
+    const scope = await resolveCustomerWalletScope(filters);
+    if (scope.empty) {
+      return { count: 0, rows: [] };
     }
 
-    const customerWalletKeysArr = customerWalletKeys ? [...customerWalletKeys] : null;
+    const customerWalletKeysArr = scope.walletKeys;
+    const customerWalletKeySet = customerWalletKeysArr ? new Set(customerWalletKeysArr) : null;
     const applyDate = (table, conditions) => {
       if (fromDate && toDate) {
         conditions.push(between(table.date_created, fromDate, toDate));
@@ -637,16 +724,9 @@ export default class TransactionService {
         const conditions = [];
         if (filters.account_key) conditions.push(eq(ngnPayouts.account_key, filters.account_key));
         if (filters.wallet_key) conditions.push(eq(ngnPayouts.source_wallet_key, filters.wallet_key));
-        if (customerWalletKeysArr) {
-          conditions.push(
-            or(
-              inArray(ngnPayouts.source_wallet_key, customerWalletKeysArr),
-              filters.identifier ? eq(ngnPayouts.source_identifier, filters.identifier) : undefined,
-            ),
-          );
-        }
+        appendPayoutCustomerScope(conditions, ngnPayouts.source_wallet_key, ngnPayouts.source_identifier, scope);
         applyDate(ngnPayouts, conditions);
-        const where = conditions.filter(Boolean).length > 0 ? and(...conditions.filter(Boolean)) : undefined;
+        const where = whereFromConditions(conditions);
         return db.select({
           transaction_type: sql`'ngn_payout'`.as("transaction_type"),
           account_key: ngnPayouts.account_key,
@@ -697,9 +777,9 @@ export default class TransactionService {
         const conditions = [];
         if (filters.account_key) conditions.push(eq(cryptoPayouts.account_key, filters.account_key));
         if (filters.wallet_key) conditions.push(eq(cryptoPayouts.source_wallet_key, filters.wallet_key));
-        if (customerWalletKeysArr) conditions.push(inArray(cryptoPayouts.source_wallet_key, customerWalletKeysArr));
+        appendPayoutCustomerScope(conditions, cryptoPayouts.source_wallet_key, cryptoPayouts.source_identifier, scope);
         applyDate(cryptoPayouts, conditions);
-        const where = conditions.length > 0 ? and(...conditions) : undefined;
+        const where = whereFromConditions(conditions);
         return db.select({
           transaction_type: sql`'crypto_payout'`.as("transaction_type"),
           account_key: cryptoPayouts.account_key,
@@ -725,8 +805,16 @@ export default class TransactionService {
     const allRows = [...depRows, ...wdrRows, ...trfRows, ...swpRows, ...ngnDepRows, ...ngnPayRows, ...cDepRows, ...cPayRows];
 
     const filtered = allRows.filter((row) => {
-      if (filters.account_key && row.account_key !== filters.account_key) return false;
-      if (filters.identifier && !rowTouchesWalletKeys(row, customerWalletKeys)) return false;
+      if (
+        filters.account_key &&
+        row.account_key != null &&
+        row.account_key !== filters.account_key
+      ) {
+        return false;
+      }
+      if (filters.identifier && customerWalletKeySet && !rowTouchesWalletKeys(row, customerWalletKeySet)) {
+        return false;
+      }
       if (filters.wallet_key && !rowTouchesSingleWallet(row, filters.wallet_key)) return false;
       if (filters.status && String(row.status || "").toLowerCase() !== String(filters.status).toLowerCase()) return false;
       if (fromDate && new Date(row.date_created) < fromDate) return false;

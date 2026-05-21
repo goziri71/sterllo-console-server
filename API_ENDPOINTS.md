@@ -461,7 +461,7 @@ All routes require JWT + any role. All are read-only.
 | `page` | Page number (default: 1) |
 | `limit` | Items per page (default: 20) |
 | `account_key` | Filter by merchant account key |
-| `identifier` | Customer `identifier` — include all activity for every wallet belonging to that customer (optional `account_key` must match the customer’s merchant) |
+| `identifier` | Customer `identifier` — scopes results to that customer’s wallets (all wallets if `wallet_key` omitted). Validates customer exists; optional `account_key` must match the customer’s merchant; optional `wallet_key` must belong to the customer. Works on **all** transaction list endpoints and **statement**. |
 | `wallet_key` | Filter by wallet key (matches source/target and swap legs where applicable) |
 | `status` | Filter by status |
 | `currency_code` | Filter by currency code (where supported) |
