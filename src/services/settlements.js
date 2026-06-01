@@ -134,7 +134,7 @@ export default class SettlementService {
 
   async getBatches({ limit, offset, filters }) {
     const where = buildWhere(filters);
-    const [[{ total }], rowsResult] = await Promise.all([
+    const [countResult, dataResult] = await Promise.all([
       db.execute(sql`
         SELECT COUNT(*) AS total
         ${fromClause}
@@ -160,7 +160,11 @@ export default class SettlementService {
       `),
     ]);
 
-    const rows = (rowsResult?.[0] || rowsResult || []).map((row) => ({
+    const countRows = countResult[0];
+    const total = Number(countRows?.[0]?.total ?? 0);
+    const dataRows = dataResult[0] || [];
+
+    const rows = dataRows.map((row) => ({
       ...row,
       status: normalizeStatus(row.status),
       gross_amount: Number(row.gross_amount || 0),
@@ -168,7 +172,7 @@ export default class SettlementService {
       net_payable: Number(row.net_payable || 0),
     }));
 
-    return { count: Number(total || 0), rows };
+    return { count: total, rows };
   }
 
   async getBatch(batchId) {
