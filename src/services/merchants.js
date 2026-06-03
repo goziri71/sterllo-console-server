@@ -247,6 +247,29 @@ function isIsvsBusinessSuccess(payload) {
   return false;
 }
 
+function coerceIsvsPayload(raw) {
+  if (raw == null) return raw;
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    if (!trimmed) return raw;
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      return raw;
+    }
+  }
+  return raw;
+}
+
+function isvsDecryptKeychains(productKeys = {}) {
+  return [
+    productKeys.targetProductKeyKeychain,
+    productKeys.sourceProductKeyKeychain,
+    productKeys.targetProductKey,
+    productKeys.sourceProductKey,
+  ].filter((value) => String(value || "").trim().length >= 32);
+}
+
 function isvsEncryptedBlob(payload) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
   if (typeof payload.response === "string" && payload.response.trim()) return payload.response.trim();
@@ -257,12 +280,12 @@ function isvsEncryptedBlob(payload) {
   return null;
 }
 
-function tryDecryptIsvsResponse(raw, keychains = []) {
-  const encrypted = isvsEncryptedBlob(raw);
-  if (!encrypted) return raw;
+function tryDecryptIsvsResponse(raw, productKeys = {}) {
+  const payload = coerceIsvsPayload(raw);
+  const encrypted = isvsEncryptedBlob(payload);
+  if (!encrypted) return payload;
 
-  for (const keychain of keychains) {
-    if (!keychain) continue;
+  for (const keychain of isvsDecryptKeychains(productKeys)) {
     try {
       const plain = decryptFromPlainPair(encrypted, keychain, { valueName: "ISVS response" });
       const parsed = JSON.parse(plain);
@@ -274,31 +297,68 @@ function tryDecryptIsvsResponse(raw, keychains = []) {
     }
   }
 
-  return raw;
+  return payload;
 }
 
 function parseIsvsResponse(raw, productKeys = {}) {
-  const parsed = tryDecryptIsvsResponse(raw, [
-    productKeys.targetProductKeyKeychain,
-    productKeys.sourceProductKeyKeychain,
-  ]);
-  if (isIsvsBusinessSuccess(parsed)) return parsed;
-  if (isvsPayloadMessage(parsed)) return parsed;
-  return parsed;
+  return tryDecryptIsvsResponse(raw, productKeys);
 }
 
-function assertIsvsBusinessSuccess(payload, operation, productKeys = {}) {
+function isIsvsExplicitFailure(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return false;
+  if (payload.state === false) return true;
+  const code = Number(payload.code);
+  return Number.isFinite(code) && code >= 4000 && code !== 2000;
+}
+
+function normalizeIsvsHttpSuccess(raw, operation, productKeys = {}) {
+  const payload = coerceIsvsPayload(raw);
   const parsed = parseIsvsResponse(payload, productKeys);
-  if (isIsvsBusinessSuccess(parsed)) return parsed;
+  const encryptedOnly = Boolean(isvsEncryptedBlob(payload)) && !isIsvsBusinessSuccess(parsed);
 
-  const message =
-    isvsPayloadMessage(parsed) ||
-    `ISVS ${operation} did not return a verified success (expected state:true, code:2000, or data.id). See data.isvs for the raw upstream body.`;
+  if (isIsvsBusinessSuccess(parsed)) {
+    return {
+      verified: true,
+      isvs: parsed,
+      message: isvsPayloadMessage(parsed),
+    };
+  }
 
-  throw new ErrorClass(message, 502, {
-    isvs: payload ?? null,
-    ...(parsed !== payload ? { isvs_parsed: parsed } : {}),
-  });
+  if (isIsvsExplicitFailure(parsed)) {
+    throw new ErrorClass(
+      isvsPayloadMessage(parsed) || `ISVS ${operation} failed`,
+      502,
+      {
+        isvs: payload,
+        ...(parsed !== payload ? { isvs_parsed: parsed } : {}),
+      },
+    );
+  }
+
+  if (encryptedOnly) {
+    return {
+      verified: false,
+      isvs: payload,
+      ...(parsed !== payload ? { isvs_parsed: parsed } : {}),
+      message:
+        isvsPayloadMessage(parsed) ||
+        "ISVS returned an encrypted response. Refetch the merchant to confirm whether linking succeeded.",
+    };
+  }
+
+  const message = isvsPayloadMessage(parsed) || isvsPayloadMessage(payload);
+  if (message) {
+    throw new ErrorClass(message, 502, {
+      isvs: payload,
+      ...(parsed !== payload ? { isvs_parsed: parsed } : {}),
+    });
+  }
+
+  return {
+    verified: false,
+    isvs: payload ?? parsed,
+    message: `ISVS ${operation} returned an unrecognized body. See data.isvs.`,
+  };
 }
 
 function throwIsvsAxiosError(error, operation) {
@@ -670,7 +730,7 @@ export default class MerchantService {
         data,
         { headers: outboundHeaders },
       );
-      return assertIsvsBusinessSuccess(response.data, "Account/Link", productKeys);
+      return normalizeIsvsHttpSuccess(response.data, "Account/Link", productKeys);
     } catch (error) {
       if (error instanceof ErrorClass) throw error;
       throwIsvsAxiosError(error, "Account/Link");
@@ -735,7 +795,7 @@ export default class MerchantService {
         data,
         { headers: outboundHeaders },
       );
-      return assertIsvsBusinessSuccess(response.data, "Account/Update", productKeys);
+      return normalizeIsvsHttpSuccess(response.data, "Account/Update", productKeys);
     } catch (error) {
       if (error instanceof ErrorClass) throw error;
       throwIsvsAxiosError(error, "Account/Update");

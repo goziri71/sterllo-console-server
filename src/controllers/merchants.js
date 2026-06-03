@@ -120,7 +120,7 @@ export const getMerchantSettlements = async (request, reply) => {
 };
 
 export const linkMerchantBeamerAccount = async (request, reply) => {
-  const isvs = await merchantService.linkBeamerAccount(
+  const result = await merchantService.linkBeamerAccount(
     request.params.account_key,
     request.body ?? {},
     request.headers,
@@ -128,14 +128,18 @@ export const linkMerchantBeamerAccount = async (request, reply) => {
 
   return reply.code(200).send({
     code: 200,
-    success: true,
-    message: isvs?.message || "Beamer account link completed",
-    data: { isvs },
+    success: result.verified !== false,
+    message: result.message || "Beamer account link completed",
+    data: {
+      isvs: result.isvs,
+      isvs_verified: result.verified !== false,
+      ...(result.isvs_parsed ? { isvs_parsed: result.isvs_parsed } : {}),
+    },
   });
 };
 
 export const updateMerchantBeamerAccount = async (request, reply) => {
-  const isvs = await merchantService.updateBeamerAccount(
+  const result = await merchantService.updateBeamerAccount(
     request.params.account_key,
     request.body ?? {},
     request.headers,
@@ -143,9 +147,13 @@ export const updateMerchantBeamerAccount = async (request, reply) => {
 
   return reply.code(200).send({
     code: 200,
-    success: true,
-    message: isvs?.message || "Beamer account update completed",
-    data: { isvs },
+    success: result.verified !== false,
+    message: result.message || "Beamer account update completed",
+    data: {
+      isvs: result.isvs,
+      isvs_verified: result.verified !== false,
+      ...(result.isvs_parsed ? { isvs_parsed: result.isvs_parsed } : {}),
+    },
   });
 };
 
