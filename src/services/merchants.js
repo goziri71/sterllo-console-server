@@ -4,7 +4,11 @@ import axios from "axios";
 import { db } from "../db/index.js";
 import { merchants, merchantLedgers, settlementLedgers } from "../db/schema/merchants.js";
 import { udara360APICredentials } from "../db/schema/vendor.js";
-import { decryptFromPlainPair, stripWrappingQuotes } from "../utils/decryptProdSecret.js";
+import {
+  decryptFromPlainPair,
+  looksLikeBase64,
+  stripWrappingQuotes,
+} from "../utils/decryptProdSecret.js";
 import { customers } from "../db/schema/customers.js";
 import { kycs } from "../db/schema/kycs.js";
 import { ErrorClass } from "../utils/errorClass/index.js";
@@ -44,37 +48,99 @@ function mergeMerchantEnvironments(ledgerEnvsCsv, customerEnvsCsv) {
   return merchantTypeFromEnvironments(merged || null);
 }
 
-function getBeamerProductKeys() {
-  const decryptPair = ({ encrypted, keychain, name }) =>
-    decryptFromPlainPair(
-      stripWrappingQuotes(String(encrypted ?? "")),
-      stripWrappingQuotes(String(keychain ?? "")),
-      { valueName: name },
-    );
-
-  const sourceProductKey =
-    process.env.SOURCE_PRODUCT_KEY_KEYCHAIN && process.env.SOURCE_PRODUCT_KEY
-      ? decryptPair({
-          encrypted: process.env.SOURCE_PRODUCT_KEY,
-          keychain: process.env.SOURCE_PRODUCT_KEY_KEYCHAIN,
-          name: "SOURCE_PRODUCT_KEY",
-        })
-      : stripWrappingQuotes(process.env.SOURCE_PRODUCT_KEY || "");
-
-  const targetProductKey =
-    process.env.TARGET_PRODUCT_KEY_KEYCHAIN && process.env.TARGET_PRODUCT_KEY
-      ? decryptPair({
-          encrypted: process.env.TARGET_PRODUCT_KEY,
-          keychain: process.env.TARGET_PRODUCT_KEY_KEYCHAIN,
-          name: "TARGET_PRODUCT_KEY",
-        })
-      : stripWrappingQuotes(process.env.TARGET_PRODUCT_KEY || "");
-
+function getBeamerProductKeyMaterial() {
   return {
-    sourceProductKey,
-    targetProductKey,
+    sourceProductKey: stripWrappingQuotes(process.env.SOURCE_PRODUCT_KEY || ""),
+    targetProductKey: stripWrappingQuotes(process.env.TARGET_PRODUCT_KEY || ""),
     sourceProductKeyKeychain: stripWrappingQuotes(process.env.SOURCE_PRODUCT_KEY_KEYCHAIN || ""),
     targetProductKeyKeychain: stripWrappingQuotes(process.env.TARGET_PRODUCT_KEY_KEYCHAIN || ""),
+  };
+}
+
+function beamerDecryptKeychains(material = {}) {
+  return [
+    material.sourceProductKeyKeychain,
+    material.targetProductKeyKeychain,
+    material.sourceProductKey,
+    material.targetProductKey,
+  ].filter((value) => String(value || "").trim().length >= 32);
+}
+
+/** ISVS Beamer headers must be plaintext; decrypt AES/base64 values with product key keychains first. */
+function decryptBeamerHeaderValue(raw, material, label) {
+  const text = stripWrappingQuotes(String(raw ?? "").trim());
+  if (!text) return "";
+
+  const keychains = beamerDecryptKeychains(material);
+  if (keychains.length === 0) return text;
+
+  for (const keychain of keychains) {
+    try {
+      const plain = decryptFromPlainPair(text, keychain, { valueName: label });
+      const result = stripWrappingQuotes(String(plain).trim());
+      if (result) return result;
+    } catch {
+      /* try next keychain */
+    }
+  }
+
+  // UUIDs and short merchant keys are already plaintext when decrypt does not apply.
+  if (/^[0-9a-f-]{32,36}$/i.test(text)) return text;
+  if (text.length <= 36 && !looksLikeBase64(text)) return text;
+
+  if (looksLikeBase64(text)) {
+    throw new ErrorClass(`Unable to decrypt ${label} for ISVS Beamer request`, 400, {
+      hint: "Provide AES-encrypted base64 or plaintext value decryptable with SOURCE/TARGET product key keychains",
+    });
+  }
+
+  return text;
+}
+
+function buildBeamerOutboundHeaders(material, headers, { link = false } = {}) {
+  const outbound = {
+    "Target-Product-Key": decryptBeamerHeaderValue(
+      material.targetProductKey,
+      material,
+      "Target-Product-Key",
+    ),
+    "Source-Product-Key": decryptBeamerHeaderValue(
+      material.sourceProductKey,
+      material,
+      "Source-Product-Key",
+    ),
+    "Request-Id": decryptBeamerHeaderValue(headers["Request-Id"], material, "Request-Id"),
+  };
+
+  if (link) {
+    outbound["User-Key"] = decryptBeamerHeaderValue(headers["User-Key"], material, "User-Key");
+    outbound["Accout-Key"] = decryptBeamerHeaderValue(headers["Accout-Key"], material, "Accout-Key");
+    if (headers["Request-IP-Address"]) {
+      outbound["Request-IP-Address"] = decryptBeamerHeaderValue(
+        headers["Request-IP-Address"],
+        material,
+        "Request-IP-Address",
+      );
+    }
+  }
+
+  return outbound;
+}
+
+function getBeamerProductKeys() {
+  const material = getBeamerProductKeyMaterial();
+  return {
+    ...material,
+    sourceProductKey: decryptBeamerHeaderValue(
+      material.sourceProductKey,
+      material,
+      "Source-Product-Key",
+    ),
+    targetProductKey: decryptBeamerHeaderValue(
+      material.targetProductKey,
+      material,
+      "Target-Product-Key",
+    ),
   };
 }
 
@@ -262,12 +328,7 @@ function coerceIsvsPayload(raw) {
 }
 
 function isvsDecryptKeychains(productKeys = {}) {
-  return [
-    productKeys.targetProductKeyKeychain,
-    productKeys.sourceProductKeyKeychain,
-    productKeys.targetProductKey,
-    productKeys.sourceProductKey,
-  ].filter((value) => String(value || "").trim().length >= 32);
+  return beamerDecryptKeychains(productKeys);
 }
 
 function isvsEncryptedBlob(payload) {
@@ -708,12 +769,11 @@ export default class MerchantService {
       throw new ErrorClass("Merchant not found", 404);
     }
 
-    const productKeys = getBeamerProductKeys();
-    const { targetProductKey, sourceProductKey } = productKeys;
-    if (!String(targetProductKey || "").trim()) {
+    const productKeyMaterial = getBeamerProductKeyMaterial();
+    if (!String(productKeyMaterial.targetProductKey || "").trim()) {
       throw new ErrorClass("TARGET_PRODUCT_KEY is required for beamer link", 500);
     }
-    if (!String(sourceProductKey || "").trim()) {
+    if (!String(productKeyMaterial.sourceProductKey || "").trim()) {
       throw new ErrorClass("SOURCE_PRODUCT_KEY is required for beamer link", 500);
     }
 
@@ -739,15 +799,23 @@ export default class MerchantService {
       throw new ErrorClass("client.key is required", 400);
     }
 
-    const outboundHeaders = {
-      "Target-Product-Key": targetProductKey,
-      "Source-Product-Key": sourceProductKey,
-      "User-Key": headers["User-Key"],
-      "Accout-Key": headers["Accout-Key"],
-      "Request-Id": headers["Request-Id"],
-    };
-    if (headers["Request-IP-Address"]) {
-      outboundHeaders["Request-IP-Address"] = headers["Request-IP-Address"];
+    const outboundHeaders = buildBeamerOutboundHeaders(productKeyMaterial, headers, { link: true });
+    const productKeys = getBeamerProductKeys();
+
+    if (!outboundHeaders["Target-Product-Key"]) {
+      throw new ErrorClass("Target-Product-Key could not be resolved after decryption", 500);
+    }
+    if (!outboundHeaders["Source-Product-Key"]) {
+      throw new ErrorClass("Source-Product-Key could not be resolved after decryption", 500);
+    }
+    if (!outboundHeaders["User-Key"]) {
+      throw new ErrorClass("User-Key could not be resolved after decryption", 400);
+    }
+    if (!outboundHeaders["Accout-Key"]) {
+      throw new ErrorClass("Accout-Key could not be resolved after decryption", 400);
+    }
+    if (!outboundHeaders["Request-Id"]) {
+      throw new ErrorClass("Request-Id could not be resolved after decryption", 400);
     }
 
     try {
@@ -775,12 +843,11 @@ export default class MerchantService {
       throw new ErrorClass("Merchant not found", 404);
     }
 
-    const productKeys = getBeamerProductKeys();
-    const { targetProductKey, sourceProductKey } = productKeys;
-    if (!String(targetProductKey || "").trim()) {
+    const productKeyMaterial = getBeamerProductKeyMaterial();
+    if (!String(productKeyMaterial.targetProductKey || "").trim()) {
       throw new ErrorClass("TARGET_PRODUCT_KEY is required for beamer update", 500);
     }
-    if (!String(sourceProductKey || "").trim()) {
+    if (!String(productKeyMaterial.sourceProductKey || "").trim()) {
       throw new ErrorClass("SOURCE_PRODUCT_KEY is required for beamer update", 500);
     }
 
@@ -810,11 +877,18 @@ export default class MerchantService {
       throw new ErrorClass("client.key is required", 400);
     }
 
-    const outboundHeaders = {
-      "Target-Product-Key": targetProductKey,
-      "Source-Product-Key": sourceProductKey,
-      "Request-Id": headers["Request-Id"],
-    };
+    const outboundHeaders = buildBeamerOutboundHeaders(productKeyMaterial, headers);
+    const productKeys = getBeamerProductKeys();
+
+    if (!outboundHeaders["Target-Product-Key"]) {
+      throw new ErrorClass("Target-Product-Key could not be resolved after decryption", 500);
+    }
+    if (!outboundHeaders["Source-Product-Key"]) {
+      throw new ErrorClass("Source-Product-Key could not be resolved after decryption", 500);
+    }
+    if (!outboundHeaders["Request-Id"]) {
+      throw new ErrorClass("Request-Id could not be resolved after decryption", 400);
+    }
 
     try {
       const response = await axios.post(
