@@ -63,12 +63,13 @@ app.register(fjwt, {
   secret: env.JWT_SECRET,
   sign: { expiresIn: env.JWT_EXPIRES_IN },
 });
-// CORS before helmet. Must list DELETE + PATCH — default @fastify/cors only allows GET/HEAD/POST,
-// so assign/revoke role (DELETE) and PATCH role permissions failed from browsers with a CORS error.
+// CORS before helmet. Methods must include DELETE + PATCH (default cors only allows GET/HEAD/POST).
+// Do not set a narrow allowedHeaders list — @fastify/cors then reflects Access-Control-Request-Headers
+// on preflight so Beamer/Udara link calls can send User-Key, Accout-Key, Request-Id, etc. when the UI
+// passes them as HTTP headers (body.headers is also supported on account-link).
 app.register(cors, {
   origin: true,
   methods: ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"],
-  allowedHeaders: ["Authorization", "Content-Type", "Accept"],
   credentials: true,
 });
 app.register(helmet);

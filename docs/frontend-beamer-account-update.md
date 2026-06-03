@@ -7,7 +7,7 @@ This document explains how frontend should call the Beamer account update endpoi
 There is no separate “second database” user list. Use the main merchants listing (or single merchant fetch); each row includes optional **`udara360`** details joined from `Udara360APICredentials` on `account_key` (latest credential row per merchant when several exist).
 
 - **Method:** `GET`
-- **URL:** `/api/v1/merchants` (paginated list) or `/api/v1/merchants/:account_key`
+- **URL:** `/1.202602.0/merchants` (paginated list) or `/1.202602.0/merchants/:account_key` (use your deployed `API_VERSION` prefix)
 - **Permission:** `CONSOLE_READ`
 
 Each merchant object may include:
@@ -29,12 +29,24 @@ Or `"udara360": null` when no credential row exists. Secrets (`client_secret`, t
 
 Use `udara360.client_id`, `udara360.account_number`, and merchant `user_key` / `account_key` as needed when building Beamer link/update payloads.
 
-## Endpoint
+## Endpoints
+
+Use the same API version prefix as the rest of the console (e.g. `/1.202602.0`).
+
+### Link (Udara / Beamer)
 
 - **Method:** `POST`
-- **URL:** `/api/v1/merchants/:account_key/integrations/beamer/account-update`
+- **URL:** `/1.202602.0/merchants/:account_key/integrations/beamer/account-link`
+- **Permission:** `merchant.update`
+- **Body:** `{ "headers": { "User-Key", "Accout-Key", "Request-Id", optional "Request-IP-Address" }, "data": { "account_number", "client": { "id", "key" } } }`
+- Put integration headers in the **JSON body** when possible; the API CORS config also allows them as HTTP headers if the UI sends them that way.
+
+### Update
+
+- **Method:** `POST`
+- **URL:** `/1.202602.0/merchants/:account_key/integrations/beamer/account-update`
 - **Auth:** Same auth flow used for other merchant update endpoints
-- **Permission required:** `MERCHANT_UPDATE`
+- **Permission required:** `merchant.update`
 
 ## Path Param
 
@@ -100,7 +112,7 @@ Backend returns standard success envelope and forwards upstream data:
 ## Frontend Example (fetch)
 
 ```ts
-await fetch(`/api/v1/merchants/${accountKey}/integrations/beamer/account-update`, {
+await fetch(`/1.202602.0/merchants/${accountKey}/integrations/beamer/account-update`, {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
