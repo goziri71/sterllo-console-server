@@ -399,6 +399,32 @@ function shapeUdaraPublic(row) {
   };
 }
 
+async function attachUdara360DbStatus(result, accountKey, udaraBefore = null) {
+  const udaraAfter = await fetchLatestUdaraOne(accountKey);
+  const linked = Boolean(udaraAfter);
+  const wasLinked = Boolean(udaraBefore);
+  const newlyLinked = linked && !wasLinked;
+
+  let message = result.message;
+  if (linked) {
+    message = newlyLinked
+      ? "Account linked successfully (Udara360 credentials saved)."
+      : "Udara360 credentials present (update accepted or already linked).";
+  } else if (result.verified === false) {
+    message =
+      "ISVS returned an encrypted response but no Udara360 credentials were saved. Check account_number, client.id, and client.key with Udara/ISVS.";
+  }
+
+  return {
+    ...result,
+    isvs_verified: result.verified === true,
+    verified: result.verified === true || linked,
+    message,
+    udara360_linked: linked,
+    udara360: shapeUdaraPublic(udaraAfter),
+  };
+}
+
 function isMissingUdaraTableError(e) {
   return isMissingMysqlTableError(e);
 }
@@ -730,7 +756,8 @@ export default class MerchantService {
         data,
         { headers: outboundHeaders },
       );
-      return normalizeIsvsHttpSuccess(response.data, "Account/Link", productKeys);
+      const result = normalizeIsvsHttpSuccess(response.data, "Account/Link", productKeys);
+      return attachUdara360DbStatus(result, accountKey, udara360);
     } catch (error) {
       if (error instanceof ErrorClass) throw error;
       throwIsvsAxiosError(error, "Account/Link");
@@ -795,7 +822,8 @@ export default class MerchantService {
         data,
         { headers: outboundHeaders },
       );
-      return normalizeIsvsHttpSuccess(response.data, "Account/Update", productKeys);
+      const result = normalizeIsvsHttpSuccess(response.data, "Account/Update", productKeys);
+      return attachUdara360DbStatus(result, accountKey, udara360);
     } catch (error) {
       if (error instanceof ErrorClass) throw error;
       throwIsvsAxiosError(error, "Account/Update");
