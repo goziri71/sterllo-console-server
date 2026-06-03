@@ -23,10 +23,15 @@ export const errorHandler = (error, request, reply) => {
   const { httpStatus, bodyCode } = resolveHttpAndBodyCode(raw);
   const isClientError = httpStatus >= 400 && httpStatus < 500;
   const isProduction = process.env.NODE_ENV === "production";
+  const hasExplicitStatus = Number.isFinite(Number(error?.statusCode));
+  const isUpstreamError = hasExplicitStatus && error?.data?.isvs != null;
 
-  const message = isClientError
-    ? (error.message || "Bad request")
-    : "An unexpected error occurred";
+  const message =
+    isClientError || isUpstreamError || (hasExplicitStatus && error.message)
+      ? (error.message || "Bad request")
+      : isProduction
+        ? "An unexpected error occurred"
+        : (error.message || "An unexpected error occurred");
 
   let data = {};
   if (error?.data && typeof error.data === "object" && !Array.isArray(error.data)) {

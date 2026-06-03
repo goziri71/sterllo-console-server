@@ -70,7 +70,12 @@ function getBeamerProductKeys() {
         })
       : stripWrappingQuotes(process.env.TARGET_PRODUCT_KEY || "");
 
-  return { sourceProductKey, targetProductKey };
+  return {
+    sourceProductKey,
+    targetProductKey,
+    sourceProductKeyKeychain: stripWrappingQuotes(process.env.SOURCE_PRODUCT_KEY_KEYCHAIN || ""),
+    targetProductKeyKeychain: stripWrappingQuotes(process.env.TARGET_PRODUCT_KEY_KEYCHAIN || ""),
+  };
 }
 
 function asPlainObject(value) {
@@ -232,6 +237,7 @@ function isvsPayloadMessage(payload) {
 
 function isIsvsBusinessSuccess(payload) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return false;
+  if (payload.state === false) return false;
   if (payload.state === true) return true;
   if (Number(payload.code) === 2000) return true;
   const inner = payload.data;
@@ -241,12 +247,58 @@ function isIsvsBusinessSuccess(payload) {
   return false;
 }
 
-function assertIsvsBusinessSuccess(payload, operation) {
-  if (isIsvsBusinessSuccess(payload)) return payload;
+function isvsEncryptedBlob(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  if (typeof payload.response === "string" && payload.response.trim()) return payload.response.trim();
+  const inner = payload.data;
+  if (inner && typeof inner === "object" && !Array.isArray(inner)) {
+    if (typeof inner.response === "string" && inner.response.trim()) return inner.response.trim();
+  }
+  return null;
+}
+
+function tryDecryptIsvsResponse(raw, keychains = []) {
+  const encrypted = isvsEncryptedBlob(raw);
+  if (!encrypted) return raw;
+
+  for (const keychain of keychains) {
+    if (!keychain) continue;
+    try {
+      const plain = decryptFromPlainPair(encrypted, keychain, { valueName: "ISVS response" });
+      const parsed = JSON.parse(plain);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch {
+      /* try next keychain */
+    }
+  }
+
+  return raw;
+}
+
+function parseIsvsResponse(raw, productKeys = {}) {
+  const parsed = tryDecryptIsvsResponse(raw, [
+    productKeys.targetProductKeyKeychain,
+    productKeys.sourceProductKeyKeychain,
+  ]);
+  if (isIsvsBusinessSuccess(parsed)) return parsed;
+  if (isvsPayloadMessage(parsed)) return parsed;
+  return parsed;
+}
+
+function assertIsvsBusinessSuccess(payload, operation, productKeys = {}) {
+  const parsed = parseIsvsResponse(payload, productKeys);
+  if (isIsvsBusinessSuccess(parsed)) return parsed;
+
   const message =
-    isvsPayloadMessage(payload) ||
-    `ISVS ${operation} did not succeed (expected state:true, code:2000, or data.id; got encrypted or non-standard body)`;
-  throw new ErrorClass(message, 502, { isvs: payload ?? null });
+    isvsPayloadMessage(parsed) ||
+    `ISVS ${operation} did not return a verified success (expected state:true, code:2000, or data.id). See data.isvs for the raw upstream body.`;
+
+  throw new ErrorClass(message, 502, {
+    isvs: payload ?? null,
+    ...(parsed !== payload ? { isvs_parsed: parsed } : {}),
+  });
 }
 
 function throwIsvsAxiosError(error, operation) {
@@ -570,7 +622,8 @@ export default class MerchantService {
       throw new ErrorClass("Merchant not found", 404);
     }
 
-    const { targetProductKey, sourceProductKey } = getBeamerProductKeys();
+    const productKeys = getBeamerProductKeys();
+    const { targetProductKey, sourceProductKey } = productKeys;
     if (!String(targetProductKey || "").trim()) {
       throw new ErrorClass("TARGET_PRODUCT_KEY is required for beamer link", 500);
     }
@@ -617,7 +670,7 @@ export default class MerchantService {
         data,
         { headers: outboundHeaders },
       );
-      return assertIsvsBusinessSuccess(response.data, "Account/Link");
+      return assertIsvsBusinessSuccess(response.data, "Account/Link", productKeys);
     } catch (error) {
       if (error instanceof ErrorClass) throw error;
       throwIsvsAxiosError(error, "Account/Link");
@@ -635,7 +688,8 @@ export default class MerchantService {
       throw new ErrorClass("Merchant not found", 404);
     }
 
-    const { targetProductKey, sourceProductKey } = getBeamerProductKeys();
+    const productKeys = getBeamerProductKeys();
+    const { targetProductKey, sourceProductKey } = productKeys;
     if (!String(targetProductKey || "").trim()) {
       throw new ErrorClass("TARGET_PRODUCT_KEY is required for beamer update", 500);
     }
@@ -649,8 +703,15 @@ export default class MerchantService {
     if (!headers["Request-Id"]) {
       throw new ErrorClass("Request-Id is required", 400);
     }
+    if (!udara360) {
+      throw new ErrorClass(
+        "This merchant has no Udara360 integration on file. Use POST .../integrations/beamer/account-link for first-time linking, not account-update.",
+        400,
+        { hint: "account-link creates the integration; account-update only refreshes an existing one" },
+      );
+    }
     if (!data.id) {
-      throw new ErrorClass("data.id is required", 400);
+      throw new ErrorClass("data.id is required (Udara360 integration identifier)", 400);
     }
     if (!data.account_number) {
       throw new ErrorClass("account_number is required", 400);
@@ -674,7 +735,7 @@ export default class MerchantService {
         data,
         { headers: outboundHeaders },
       );
-      return assertIsvsBusinessSuccess(response.data, "Account/Update");
+      return assertIsvsBusinessSuccess(response.data, "Account/Update", productKeys);
     } catch (error) {
       if (error instanceof ErrorClass) throw error;
       throwIsvsAxiosError(error, "Account/Update");
