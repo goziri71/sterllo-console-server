@@ -122,7 +122,7 @@ export const getMerchantSettlements = async (request, reply) => {
 export const linkMerchantBeamerAccount = async (request, reply) => {
   const data = await merchantService.linkBeamerAccount(
     request.params.account_key,
-    request.body ?? {},
+    request.body,
     request.headers,
   );
 
@@ -135,11 +135,7 @@ export const linkMerchantBeamerAccount = async (request, reply) => {
 };
 
 export const updateMerchantBeamerAccount = async (request, reply) => {
-  const data = await merchantService.updateBeamerAccount(
-    request.params.account_key,
-    request.body ?? {},
-    request.headers,
-  );
+  const data = await merchantService.updateBeamerAccount(request.params.account_key, request.body);
 
   return reply.code(200).send({
     code: 200,
