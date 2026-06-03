@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { eq, and, desc, asc, count, ne, or, sql, max, inArray } from "drizzle-orm";
 import axios from "axios";
 import { db } from "../db/index.js";
@@ -70,6 +71,162 @@ function getBeamerProductKeys() {
       : stripWrappingQuotes(process.env.TARGET_PRODUCT_KEY || "");
 
   return { sourceProductKey, targetProductKey };
+}
+
+function asPlainObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+
+function pickFirstNonEmpty(...candidates) {
+  for (const candidate of candidates) {
+    if (candidate === undefined || candidate === null) continue;
+    const text = String(candidate).trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function getHttpHeader(httpHeaders, ...names) {
+  if (!httpHeaders || typeof httpHeaders !== "object") return "";
+  for (const name of names) {
+    const direct = httpHeaders[name];
+    if (direct != null && String(direct).trim()) return String(direct).trim();
+    const lower = httpHeaders[name.toLowerCase()];
+    if (lower != null && String(lower).trim()) return String(lower).trim();
+  }
+  return "";
+}
+
+/**
+ * Accepts nested { headers, data }, flat fields, HTTP headers, and merchant/Udara defaults.
+ * Frontend often sends {} with Beamer keys on the HTTP request instead of in the JSON body.
+ */
+function normalizeBeamerLinkPayload(payload, httpHeaders, merchant, udara360) {
+  const body = asPlainObject(payload) || {};
+  const nestedHeaders = asPlainObject(body.headers) || asPlainObject(body.header);
+  const nestedData = asPlainObject(body.data);
+  const flatClient = asPlainObject(body.client);
+
+  const headers = {
+    "User-Key": pickFirstNonEmpty(
+      nestedHeaders?.["User-Key"],
+      nestedHeaders?.user_key,
+      nestedHeaders?.userKey,
+      body.user_key,
+      body.userKey,
+      getHttpHeader(httpHeaders, "User-Key", "user-key"),
+      merchant?.user_key,
+    ),
+    "Accout-Key": pickFirstNonEmpty(
+      nestedHeaders?.["Accout-Key"],
+      nestedHeaders?.["Account-Key"],
+      nestedHeaders?.account_key,
+      nestedHeaders?.accountKey,
+      body.account_key,
+      body.accountKey,
+      getHttpHeader(httpHeaders, "Accout-Key", "Account-Key", "accout-key", "account-key"),
+      merchant?.account_key,
+    ),
+    "Request-Id": pickFirstNonEmpty(
+      nestedHeaders?.["Request-Id"],
+      nestedHeaders?.request_id,
+      nestedHeaders?.requestId,
+      body.request_id,
+      body.requestId,
+      getHttpHeader(httpHeaders, "Request-Id", "request-id"),
+      crypto.randomUUID(),
+    ),
+  };
+
+  const requestIp = pickFirstNonEmpty(
+    nestedHeaders?.["Request-IP-Address"],
+    nestedHeaders?.request_ip_address,
+    body.request_ip_address,
+    getHttpHeader(httpHeaders, "Request-IP-Address", "request-ip-address"),
+  );
+  if (requestIp) {
+    headers["Request-IP-Address"] = requestIp;
+  }
+
+  const data = {
+    account_number: pickFirstNonEmpty(
+      nestedData?.account_number,
+      body.account_number,
+      body.accountNumber,
+      udara360?.account_number,
+    ),
+    client: {
+      id: pickFirstNonEmpty(
+        nestedData?.client?.id,
+        flatClient?.id,
+        body.client_id,
+        body.clientId,
+        udara360?.client_id,
+      ),
+      key: pickFirstNonEmpty(
+        nestedData?.client?.key,
+        flatClient?.key,
+        body.client_key,
+        body.clientKey,
+      ),
+    },
+  };
+
+  return { headers, data };
+}
+
+/** Update only needs Request-Id on outbound headers; data shape matches ISVS Account/Update. */
+function normalizeBeamerUpdatePayload(payload, httpHeaders, udara360) {
+  const body = asPlainObject(payload) || {};
+  const nestedHeaders = asPlainObject(body.headers) || asPlainObject(body.header);
+  const nestedData = asPlainObject(body.data);
+  const flatClient = asPlainObject(body.client);
+
+  const headers = {
+    "Request-Id": pickFirstNonEmpty(
+      nestedHeaders?.["Request-Id"],
+      nestedHeaders?.request_id,
+      nestedHeaders?.requestId,
+      body.request_id,
+      body.requestId,
+      getHttpHeader(httpHeaders, "Request-Id", "request-id"),
+      crypto.randomUUID(),
+    ),
+  };
+
+  const data = {
+    id: pickFirstNonEmpty(
+      nestedData?.id,
+      body.id,
+      body.integration_id,
+      body.integrationId,
+      udara360?.id != null ? String(udara360.id) : "",
+      udara360?.identifier,
+    ),
+    account_number: pickFirstNonEmpty(
+      nestedData?.account_number,
+      body.account_number,
+      body.accountNumber,
+      udara360?.account_number,
+    ),
+    client: {
+      id: pickFirstNonEmpty(
+        nestedData?.client?.id,
+        flatClient?.id,
+        body.client_id,
+        body.clientId,
+        udara360?.client_id,
+      ),
+      key: pickFirstNonEmpty(
+        nestedData?.client?.key,
+        flatClient?.key,
+        body.client_key,
+        body.clientKey,
+      ),
+    },
+  };
+
+  return { headers, data };
 }
 
 const UDARA360_PUBLIC = {
@@ -370,7 +527,7 @@ export default class MerchantService {
     return { count: Number(total), rows };
   }
 
-  async linkBeamerAccount(accountKey, payload) {
+  async linkBeamerAccount(accountKey, payload, httpHeaders = {}) {
     const [merchant] = await db
       .select()
       .from(merchants)
@@ -388,44 +545,50 @@ export default class MerchantService {
     if (!String(sourceProductKey || "").trim()) {
       throw new ErrorClass("SOURCE_PRODUCT_KEY is required for beamer link", 500);
     }
-    const headers = payload?.headers;
-    const data = payload?.data;
-    if (!headers || typeof headers !== "object" || Array.isArray(headers)) {
-      throw new ErrorClass("headers object is required", 400);
-    }
-    if (!data || typeof data !== "object" || Array.isArray(data)) {
-      throw new ErrorClass("data object is required", 400);
-    }
 
-    const requiredHeaders = ["User-Key", "Accout-Key", "Request-Id"];
-    for (const key of requiredHeaders) {
-      if (!String(headers[key] || "").trim()) {
-        throw new ErrorClass(`${key} header is required`, 400);
-      }
-    }
+    const udara360 = await fetchLatestUdaraOne(accountKey);
+    const { headers, data } = normalizeBeamerLinkPayload(payload, httpHeaders, merchant, udara360);
 
-    if (!String(data.account_number || "").trim()) {
-      throw new ErrorClass("data.account_number is required", 400);
+    if (!headers["User-Key"]) {
+      throw new ErrorClass(
+        "User-Key is required (send in body.headers, as an HTTP header, or ensure merchant has user_key)",
+        400,
+      );
     }
-    if (!data.client || typeof data.client !== "object" || Array.isArray(data.client)) {
-      throw new ErrorClass("data.client object is required", 400);
+    if (!headers["Accout-Key"]) {
+      throw new ErrorClass(
+        "Accout-Key is required (send in body.headers, as an HTTP header, or use merchant account_key)",
+        400,
+      );
     }
-    if (!String(data.client.id || "").trim()) {
-      throw new ErrorClass("data.client.id is required", 400);
+    if (!headers["Request-Id"]) {
+      throw new ErrorClass("Request-Id is required", 400);
     }
-    if (!String(data.client.key || "").trim()) {
-      throw new ErrorClass("data.client.key is required", 400);
+    if (!data.account_number) {
+      throw new ErrorClass(
+        "account_number is required (body.data.account_number, body.account_number, or existing udara360 record)",
+        400,
+      );
+    }
+    if (!data.client.id) {
+      throw new ErrorClass(
+        "client.id is required (body.data.client.id, body.client_id, or existing udara360.client_id)",
+        400,
+      );
+    }
+    if (!data.client.key) {
+      throw new ErrorClass("client.key is required (body.data.client.key or body.client_key)", 400);
     }
 
     const outboundHeaders = {
       "Target-Product-Key": targetProductKey,
       "Source-Product-Key": sourceProductKey,
-      "User-Key": String(headers["User-Key"]).trim(),
-      "Accout-Key": String(headers["Accout-Key"]).trim(),
-      "Request-Id": String(headers["Request-Id"]).trim(),
+      "User-Key": headers["User-Key"],
+      "Accout-Key": headers["Accout-Key"],
+      "Request-Id": headers["Request-Id"],
     };
-    if (headers["Request-IP-Address"] !== undefined && headers["Request-IP-Address"] !== null) {
-      outboundHeaders["Request-IP-Address"] = String(headers["Request-IP-Address"]).trim();
+    if (headers["Request-IP-Address"]) {
+      outboundHeaders["Request-IP-Address"] = headers["Request-IP-Address"];
     }
 
     try {
@@ -445,7 +608,7 @@ export default class MerchantService {
     }
   }
 
-  async updateBeamerAccount(accountKey, payload) {
+  async updateBeamerAccount(accountKey, payload, httpHeaders = {}) {
     const [merchant] = await db
       .select()
       .from(merchants)
@@ -463,38 +626,42 @@ export default class MerchantService {
     if (!String(sourceProductKey || "").trim()) {
       throw new ErrorClass("SOURCE_PRODUCT_KEY is required for beamer update", 500);
     }
-    const headers = payload?.headers;
-    const data = payload?.data;
-    if (!headers || typeof headers !== "object" || Array.isArray(headers)) {
-      throw new ErrorClass("headers object is required", 400);
-    }
-    if (!data || typeof data !== "object" || Array.isArray(data)) {
-      throw new ErrorClass("data object is required", 400);
-    }
-    if (!String(headers["Request-Id"] || "").trim()) {
-      throw new ErrorClass("Request-Id header is required", 400);
-    }
 
-    if (!String(data.id || "").trim()) {
-      throw new ErrorClass("data.id is required", 400);
+    const udara360 = await fetchLatestUdaraOne(accountKey);
+    const { headers, data } = normalizeBeamerUpdatePayload(payload, httpHeaders, udara360);
+
+    if (!headers["Request-Id"]) {
+      throw new ErrorClass(
+        "Request-Id is required (body.headers, HTTP header Request-Id, or omit to auto-generate)",
+        400,
+      );
     }
-    if (!String(data.account_number || "").trim()) {
-      throw new ErrorClass("data.account_number is required", 400);
+    if (!data.id) {
+      throw new ErrorClass(
+        "data.id is required (body.data.id, body.id, or existing udara360.id / identifier)",
+        400,
+      );
     }
-    if (!data.client || typeof data.client !== "object" || Array.isArray(data.client)) {
-      throw new ErrorClass("data.client object is required", 400);
+    if (!data.account_number) {
+      throw new ErrorClass(
+        "account_number is required (body.data.account_number, body.account_number, or udara360)",
+        400,
+      );
     }
-    if (!String(data.client.id || "").trim()) {
-      throw new ErrorClass("data.client.id is required", 400);
+    if (!data.client.id) {
+      throw new ErrorClass(
+        "client.id is required (body.data.client.id, body.client_id, or udara360.client_id)",
+        400,
+      );
     }
-    if (!String(data.client.key || "").trim()) {
-      throw new ErrorClass("data.client.key is required", 400);
+    if (!data.client.key) {
+      throw new ErrorClass("client.key is required (body.data.client.key or body.client_key)", 400);
     }
 
     const outboundHeaders = {
       "Target-Product-Key": targetProductKey,
       "Source-Product-Key": sourceProductKey,
-      "Request-Id": String(headers["Request-Id"]).trim(),
+      "Request-Id": headers["Request-Id"],
     };
 
     try {

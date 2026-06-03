@@ -38,8 +38,24 @@ Use the same API version prefix as the rest of the console (e.g. `/1.202602.0`).
 - **Method:** `POST`
 - **URL:** `/1.202602.0/merchants/:account_key/integrations/beamer/account-link`
 - **Permission:** `merchant.update`
-- **Body:** `{ "headers": { "User-Key", "Accout-Key", "Request-Id", optional "Request-IP-Address" }, "data": { "account_number", "client": { "id", "key" } } }`
-- Put integration headers in the **JSON body** when possible; the API CORS config also allows them as HTTP headers if the UI sends them that way.
+- **Body (preferred):**
+```json
+{
+  "headers": {
+    "User-Key": "merchant user_key",
+    "Accout-Key": "merchant account_key",
+    "Request-Id": "uuid"
+  },
+  "data": {
+    "account_number": "string",
+    "client": { "id": "string", "key": "string" }
+  }
+}
+```
+- **Also accepted:** empty `{}` if you send `User-Key`, `Accout-Key`, and `Request-Id` as **HTTP headers** — the backend fills them from headers + merchant row.
+- **Also accepted:** flat JSON `{ "account_number", "client_id", "client_key", "user_key", "account_key", "request_id" }`.
+- `User-Key` / `Accout-Key` default from the merchant row when omitted; `Request-Id` is auto-generated if omitted.
+- `account_number` / `client.id` can default from existing `udara360` on the merchant; **`client.key` must still be sent** (not stored on the public merchant payload).
 
 ### Update
 
@@ -74,11 +90,11 @@ Send JSON with this shape:
 
 ### Important
 
-- Frontend must send all `data` fields itself: `data.id`, `data.account_number`, `data.client.id`, `data.client.key`.
-- Backend does **not** auto-fill `data.id` or `data.client.key`.
-- Frontend sends only `Request-Id` inside `headers`.
-- `Target-Product-Key` and `Source-Product-Key` are injected by backend from encrypted env values.
-- `Request-Id` should be unique per request to support traceability and retries.
+- **Preferred body:** `{ "headers": { "Request-Id": "uuid" }, "data": { "id", "account_number", "client": { "id", "key" } } }`
+- **Also accepted:** `{}` or flat JSON if `Request-Id` is sent as an **HTTP header** (or omitted — server generates one).
+- `data.id`, `account_number`, and `client.id` can default from the merchant’s **`udara360`** row when present.
+- **`client.key` must still be sent** in the body (not exposed on public merchant responses).
+- `Target-Product-Key` and `Source-Product-Key` are injected by the backend from env (not sent by the UI).
 
 ## Success Response
 
