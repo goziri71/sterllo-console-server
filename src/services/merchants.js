@@ -193,8 +193,8 @@ function normalizeBeamerUpdatePayload(payload, httpHeaders, udara360) {
       body.id,
       body.integration_id,
       body.integrationId,
-      udara360?.id != null ? String(udara360.id) : "",
       udara360?.identifier,
+      udara360?.id != null ? String(udara360.id) : "",
     ),
     account_number: pickFirstNonEmpty(
       nestedData?.account_number,
@@ -220,6 +220,45 @@ function normalizeBeamerUpdatePayload(payload, httpHeaders, udara360) {
   };
 
   return { headers, data };
+}
+
+function isvsPayloadMessage(payload) {
+  if (payload == null) return null;
+  if (typeof payload === "string" && payload.trim()) return payload.trim();
+  if (typeof payload !== "object" || Array.isArray(payload)) return null;
+  if (typeof payload.message === "string" && payload.message.trim()) return payload.message.trim();
+  return null;
+}
+
+function isIsvsBusinessSuccess(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return false;
+  if (payload.state === true) return true;
+  if (Number(payload.code) === 2000) return true;
+  const inner = payload.data;
+  if (inner && typeof inner === "object" && !Array.isArray(inner)) {
+    if (inner.id != null && String(inner.id).trim()) return true;
+  }
+  return false;
+}
+
+function assertIsvsBusinessSuccess(payload, operation) {
+  if (isIsvsBusinessSuccess(payload)) return payload;
+  const message =
+    isvsPayloadMessage(payload) ||
+    `ISVS ${operation} did not succeed (expected state:true, code:2000, or data.id; got encrypted or non-standard body)`;
+  throw new ErrorClass(message, 502, { isvs: payload ?? null });
+}
+
+function throwIsvsAxiosError(error, operation) {
+  const status = error?.response?.status;
+  const isvsBody = error?.response?.data ?? null;
+  const message =
+    isvsPayloadMessage(isvsBody) ||
+    (typeof isvsBody === "string" ? isvsBody : null) ||
+    error?.message ||
+    `Unable to complete ISVS ${operation}`;
+  const httpStatus = status >= 400 && status < 600 ? status : 502;
+  throw new ErrorClass(message, httpStatus, { isvs: isvsBody });
 }
 
 const UDARA360_PUBLIC = {
@@ -578,14 +617,10 @@ export default class MerchantService {
         data,
         { headers: outboundHeaders },
       );
-      return response.data;
+      return assertIsvsBusinessSuccess(response.data, "Account/Link");
     } catch (error) {
-      const status = error?.response?.status;
-      const message =
-        error?.response?.data?.message ||
-        error?.message ||
-        "Unable to link account with Beamer integration";
-      throw new ErrorClass(message, status >= 400 && status < 600 ? status : 502);
+      if (error instanceof ErrorClass) throw error;
+      throwIsvsAxiosError(error, "Account/Link");
     }
   }
 
@@ -639,14 +674,10 @@ export default class MerchantService {
         data,
         { headers: outboundHeaders },
       );
-      return response.data;
+      return assertIsvsBusinessSuccess(response.data, "Account/Update");
     } catch (error) {
-      const status = error?.response?.status;
-      const message =
-        error?.response?.data?.message ||
-        error?.message ||
-        "Unable to update account with Beamer integration";
-      throw new ErrorClass(message, status >= 400 && status < 600 ? status : 502);
+      if (error instanceof ErrorClass) throw error;
+      throwIsvsAxiosError(error, "Account/Update");
     }
   }
 }

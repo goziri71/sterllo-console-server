@@ -28,8 +28,10 @@ export const errorHandler = (error, request, reply) => {
     ? (error.message || "Bad request")
     : "An unexpected error occurred";
 
-  const data = {};
-  if (!isProduction && !isClientError && error?.message) {
+  let data = {};
+  if (error?.data && typeof error.data === "object" && !Array.isArray(error.data)) {
+    data = error.data;
+  } else if (!isProduction && !isClientError && error?.message) {
     data.debug = error.message;
   }
 
