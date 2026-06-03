@@ -128,11 +128,13 @@ export const linkMerchantBeamerAccount = async (request, reply) => {
 
   return reply.code(200).send({
     code: 200,
-    success: result.verified !== false,
+    success: result.verified === true,
     message: result.message || "Beamer account link completed",
     data: {
       isvs: result.isvs,
-      isvs_verified: result.verified !== false,
+      isvs_verified: result.isvs_verified === true,
+      udara360_linked: result.udara360_linked === true,
+      udara360: result.udara360 ?? null,
       ...(result.isvs_parsed ? { isvs_parsed: result.isvs_parsed } : {}),
     },
   });
@@ -147,11 +149,13 @@ export const updateMerchantBeamerAccount = async (request, reply) => {
 
   return reply.code(200).send({
     code: 200,
-    success: result.verified !== false,
+    success: result.verified === true,
     message: result.message || "Beamer account update completed",
     data: {
       isvs: result.isvs,
-      isvs_verified: result.verified !== false,
+      isvs_verified: result.isvs_verified === true,
+      udara360_linked: result.udara360_linked === true,
+      udara360: result.udara360 ?? null,
       ...(result.isvs_parsed ? { isvs_parsed: result.isvs_parsed } : {}),
     },
   });
