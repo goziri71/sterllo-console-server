@@ -11,7 +11,7 @@ import {
 } from "../utils/decryptProdSecret.js";
 import { customers } from "../db/schema/customers.js";
 import { kycs } from "../db/schema/kycs.js";
-import { ErrorClass } from "../utils/errorClass/index.js";
+import { ErrorClass, IsvsPassthroughError } from "../utils/errorClass/index.js";
 import { isMissingMysqlTableError } from "../utils/mysqlErrors.js";
 
 const SORTABLE_COLUMNS = {
@@ -372,66 +372,47 @@ function isIsvsExplicitFailure(payload) {
   return Number.isFinite(code) && code >= 4000 && code !== 2000;
 }
 
-function normalizeIsvsHttpSuccess(raw, operation, productKeys = {}) {
-  const payload = coerceIsvsPayload(raw);
-  const parsed = parseIsvsResponse(payload, productKeys);
-  const encryptedOnly = Boolean(isvsEncryptedBlob(payload)) && !isIsvsBusinessSuccess(parsed);
-
-  if (isIsvsBusinessSuccess(parsed)) {
-    return {
-      verified: true,
-      isvs: parsed,
-      message: isvsPayloadMessage(parsed),
-    };
+function resolveIsvsHttpStatus(isvsBody, axiosStatus) {
+  const code = Number(isvsBody?.code);
+  if (Number.isFinite(code) && code >= 1000) {
+    return Math.min(599, Math.max(100, Math.floor(code / 10)));
   }
-
-  if (isIsvsExplicitFailure(parsed)) {
-    throw new ErrorClass(
-      isvsPayloadMessage(parsed) || `ISVS ${operation} failed`,
-      502,
-      {
-        isvs: payload,
-        ...(parsed !== payload ? { isvs_parsed: parsed } : {}),
-      },
-    );
-  }
-
-  if (encryptedOnly) {
-    return {
-      verified: false,
-      isvs: payload,
-      ...(parsed !== payload ? { isvs_parsed: parsed } : {}),
-      message:
-        isvsPayloadMessage(parsed) ||
-        "ISVS returned an encrypted response. Refetch the merchant to confirm whether linking succeeded.",
-    };
-  }
-
-  const message = isvsPayloadMessage(parsed) || isvsPayloadMessage(payload);
-  if (message) {
-    throw new ErrorClass(message, 502, {
-      isvs: payload,
-      ...(parsed !== payload ? { isvs_parsed: parsed } : {}),
-    });
-  }
-
-  return {
-    verified: false,
-    isvs: payload ?? parsed,
-    message: `ISVS ${operation} returned an unrecognized body. See data.isvs.`,
-  };
+  if (axiosStatus >= 400 && axiosStatus < 600) return axiosStatus;
+  return 502;
 }
 
-function throwIsvsAxiosError(error, operation) {
+function throwIsvsPassthrough(body, axiosStatus) {
+  const payload = coerceIsvsPayload(body);
+  const isvsBody =
+    payload && typeof payload === "object" && !Array.isArray(payload)
+      ? payload
+      : { state: false, message: String(payload ?? "") };
+  throw new IsvsPassthroughError(isvsBody, resolveIsvsHttpStatus(isvsBody, axiosStatus));
+}
+
+function finalizeIsvsHttpBody(raw, productKeys = {}) {
+  const payload = coerceIsvsPayload(raw);
+  const parsed = parseIsvsResponse(payload, productKeys);
+
+  if (isIsvsExplicitFailure(parsed)) {
+    throwIsvsPassthrough(parsed, 200);
+  }
+
+  if (isIsvsBusinessSuccess(parsed)) {
+    return parsed;
+  }
+
+  if (isIsvsExplicitFailure(payload)) {
+    throwIsvsPassthrough(payload, 200);
+  }
+
+  return parsed !== payload ? parsed : payload;
+}
+
+function throwIsvsAxiosError(error) {
   const status = error?.response?.status;
   const isvsBody = error?.response?.data ?? null;
-  const message =
-    isvsPayloadMessage(isvsBody) ||
-    (typeof isvsBody === "string" ? isvsBody : null) ||
-    error?.message ||
-    `Unable to complete ISVS ${operation}`;
-  const httpStatus = status >= 400 && status < 600 ? status : 502;
-  throw new ErrorClass(message, httpStatus, { isvs: isvsBody });
+  throwIsvsPassthrough(isvsBody, status);
 }
 
 const UDARA360_PUBLIC = {
@@ -457,32 +438,6 @@ function shapeUdaraPublic(row) {
     expiry_date: row.expiry_date,
     date_created: row.date_created,
     date_modified: row.date_modified,
-  };
-}
-
-async function attachUdara360DbStatus(result, accountKey, udaraBefore = null) {
-  const udaraAfter = await fetchLatestUdaraOne(accountKey);
-  const linked = Boolean(udaraAfter);
-  const wasLinked = Boolean(udaraBefore);
-  const newlyLinked = linked && !wasLinked;
-
-  let message = result.message;
-  if (linked) {
-    message = newlyLinked
-      ? "Account linked successfully (Udara360 credentials saved)."
-      : "Udara360 credentials present (update accepted or already linked).";
-  } else if (result.verified === false) {
-    message =
-      "ISVS returned an encrypted response but no Udara360 credentials were saved. Check account_number, client.id, and client.key with Udara/ISVS.";
-  }
-
-  return {
-    ...result,
-    isvs_verified: result.verified === true,
-    verified: result.verified === true || linked,
-    message,
-    udara360_linked: linked,
-    udara360: shapeUdaraPublic(udaraAfter),
   };
 }
 
@@ -824,11 +779,10 @@ export default class MerchantService {
         data,
         { headers: outboundHeaders },
       );
-      const result = normalizeIsvsHttpSuccess(response.data, "Account/Link", productKeys);
-      return attachUdara360DbStatus(result, accountKey, udara360);
+      return finalizeIsvsHttpBody(response.data, productKeys);
     } catch (error) {
-      if (error instanceof ErrorClass) throw error;
-      throwIsvsAxiosError(error, "Account/Link");
+      if (error instanceof ErrorClass || error instanceof IsvsPassthroughError) throw error;
+      throwIsvsAxiosError(error);
     }
   }
 
@@ -896,11 +850,10 @@ export default class MerchantService {
         data,
         { headers: outboundHeaders },
       );
-      const result = normalizeIsvsHttpSuccess(response.data, "Account/Update", productKeys);
-      return attachUdara360DbStatus(result, accountKey, udara360);
+      return finalizeIsvsHttpBody(response.data, productKeys);
     } catch (error) {
-      if (error instanceof ErrorClass) throw error;
-      throwIsvsAxiosError(error, "Account/Update");
+      if (error instanceof ErrorClass || error instanceof IsvsPassthroughError) throw error;
+      throwIsvsAxiosError(error);
     }
   }
 }
