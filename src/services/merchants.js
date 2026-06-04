@@ -350,10 +350,6 @@ function coerceIsvsPayload(raw) {
   return raw;
 }
 
-function isvsDecryptKeychains(keys = {}) {
-  return beamerDecryptKeychains(keys, keys);
-}
-
 function isvsEncryptedBlob(payload) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
   if (typeof payload.response === "string" && payload.response.trim()) return payload.response.trim();
@@ -364,16 +360,63 @@ function isvsEncryptedBlob(payload) {
   return null;
 }
 
-function tryDecryptIsvsResponse(raw, productKeys = {}) {
+function parseDecryptedIsvsPlain(plain) {
+  const trimmed = stripWrappingQuotes(String(plain ?? "").trim());
+  if (!trimmed) return null;
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (parsed && typeof parsed === "object") return parsed;
+  } catch {
+    /* fall through */
+  }
+  return coerceIsvsPayload(trimmed);
+}
+
+function collectIsvsResponseDecryptAttempts(encrypted, keys = {}, outboundHeaders = {}, material = {}) {
+  const attempts = [];
+  const seen = new Set();
+  const push = (enc, kc) => {
+    const e = stripWrappingQuotes(String(enc ?? "").trim());
+    const k = stripWrappingQuotes(String(kc ?? "").trim());
+    if (!e || !k || k.length < 32) return;
+    const id = `${e}|${k}`;
+    if (seen.has(id)) return;
+    seen.add(id);
+    attempts.push([e, k]);
+  };
+
+  push(encrypted, keys.targetProductKeyKeychain);
+  push(encrypted, keys.sourceProductKeyKeychain);
+  push(encrypted, outboundHeaders["Target-Product-Key"]);
+  push(encrypted, outboundHeaders["Source-Product-Key"]);
+  push(encrypted, keys.targetProductKey);
+  push(encrypted, keys.sourceProductKey);
+  push(encrypted, material.targetProductKeyKeychain);
+  push(encrypted, material.sourceProductKeyKeychain);
+  push(material.targetProductKey, material.targetProductKeyKeychain);
+  push(material.sourceProductKey, material.sourceProductKeyKeychain);
+  push(material.targetProductKey, material.sourceProductKeyKeychain);
+  push(material.sourceProductKey, material.targetProductKeyKeychain);
+
+  return attempts;
+}
+
+function tryDecryptIsvsResponse(raw, productKeys = {}, outboundHeaders = {}) {
   const payload = coerceIsvsPayload(raw);
   const encrypted = isvsEncryptedBlob(payload);
   if (!encrypted) return payload;
 
-  for (const keychain of isvsDecryptKeychains(productKeys)) {
+  const material = getBeamerProductKeyMaterial();
+  for (const [enc, keychain] of collectIsvsResponseDecryptAttempts(
+    encrypted,
+    productKeys,
+    outboundHeaders,
+    material,
+  )) {
     try {
-      const plain = decryptFromPlainPair(encrypted, keychain, { valueName: "ISVS response" });
-      const parsed = JSON.parse(plain);
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const plain = decryptFromPlainPair(enc, keychain, { valueName: "ISVS response" });
+      const parsed = parseDecryptedIsvsPlain(plain);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && !isvsEncryptedBlob(parsed)) {
         return parsed;
       }
     } catch {
@@ -382,10 +425,6 @@ function tryDecryptIsvsResponse(raw, productKeys = {}) {
   }
 
   return payload;
-}
-
-function parseIsvsResponse(raw, productKeys = {}) {
-  return tryDecryptIsvsResponse(raw, productKeys);
 }
 
 function isIsvsExplicitFailure(payload) {
@@ -413,9 +452,16 @@ function throwIsvsPassthrough(body, axiosStatus) {
   throw new IsvsPassthroughError(isvsBody, resolveIsvsHttpStatus(isvsBody, axiosStatus));
 }
 
-function finalizeIsvsHttpBody(raw, productKeys = {}) {
+function finalizeIsvsHttpBody(raw, productKeys = {}, outboundHeaders = {}) {
   const payload = coerceIsvsPayload(raw);
-  const parsed = parseIsvsResponse(payload, productKeys);
+  const parsed = tryDecryptIsvsResponse(payload, productKeys, outboundHeaders);
+
+  if (isvsEncryptedBlob(parsed)) {
+    throw new ErrorClass(
+      "ISVS returned an encrypted response body that could not be decrypted. Verify SOURCE_PRODUCT_KEY, TARGET_PRODUCT_KEY, and their KEYCHAIN env vars on the console server.",
+      502,
+    );
+  }
 
   if (isIsvsExplicitFailure(parsed)) {
     throwIsvsPassthrough(parsed, 200);
@@ -429,7 +475,7 @@ function finalizeIsvsHttpBody(raw, productKeys = {}) {
     throwIsvsPassthrough(payload, 200);
   }
 
-  return parsed !== payload ? parsed : payload;
+  return parsed;
 }
 
 function throwIsvsAxiosError(error) {
@@ -802,7 +848,7 @@ export default class MerchantService {
         data,
         { headers: outboundHeaders },
       );
-      return finalizeIsvsHttpBody(response.data, productKeys);
+      return finalizeIsvsHttpBody(response.data, productKeys, outboundHeaders);
     } catch (error) {
       if (error instanceof ErrorClass || error instanceof IsvsPassthroughError) throw error;
       throwIsvsAxiosError(error);
@@ -873,7 +919,7 @@ export default class MerchantService {
         data,
         { headers: outboundHeaders },
       );
-      return finalizeIsvsHttpBody(response.data, productKeys);
+      return finalizeIsvsHttpBody(response.data, productKeys, outboundHeaders);
     } catch (error) {
       if (error instanceof ErrorClass || error instanceof IsvsPassthroughError) throw error;
       throwIsvsAxiosError(error);
