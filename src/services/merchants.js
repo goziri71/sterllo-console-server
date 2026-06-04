@@ -453,13 +453,9 @@ function isIsvsExplicitFailure(payload) {
   return Number.isFinite(code) && code >= 4000 && code !== 2000;
 }
 
-function resolveIsvsHttpStatus(isvsBody, axiosStatus) {
-  const payload =
-    isvsBody && typeof isvsBody === "object" && !Array.isArray(isvsBody) ? isvsBody : null;
-  const code = Number(payload?.code);
-  if (Number.isFinite(code) && code >= 1000) {
-    return Math.min(599, Math.max(100, Math.floor(code / 10)));
-  }
+function resolveIsvsHttpStatus(_isvsBody, axiosStatus) {
+  // ISVS business codes (e.g. 4013 "Request denied") are not HTTP statuses.
+  // Mapping 4013 → HTTP 401 makes browsers/axios clients treat it as JWT failure and log the user out.
   const status = Number(axiosStatus);
   if (Number.isFinite(status) && status >= 100 && status < 600) {
     return status;
