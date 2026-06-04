@@ -123,7 +123,6 @@ export const linkMerchantBeamerAccount = async (request, reply) => {
   const { httpStatus, body } = await merchantService.linkBeamerAccount(
     request.params.account_key,
     request.body ?? {},
-    request.headers,
   );
 
   return reply.code(httpStatus).send(body);
@@ -133,7 +132,6 @@ export const updateMerchantBeamerAccount = async (request, reply) => {
   const { httpStatus, body } = await merchantService.updateBeamerAccount(
     request.params.account_key,
     request.body ?? {},
-    request.headers,
   );
 
   return reply.code(httpStatus).send(body);

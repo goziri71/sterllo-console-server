@@ -38,14 +38,13 @@ Use the same API version prefix as the rest of the console (e.g. `/1.202602.0`).
 - **Method:** `POST`
 - **URL:** `/1.202602.0/merchants/:account_key/integrations/beamer/account-link`
 - **Permission:** `merchant.update`
-- **Body (preferred):** matches `docs/isvs-beamer-link.json` (ISVS `Account/Link`).
+- **Body (required):** exact ISVS shape in `docs/isvs-beamer-link.json` — `axios` posts `data` as JSON and `headers` as HTTP headers. Only `Target-Product-Key` / `Source-Product-Key` are added from server env.
 ```json
 {
   "headers": {
-    "User-Key": "merchant user_key",
-    "Accout-Key": "merchant account_key",
-    "Request-Id": "uuid",
-    "Credentials": "Udara client secret (optional here if sent as data.client.key)"
+    "User-Key": "string",
+    "Accout-Key": "string",
+    "Request-Id": "uuid"
   },
   "data": {
     "account_number": "string",
@@ -53,11 +52,8 @@ Use the same API version prefix as the rest of the console (e.g. `/1.202602.0`).
   }
 }
 ```
-- The backend forwards **`Credentials`** to ISVS (from `headers.Credentials` or **`data.client.key`**, decrypted when AES/base64). ISVS rejects the call without this header.
-- **Also accepted:** empty `{}` if you send `User-Key`, `Accout-Key`, and `Request-Id` as **HTTP headers** — the backend fills them from headers + merchant row.
-- **Also accepted:** flat JSON `{ "account_number", "client_id", "client_key", "user_key", "account_key", "request_id" }`.
-- `User-Key` / `Accout-Key` default from the merchant row when omitted; `Request-Id` is auto-generated if omitted.
-- `account_number` / `client.id` can default from existing `udara360` on the merchant; **`client.key` must still be sent** (not stored on the public merchant payload).
+- Do **not** send a separate `Credentials` header; `client.key` belongs in **`data.client.key`** only (per Link contract).
+- Header values that are AES/base64 are decrypted server-side before ISVS; plaintext values are sent unchanged.
 
 ### Update
 
