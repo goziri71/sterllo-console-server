@@ -57,23 +57,49 @@ function getBeamerProductKeyMaterial() {
   };
 }
 
-function beamerDecryptKeychains(material = {}) {
+function beamerDecryptKeychains(material = {}, productKeys = {}) {
   return [
     material.sourceProductKeyKeychain,
     material.targetProductKeyKeychain,
-    material.sourceProductKey,
-    material.targetProductKey,
+    productKeys.sourceProductKey,
+    productKeys.targetProductKey,
   ].filter((value) => String(value || "").trim().length >= 32);
 }
 
-/** ISVS Beamer headers must be plaintext; decrypt AES/base64 values with product key keychains first. */
-function decryptBeamerHeaderValue(raw, material, label) {
+/** Env product keys: decrypt ciphertext with its own *_KEYCHAIN only (not cross-keychain). */
+function decryptBeamerEnvProductKey(encrypted, keychain, label) {
+  const enc = stripWrappingQuotes(String(encrypted ?? "").trim());
+  if (!enc) return "";
+  const kc = stripWrappingQuotes(String(keychain ?? "").trim());
+  if (!kc) return enc;
+  try {
+    return stripWrappingQuotes(decryptFromPlainPair(enc, kc, { valueName: label }));
+  } catch {
+    return enc;
+  }
+}
+
+function resolveBeamerProductKeysFromMaterial(material) {
+  return {
+    sourceProductKey: decryptBeamerEnvProductKey(
+      material.sourceProductKey,
+      material.sourceProductKeyKeychain,
+      "SOURCE_PRODUCT_KEY",
+    ),
+    targetProductKey: decryptBeamerEnvProductKey(
+      material.targetProductKey,
+      material.targetProductKeyKeychain,
+      "TARGET_PRODUCT_KEY",
+    ),
+  };
+}
+
+/** User-Key / Accout-Key / Request-Id: decrypt when sent as AES/base64; else use plaintext. */
+function decryptBeamerRequestHeader(raw, material, productKeys, label) {
   const text = stripWrappingQuotes(String(raw ?? "").trim());
   if (!text) return "";
 
-  const keychains = beamerDecryptKeychains(material);
-  if (keychains.length === 0) return text;
-
+  const keychains = beamerDecryptKeychains(material, productKeys);
   for (const keychain of keychains) {
     try {
       const plain = decryptFromPlainPair(text, keychain, { valueName: label });
@@ -84,7 +110,6 @@ function decryptBeamerHeaderValue(raw, material, label) {
     }
   }
 
-  // UUIDs and short merchant keys are already plaintext when decrypt does not apply.
   if (/^[0-9a-f-]{32,36}$/i.test(text)) return text;
   if (text.length <= 36 && !looksLikeBase64(text)) return text;
 
@@ -98,27 +123,36 @@ function decryptBeamerHeaderValue(raw, material, label) {
 }
 
 function buildBeamerOutboundHeaders(material, headers, { link = false } = {}) {
+  const productKeys = resolveBeamerProductKeysFromMaterial(material);
   const outbound = {
-    "Target-Product-Key": decryptBeamerHeaderValue(
-      material.targetProductKey,
+    "Target-Product-Key": productKeys.targetProductKey,
+    "Source-Product-Key": productKeys.sourceProductKey,
+    "Request-Id": decryptBeamerRequestHeader(
+      headers["Request-Id"],
       material,
-      "Target-Product-Key",
+      productKeys,
+      "Request-Id",
     ),
-    "Source-Product-Key": decryptBeamerHeaderValue(
-      material.sourceProductKey,
-      material,
-      "Source-Product-Key",
-    ),
-    "Request-Id": decryptBeamerHeaderValue(headers["Request-Id"], material, "Request-Id"),
   };
 
   if (link) {
-    outbound["User-Key"] = decryptBeamerHeaderValue(headers["User-Key"], material, "User-Key");
-    outbound["Accout-Key"] = decryptBeamerHeaderValue(headers["Accout-Key"], material, "Accout-Key");
+    outbound["User-Key"] = decryptBeamerRequestHeader(
+      headers["User-Key"],
+      material,
+      productKeys,
+      "User-Key",
+    );
+    outbound["Accout-Key"] = decryptBeamerRequestHeader(
+      headers["Accout-Key"],
+      material,
+      productKeys,
+      "Accout-Key",
+    );
     if (headers["Request-IP-Address"]) {
-      outbound["Request-IP-Address"] = decryptBeamerHeaderValue(
+      outbound["Request-IP-Address"] = decryptBeamerRequestHeader(
         headers["Request-IP-Address"],
         material,
+        productKeys,
         "Request-IP-Address",
       );
     }
@@ -129,19 +163,8 @@ function buildBeamerOutboundHeaders(material, headers, { link = false } = {}) {
 
 function getBeamerProductKeys() {
   const material = getBeamerProductKeyMaterial();
-  return {
-    ...material,
-    sourceProductKey: decryptBeamerHeaderValue(
-      material.sourceProductKey,
-      material,
-      "Source-Product-Key",
-    ),
-    targetProductKey: decryptBeamerHeaderValue(
-      material.targetProductKey,
-      material,
-      "Target-Product-Key",
-    ),
-  };
+  const productKeys = resolveBeamerProductKeysFromMaterial(material);
+  return { ...material, ...productKeys };
 }
 
 function asPlainObject(value) {
@@ -327,8 +350,8 @@ function coerceIsvsPayload(raw) {
   return raw;
 }
 
-function isvsDecryptKeychains(productKeys = {}) {
-  return beamerDecryptKeychains(productKeys);
+function isvsDecryptKeychains(keys = {}) {
+  return beamerDecryptKeychains(keys, keys);
 }
 
 function isvsEncryptedBlob(payload) {
