@@ -120,45 +120,23 @@ export const getMerchantSettlements = async (request, reply) => {
 };
 
 export const linkMerchantBeamerAccount = async (request, reply) => {
-  const result = await merchantService.linkBeamerAccount(
+  const isvsBody = await merchantService.linkBeamerAccount(
     request.params.account_key,
     request.body ?? {},
     request.headers,
   );
 
-  return reply.code(200).send({
-    code: 200,
-    success: result.verified === true,
-    message: result.message || "Beamer account link completed",
-    data: {
-      isvs: result.isvs,
-      isvs_verified: result.isvs_verified === true,
-      udara360_linked: result.udara360_linked === true,
-      udara360: result.udara360 ?? null,
-      ...(result.isvs_parsed ? { isvs_parsed: result.isvs_parsed } : {}),
-    },
-  });
+  return reply.code(200).send(isvsBody);
 };
 
 export const updateMerchantBeamerAccount = async (request, reply) => {
-  const result = await merchantService.updateBeamerAccount(
+  const isvsBody = await merchantService.updateBeamerAccount(
     request.params.account_key,
     request.body ?? {},
     request.headers,
   );
 
-  return reply.code(200).send({
-    code: 200,
-    success: result.verified === true,
-    message: result.message || "Beamer account update completed",
-    data: {
-      isvs: result.isvs,
-      isvs_verified: result.isvs_verified === true,
-      udara360_linked: result.udara360_linked === true,
-      udara360: result.udara360 ?? null,
-      ...(result.isvs_parsed ? { isvs_parsed: result.isvs_parsed } : {}),
-    },
-  });
+  return reply.code(200).send(isvsBody);
 };
 
 /**
