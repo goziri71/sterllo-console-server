@@ -37,13 +37,14 @@ function upstreamBodyMessage(body) {
   return "Upstream error";
 }
 
-/** Return the ISVS JSON body unchanged (Beamer link/update). */
+/** Return the ISVS response body unchanged (Beamer link/update). */
 export class IsvsPassthroughError extends Error {
   constructor(isvsBody, httpStatus) {
-    const body = normalizeUpstreamBody(isvsBody);
-    super(upstreamBodyMessage(body));
-    this.statusCode = httpStatus;
-    this.isvsBody = body;
+    const status = Number(httpStatus);
+    super(upstreamBodyMessage(normalizeUpstreamBody(isvsBody)));
+    this.statusCode =
+      Number.isFinite(status) && status >= 100 && status < 600 ? status : 502;
+    this.isvsBody = isvsBody;
     Error.captureStackTrace(this, this.constructor);
   }
 }
