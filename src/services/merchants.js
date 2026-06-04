@@ -435,42 +435,49 @@ function isIsvsExplicitFailure(payload) {
 }
 
 function resolveIsvsHttpStatus(isvsBody, axiosStatus) {
-  const code = Number(isvsBody?.code);
+  const payload =
+    isvsBody && typeof isvsBody === "object" && !Array.isArray(isvsBody) ? isvsBody : null;
+  const code = Number(payload?.code);
   if (Number.isFinite(code) && code >= 1000) {
     return Math.min(599, Math.max(100, Math.floor(code / 10)));
   }
-  if (axiosStatus >= 400 && axiosStatus < 600) return axiosStatus;
+  const status = Number(axiosStatus);
+  if (Number.isFinite(status) && status >= 100 && status < 600) {
+    return status;
+  }
   return 502;
 }
 
 function throwIsvsPassthrough(body, axiosStatus) {
-  const payload = coerceIsvsPayload(body);
-  const isvsBody =
-    payload && typeof payload === "object" && !Array.isArray(payload)
-      ? payload
-      : { state: false, message: String(payload ?? "") };
-  throw new IsvsPassthroughError(isvsBody, resolveIsvsHttpStatus(isvsBody, axiosStatus));
+  throw new IsvsPassthroughError(body, resolveIsvsHttpStatus(body, axiosStatus));
 }
 
-function finalizeIsvsHttpBody(raw, productKeys = {}, outboundHeaders = {}) {
+function finalizeIsvsHttpBody(raw, productKeys = {}, outboundHeaders = {}, axiosStatus = 200) {
   const payload = coerceIsvsPayload(raw);
   const parsed = tryDecryptIsvsResponse(payload, productKeys, outboundHeaders);
-
-  if (isIsvsExplicitFailure(parsed)) {
-    throwIsvsPassthrough(parsed, 200);
-  }
 
   if (isIsvsBusinessSuccess(parsed)) {
     return parsed;
   }
 
-  if (isIsvsExplicitFailure(payload)) {
-    throwIsvsPassthrough(payload, 200);
+  if (isIsvsExplicitFailure(parsed)) {
+    throwIsvsPassthrough(parsed, axiosStatus);
   }
 
-  // ISVS often returns HTTP 200 with only { response: "<encrypted>" } when keys cannot
-  // be decrypted here — still return that exact upstream body (not a console 502).
-  return parsed;
+  if (Number(axiosStatus) >= 400) {
+    throwIsvsPassthrough(raw, axiosStatus);
+  }
+
+  // HTTP 200 with only { response: "<encrypted>" } — return exact ISVS body (not console 502).
+  if (isvsEncryptedBlob(parsed)) {
+    return parsed;
+  }
+
+  if (isIsvsExplicitFailure(payload)) {
+    throwIsvsPassthrough(payload, axiosStatus);
+  }
+
+  throwIsvsPassthrough(parsed !== payload ? parsed : raw, axiosStatus);
 }
 
 function throwIsvsAxiosError(error) {
@@ -841,9 +848,14 @@ export default class MerchantService {
       const response = await axios.post(
         "https://api.isvs.sterllo.com/1.202510.0/Integrations/Beamer/Account/Link",
         data,
-        { headers: outboundHeaders },
+        { headers: outboundHeaders, validateStatus: () => true },
       );
-      return finalizeIsvsHttpBody(response.data, productKeys, outboundHeaders);
+      return finalizeIsvsHttpBody(
+        response.data,
+        productKeys,
+        outboundHeaders,
+        response.status,
+      );
     } catch (error) {
       if (error instanceof ErrorClass || error instanceof IsvsPassthroughError) throw error;
       throwIsvsAxiosError(error);
@@ -912,9 +924,14 @@ export default class MerchantService {
       const response = await axios.post(
         "https://api.isvs.sterllo.com/1.202510.0/Integrations/Beamer/Account/Update",
         data,
-        { headers: outboundHeaders },
+        { headers: outboundHeaders, validateStatus: () => true },
       );
-      return finalizeIsvsHttpBody(response.data, productKeys, outboundHeaders);
+      return finalizeIsvsHttpBody(
+        response.data,
+        productKeys,
+        outboundHeaders,
+        response.status,
+      );
     } catch (error) {
       if (error instanceof ErrorClass || error instanceof IsvsPassthroughError) throw error;
       throwIsvsAxiosError(error);
