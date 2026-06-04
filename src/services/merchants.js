@@ -456,13 +456,6 @@ function finalizeIsvsHttpBody(raw, productKeys = {}, outboundHeaders = {}) {
   const payload = coerceIsvsPayload(raw);
   const parsed = tryDecryptIsvsResponse(payload, productKeys, outboundHeaders);
 
-  if (isvsEncryptedBlob(parsed)) {
-    throw new ErrorClass(
-      "ISVS returned an encrypted response body that could not be decrypted. Verify SOURCE_PRODUCT_KEY, TARGET_PRODUCT_KEY, and their KEYCHAIN env vars on the console server.",
-      502,
-    );
-  }
-
   if (isIsvsExplicitFailure(parsed)) {
     throwIsvsPassthrough(parsed, 200);
   }
@@ -475,6 +468,8 @@ function finalizeIsvsHttpBody(raw, productKeys = {}, outboundHeaders = {}) {
     throwIsvsPassthrough(payload, 200);
   }
 
+  // ISVS often returns HTTP 200 with only { response: "<encrypted>" } when keys cannot
+  // be decrypted here — still return that exact upstream body (not a console 502).
   return parsed;
 }
 
