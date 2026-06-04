@@ -8,16 +8,53 @@ export class ErrorClass extends Error {
   }
 }
 
+function normalizeUpstreamBody(body) {
+  if (body == null) {
+    return { state: false, message: "Empty upstream response" };
+  }
+  if (typeof body === "string") {
+    const trimmed = body.trim();
+    if (!trimmed) return { state: false, message: "Empty upstream response" };
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === "object") return parsed;
+    } catch {
+      /* plain text body */
+    }
+    return { state: false, message: trimmed };
+  }
+  if (typeof body === "object" && !Array.isArray(body)) {
+    return body;
+  }
+  return { state: false, message: String(body) };
+}
+
+function upstreamBodyMessage(body) {
+  const normalized = normalizeUpstreamBody(body);
+  if (typeof normalized.message === "string" && normalized.message.trim()) {
+    return normalized.message.trim();
+  }
+  return "Upstream error";
+}
+
 /** Return the ISVS JSON body unchanged (Beamer link/update). */
 export class IsvsPassthroughError extends Error {
   constructor(isvsBody, httpStatus) {
-    const body =
-      isvsBody && typeof isvsBody === "object" && !Array.isArray(isvsBody)
-        ? isvsBody
-        : { state: false, message: String(isvsBody ?? "") };
-    super(typeof body.message === "string" ? body.message : "ISVS error");
+    const body = normalizeUpstreamBody(isvsBody);
+    super(upstreamBodyMessage(body));
     this.statusCode = httpStatus;
     this.isvsBody = body;
+    Error.captureStackTrace(this, this.constructor);
+  }
+}
+
+/** Return the Redbiller proxy JSON body unchanged. */
+export class RedbillerPassthroughError extends Error {
+  constructor(redbillerBody, httpStatus) {
+    const body = normalizeUpstreamBody(redbillerBody);
+    super(upstreamBodyMessage(body));
+    this.statusCode = httpStatus;
+    this.redbillerBody = body;
     Error.captureStackTrace(this, this.constructor);
   }
 }
