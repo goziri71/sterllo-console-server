@@ -13,8 +13,8 @@ function getRedbillerProxyBaseUrl() {
 function buildRedbillerProxyHeaders({ userKey, accountKey }) {
   const headers = {
     Accept: "application/json",
-    "x-user-key": userKey,
-    "x-account-key": accountKey,
+    key: userKey,
+    "account-key": accountKey,
   };
 
   const authorization = stripWrappingQuotes(process.env.REDBILLER_PROXY_AUTHORIZATION || "");
@@ -29,6 +29,7 @@ function buildRedbillerProxyHeaders({ userKey, accountKey }) {
 
 /**
  * Proxies Redbiller sub-account KYC enable/status.
+ * Outbound auth: `key` = customer user_key, `account-key` = customer account_key.
  * @see https://api.proxy.account.redbiller.com/api/v1/auth/sub-accounts/kyc/status/enable
  */
 export async function fetchSubAccountKycEnableStatus({ userKey, accountKey }) {
