@@ -48,12 +48,26 @@ function mergeMerchantEnvironments(ledgerEnvsCsv, customerEnvsCsv) {
   return merchantTypeFromEnvironments(merged || null);
 }
 
+function beamerEnvKeychain(...names) {
+  for (const name of names) {
+    const value = stripWrappingQuotes(process.env[name] || "");
+    if (value) return value;
+  }
+  return "";
+}
+
 function getBeamerProductKeyMaterial() {
   return {
     sourceProductKey: stripWrappingQuotes(process.env.SOURCE_PRODUCT_KEY || ""),
     targetProductKey: stripWrappingQuotes(process.env.TARGET_PRODUCT_KEY || ""),
-    sourceProductKeyKeychain: stripWrappingQuotes(process.env.SOURCE_PRODUCT_KEY_KEYCHAIN || ""),
-    targetProductKeyKeychain: stripWrappingQuotes(process.env.TARGET_PRODUCT_KEY_KEYCHAIN || ""),
+    sourceProductKeyKeychain: beamerEnvKeychain(
+      "SOURCE_PRODUCT_KEY_KEYCHAIN",
+      "SOURCE_PRODUCT_KEYCHAIN",
+    ),
+    targetProductKeyKeychain: beamerEnvKeychain(
+      "TARGET_PRODUCT_KEY_KEYCHAIN",
+      "TARGET_PRODUCT_KEYCHAIN",
+    ),
   };
 }
 
@@ -385,12 +399,17 @@ function collectIsvsResponseDecryptAttempts(encrypted, keys = {}, outboundHeader
     attempts.push([e, k]);
   };
 
-  push(encrypted, keys.targetProductKeyKeychain);
-  push(encrypted, keys.sourceProductKeyKeychain);
+  const resolved = resolveBeamerProductKeysFromMaterial(material);
+
+  // ISVS encrypts link/update responses with the decrypted Target product key string.
+  push(encrypted, resolved.targetProductKey);
+  push(encrypted, resolved.sourceProductKey);
   push(encrypted, outboundHeaders["Target-Product-Key"]);
   push(encrypted, outboundHeaders["Source-Product-Key"]);
   push(encrypted, keys.targetProductKey);
   push(encrypted, keys.sourceProductKey);
+  push(encrypted, keys.targetProductKeyKeychain);
+  push(encrypted, keys.sourceProductKeyKeychain);
   push(encrypted, material.targetProductKeyKeychain);
   push(encrypted, material.sourceProductKeyKeychain);
   push(material.targetProductKey, material.targetProductKeyKeychain);
@@ -468,9 +487,8 @@ function finalizeIsvsHttpBody(raw, productKeys = {}, outboundHeaders = {}, axios
     throwIsvsPassthrough(raw, axiosStatus);
   }
 
-  // HTTP 200 with only { response: "<encrypted>" } — return exact ISVS body (not console 502).
   if (isvsEncryptedBlob(parsed)) {
-    return parsed;
+    throwIsvsPassthrough(parsed, axiosStatus);
   }
 
   if (isIsvsExplicitFailure(payload)) {
