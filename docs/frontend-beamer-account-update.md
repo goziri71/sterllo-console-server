@@ -38,13 +38,14 @@ Use the same API version prefix as the rest of the console (e.g. `/1.202602.0`).
 - **Method:** `POST`
 - **URL:** `/1.202602.0/merchants/:account_key/integrations/beamer/account-link`
 - **Permission:** `merchant.update`
-- **Body (preferred):**
+- **Body (preferred):** matches `docs/isvs-beamer-link.json` (ISVS `Account/Link`).
 ```json
 {
   "headers": {
     "User-Key": "merchant user_key",
     "Accout-Key": "merchant account_key",
-    "Request-Id": "uuid"
+    "Request-Id": "uuid",
+    "Credentials": "Udara client secret (optional here if sent as data.client.key)"
   },
   "data": {
     "account_number": "string",
@@ -52,6 +53,7 @@ Use the same API version prefix as the rest of the console (e.g. `/1.202602.0`).
   }
 }
 ```
+- The backend forwards **`Credentials`** to ISVS (from `headers.Credentials` or **`data.client.key`**, decrypted when AES/base64). ISVS rejects the call without this header.
 - **Also accepted:** empty `{}` if you send `User-Key`, `Accout-Key`, and `Request-Id` as **HTTP headers** — the backend fills them from headers + merchant row.
 - **Also accepted:** flat JSON `{ "account_number", "client_id", "client_key", "user_key", "account_key", "request_id" }`.
 - `User-Key` / `Accout-Key` default from the merchant row when omitted; `Request-Id` is auto-generated if omitted.
@@ -96,20 +98,29 @@ Send JSON with this shape:
 - **`client.key` must still be sent** in the body (not exposed on public merchant responses).
 - `Target-Product-Key` and `Source-Product-Key` are injected by the backend from env (not sent by the UI).
 
-## Success Response
+## Success / ISVS response
 
-Backend returns standard success envelope and forwards upstream data:
+The response **body is the ISVS JSON unchanged** (same shape as `docs/isvs-beamer-link.json` response). HTTP status is ISVS’s status (usually **200**), not derived from ISVS `code` (so `4013` does not become HTTP 401).
+
+Example success:
 
 ```json
 {
-  "code": 200,
-  "success": true,
-  "message": "Beamer account update completed",
-  "data": {
-    "code": 2000,
-    "state": true,
-    "message": "Successful."
-  }
+  "code": 2000,
+  "state": true,
+  "message": "Successful.",
+  "data": { "id": "..." }
+}
+```
+
+Example ISVS error (still HTTP 200 from upstream):
+
+```json
+{
+  "code": 4013,
+  "state": false,
+  "message": "Request denied.",
+  "data": { "reason": "..." }
 }
 ```
 

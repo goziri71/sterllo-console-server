@@ -136,7 +136,7 @@ function decryptBeamerRequestHeader(raw, material, productKeys, label) {
   return text;
 }
 
-function buildBeamerOutboundHeaders(material, headers, { link = false } = {}) {
+function buildBeamerOutboundHeaders(material, headers, data = null, { link = false } = {}) {
   const productKeys = resolveBeamerProductKeysFromMaterial(material);
   const outbound = {
     "Target-Product-Key": productKeys.targetProductKey,
@@ -170,6 +170,20 @@ function buildBeamerOutboundHeaders(material, headers, { link = false } = {}) {
         "Request-IP-Address",
       );
     }
+  }
+
+  const credentialsRaw = pickFirstNonEmpty(
+    headers.Credentials,
+    headers.credentials,
+    data?.client?.key,
+  );
+  if (credentialsRaw) {
+    outbound.Credentials = decryptBeamerRequestHeader(
+      credentialsRaw,
+      material,
+      productKeys,
+      "Credentials",
+    );
   }
 
   return outbound;
@@ -212,6 +226,13 @@ function normalizeBeamerLinkPayload(payload, httpHeaders, merchant, udara360) {
   const flatClient = asPlainObject(body.client);
 
   const headers = {
+    Credentials: pickFirstNonEmpty(
+      nestedHeaders?.Credentials,
+      nestedHeaders?.credentials,
+      body.credentials,
+      body.Credentials,
+      getHttpHeader(httpHeaders, "Credentials", "credentials"),
+    ),
     "User-Key": pickFirstNonEmpty(
       nestedHeaders?.["User-Key"],
       nestedHeaders?.user_key,
@@ -274,6 +295,10 @@ function normalizeBeamerLinkPayload(payload, httpHeaders, merchant, udara360) {
     },
   };
 
+  if (!headers.Credentials && data.client.key) {
+    headers.Credentials = data.client.key;
+  }
+
   return { headers, data };
 }
 
@@ -284,6 +309,13 @@ function normalizeBeamerUpdatePayload(payload, httpHeaders, udara360) {
   const flatClient = asPlainObject(body.client);
 
   const headers = {
+    Credentials: pickFirstNonEmpty(
+      nestedHeaders?.Credentials,
+      nestedHeaders?.credentials,
+      body.credentials,
+      body.Credentials,
+      getHttpHeader(httpHeaders, "Credentials", "credentials"),
+    ),
     "Request-Id": pickFirstNonEmpty(
       nestedHeaders?.["Request-Id"],
       nestedHeaders?.request_id,
@@ -326,6 +358,10 @@ function normalizeBeamerUpdatePayload(payload, httpHeaders, udara360) {
       ),
     },
   };
+
+  if (!headers.Credentials && data.client.key) {
+    headers.Credentials = data.client.key;
+  }
 
   return { headers, data };
 }
@@ -463,8 +499,12 @@ function resolveIsvsHttpStatus(_isvsBody, axiosStatus) {
   return 502;
 }
 
-function throwIsvsPassthrough(body, axiosStatus) {
-  throw new IsvsPassthroughError(body, resolveIsvsHttpStatus(body, axiosStatus));
+/** Beamer link/update: always return upstream JSON + HTTP status (never a console error envelope). */
+function buildIsvsUpstreamResult(body, axiosStatus) {
+  return {
+    httpStatus: resolveIsvsHttpStatus(body, axiosStatus),
+    body,
+  };
 }
 
 function finalizeIsvsHttpBody(raw, productKeys = {}, outboundHeaders = {}, axiosStatus = 200) {
@@ -472,32 +512,32 @@ function finalizeIsvsHttpBody(raw, productKeys = {}, outboundHeaders = {}, axios
   const parsed = tryDecryptIsvsResponse(payload, productKeys, outboundHeaders);
 
   if (isIsvsBusinessSuccess(parsed)) {
-    return parsed;
+    return buildIsvsUpstreamResult(parsed, axiosStatus);
   }
 
   if (isIsvsExplicitFailure(parsed)) {
-    throwIsvsPassthrough(parsed, axiosStatus);
+    return buildIsvsUpstreamResult(parsed, axiosStatus);
   }
 
   if (Number(axiosStatus) >= 400) {
-    throwIsvsPassthrough(raw, axiosStatus);
+    return buildIsvsUpstreamResult(raw, axiosStatus);
   }
 
   if (isvsEncryptedBlob(parsed)) {
-    throwIsvsPassthrough(parsed, axiosStatus);
+    return buildIsvsUpstreamResult(parsed, axiosStatus);
   }
 
   if (isIsvsExplicitFailure(payload)) {
-    throwIsvsPassthrough(payload, axiosStatus);
+    return buildIsvsUpstreamResult(payload, axiosStatus);
   }
 
-  throwIsvsPassthrough(parsed !== payload ? parsed : raw, axiosStatus);
+  return buildIsvsUpstreamResult(parsed !== payload ? parsed : raw, axiosStatus);
 }
 
-function throwIsvsAxiosError(error) {
+function isvsResultFromAxiosError(error) {
   const status = error?.response?.status;
-  const isvsBody = error?.response?.data ?? null;
-  throwIsvsPassthrough(isvsBody, status);
+  const body = error?.response?.data ?? null;
+  return buildIsvsUpstreamResult(body, status);
 }
 
 const UDARA360_PUBLIC = {
@@ -839,7 +879,9 @@ export default class MerchantService {
       throw new ErrorClass("client.key is required", 400);
     }
 
-    const outboundHeaders = buildBeamerOutboundHeaders(productKeyMaterial, headers, { link: true });
+    const outboundHeaders = buildBeamerOutboundHeaders(productKeyMaterial, headers, data, {
+      link: true,
+    });
     const productKeys = getBeamerProductKeys();
 
     if (!outboundHeaders["Target-Product-Key"]) {
@@ -857,6 +899,12 @@ export default class MerchantService {
     if (!outboundHeaders["Request-Id"]) {
       throw new ErrorClass("Request-Id could not be resolved after decryption", 400);
     }
+    if (!outboundHeaders.Credentials) {
+      throw new ErrorClass(
+        "Credentials is required for ISVS Beamer link (headers.Credentials or data.client.key)",
+        400,
+      );
+    }
 
     try {
       const response = await axios.post(
@@ -871,8 +919,11 @@ export default class MerchantService {
         response.status,
       );
     } catch (error) {
-      if (error instanceof ErrorClass || error instanceof IsvsPassthroughError) throw error;
-      throwIsvsAxiosError(error);
+      if (error instanceof ErrorClass) throw error;
+      if (error instanceof IsvsPassthroughError) {
+        return { httpStatus: error.statusCode, body: error.isvsBody };
+      }
+      return isvsResultFromAxiosError(error);
     }
   }
 
@@ -921,7 +972,7 @@ export default class MerchantService {
       throw new ErrorClass("client.key is required", 400);
     }
 
-    const outboundHeaders = buildBeamerOutboundHeaders(productKeyMaterial, headers);
+    const outboundHeaders = buildBeamerOutboundHeaders(productKeyMaterial, headers, data);
     const productKeys = getBeamerProductKeys();
 
     if (!outboundHeaders["Target-Product-Key"]) {
@@ -932,6 +983,12 @@ export default class MerchantService {
     }
     if (!outboundHeaders["Request-Id"]) {
       throw new ErrorClass("Request-Id could not be resolved after decryption", 400);
+    }
+    if (!outboundHeaders.Credentials) {
+      throw new ErrorClass(
+        "Credentials is required for ISVS Beamer update (headers.Credentials or data.client.key)",
+        400,
+      );
     }
 
     try {
@@ -947,8 +1004,11 @@ export default class MerchantService {
         response.status,
       );
     } catch (error) {
-      if (error instanceof ErrorClass || error instanceof IsvsPassthroughError) throw error;
-      throwIsvsAxiosError(error);
+      if (error instanceof ErrorClass) throw error;
+      if (error instanceof IsvsPassthroughError) {
+        return { httpStatus: error.statusCode, body: error.isvsBody };
+      }
+      return isvsResultFromAxiosError(error);
     }
   }
 }

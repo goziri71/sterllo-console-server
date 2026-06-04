@@ -1,0 +1,30 @@
+{
+  "method": "POST",
+  "url": "https://api.isvs.sterllo.com/1.202510.0/Integrations/Beamer/Account/Link",
+  "request": {
+    "headers": {
+      "Target-Product-Key": "string (server env)",
+      "Source-Product-Key": "string (server env)",
+      "User-Key": "string",
+      "Accout-Key": "string",
+      "Request-Id": "string",
+      "Request-IP-Address": "string (optional)",
+      "Credentials": "string (Udara client secret; ISVS requires this header at runtime — use data.client.key if not sent separately)"
+    },
+    "data": {
+      "account_number": "string",
+      "client": {
+        "id": "string",
+        "key": "string"
+      }
+    }
+  },
+  "response": {
+    "code": 2000,
+    "state": true,
+    "message": "Successful.",
+    "data": {
+      "id": "string"
+    }
+  }
+}
