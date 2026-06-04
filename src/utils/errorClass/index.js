@@ -37,11 +37,11 @@ function upstreamBodyMessage(body) {
   return "Upstream error";
 }
 
-/** Return the ISVS response body unchanged (Beamer link/update). */
+/** Legacy: error handler sends isvsBody unchanged. Beamer routes return upstream via controller instead. */
 export class IsvsPassthroughError extends Error {
   constructor(isvsBody, httpStatus) {
     const status = Number(httpStatus);
-    super(upstreamBodyMessage(normalizeUpstreamBody(isvsBody)));
+    super("ISVS upstream response");
     this.statusCode =
       Number.isFinite(status) && status >= 100 && status < 600 ? status : 502;
     this.isvsBody = isvsBody;

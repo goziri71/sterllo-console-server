@@ -120,23 +120,23 @@ export const getMerchantSettlements = async (request, reply) => {
 };
 
 export const linkMerchantBeamerAccount = async (request, reply) => {
-  const isvsBody = await merchantService.linkBeamerAccount(
+  const { httpStatus, body } = await merchantService.linkBeamerAccount(
     request.params.account_key,
     request.body ?? {},
     request.headers,
   );
 
-  return reply.code(200).send(isvsBody);
+  return reply.code(httpStatus).send(body);
 };
 
 export const updateMerchantBeamerAccount = async (request, reply) => {
-  const isvsBody = await merchantService.updateBeamerAccount(
+  const { httpStatus, body } = await merchantService.updateBeamerAccount(
     request.params.account_key,
     request.body ?? {},
     request.headers,
   );
 
-  return reply.code(200).send(isvsBody);
+  return reply.code(httpStatus).send(body);
 };
 
 /**
