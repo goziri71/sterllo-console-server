@@ -37,13 +37,13 @@ export const updateKYC = async (request, reply) => {
   });
 };
 
-/** Proxies Redbiller GET /v1/auth/sub-accounts/kyc/status/enable using customer keys. */
+/** Proxies Redbiller GET /v1/auth/sub-accounts/kyc/status/enable; returns exact upstream body. */
 export const getCustomerSubAccountKycEnableStatus = async (request, reply) => {
   const upstream = await kycService.getSubAccountKycEnableStatus(request.params.identifier);
   const httpStatus =
     upstream.status >= 100 && upstream.status < 600 ? upstream.status : 502;
 
-  return reply.code(httpStatus).send(upstream.data ?? {});
+  return reply.code(httpStatus).send(upstream.data);
 };
 
 export const getCustomerKYCs = async (request, reply) => {

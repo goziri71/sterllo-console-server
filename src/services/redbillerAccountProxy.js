@@ -1,6 +1,6 @@
 import axios from "axios";
 import { stripWrappingQuotes } from "../utils/decryptProdSecret.js";
-import { ErrorClass } from "../utils/errorClass/index.js";
+import { RedbillerPassthroughError } from "../utils/errorClass/index.js";
 
 const DEFAULT_BASE_URL = "https://api.proxy.account.redbiller.com/api";
 const KYC_ENABLE_STATUS_PATH = "/v1/auth/sub-accounts/kyc/status/enable";
@@ -40,13 +40,25 @@ export async function fetchSubAccountKycEnableStatus({ userKey, accountKey }) {
       validateStatus: () => true,
     });
 
-    return {
-      status: response.status,
-      data: response.data ?? null,
-    };
+    const status = response.status >= 100 && response.status < 600 ? response.status : 502;
+    const data = response.data ?? null;
+
+    if (status >= 400) {
+      throw new RedbillerPassthroughError(data, status);
+    }
+
+    return { status, data };
   } catch (error) {
-    throw new ErrorClass(
-      error?.message || "Unable to reach Redbiller proxy API",
+    if (error instanceof RedbillerPassthroughError) throw error;
+    const status = error?.response?.status;
+    if (error?.response?.data != null && status >= 400 && status < 600) {
+      throw new RedbillerPassthroughError(error.response.data, status);
+    }
+    throw new RedbillerPassthroughError(
+      {
+        state: false,
+        message: error?.message || "Unable to reach Redbiller proxy API",
+      },
       502,
     );
   }

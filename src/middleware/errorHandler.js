@@ -13,13 +13,17 @@ function resolveHttpAndBodyCode(raw) {
   return { httpStatus: 500, bodyCode: 5000 };
 }
 
-import { IsvsPassthroughError } from "../utils/errorClass/index.js";
+import { IsvsPassthroughError, RedbillerPassthroughError } from "../utils/errorClass/index.js";
 
 export const errorHandler = (error, request, reply) => {
   request.log.error(error);
 
   if (error instanceof IsvsPassthroughError) {
     return reply.code(error.statusCode).send(error.isvsBody);
+  }
+
+  if (error instanceof RedbillerPassthroughError) {
+    return reply.code(error.statusCode).send(error.redbillerBody);
   }
 
   const raw =
