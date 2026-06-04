@@ -8,7 +8,7 @@ export async function fetchSubAccountKycEnableStatus({ userKey, accountKey }) {
   const response = await axios.get(REDBILLER_URL, {
     headers: {
       key: userKey,
-      account: accountKey,
+      account_key: accountKey,
     },
     validateStatus: () => true,
   });
