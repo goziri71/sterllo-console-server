@@ -3,13 +3,12 @@
   "url": "https://api.isvs.sterllo.com/1.202510.0/Integrations/Beamer/Account/Link",
   "request": {
     "headers": {
-      "Target-Product-Key": "string (server env)",
-      "Source-Product-Key": "string (server env)",
+      "Target-Product-Key": "injected from server env (decrypted)",
+      "Source-Product-Key": "injected from server env (decrypted)",
       "User-Key": "string",
       "Accout-Key": "string",
       "Request-Id": "string",
-      "Request-IP-Address": "string (optional)",
-      "Credentials": "string (Udara client secret; ISVS requires this header at runtime — use data.client.key if not sent separately)"
+      "Request-IP-Address": "string (optional)"
     },
     "data": {
       "account_number": "string",
