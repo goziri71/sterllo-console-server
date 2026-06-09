@@ -4,7 +4,6 @@ import { kycs } from "../db/schema/kycs.js";
 import { customers } from "../db/schema/customers.js";
 import { merchants } from "../db/schema/merchants.js";
 import { ErrorClass } from "../utils/errorClass/index.js";
-import { fetchSubAccountKycEnableStatus } from "./redbillerAccountProxy.js";
 
 const KYC_IDENTIFICATION_TYPE_LABELS = {
   BANK_VERIFICATION_NUMBER: "Bank Verification Number (BVN)",
@@ -247,30 +246,6 @@ export default class KYCService {
       throw new ErrorClass("KYC not found", 404);
     }
     return kyc;
-  }
-
-  async getSubAccountKycEnableStatus(identifier) {
-    const [customer] = await db
-      .select({
-        identifier: customers.identifier,
-        user_key: customers.user_key,
-        account_key: customers.account_key,
-      })
-      .from(customers)
-      .where(eq(customers.identifier, identifier))
-      .limit(1);
-
-    if (!customer) {
-      throw new ErrorClass("Customer not found", 404);
-    }
-
-    const userKey = String(customer.user_key || "").trim();
-    const accountKey = String(customer.account_key || "").trim();
-    if (!userKey || !accountKey) {
-      throw new ErrorClass("Customer is missing user_key or account_key", 400);
-    }
-
-    return fetchSubAccountKycEnableStatus({ userKey, accountKey });
   }
 
   async getByCustomer(identifier, { limit, offset }) {

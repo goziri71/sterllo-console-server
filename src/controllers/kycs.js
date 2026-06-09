@@ -1,4 +1,6 @@
 import KYCService from "../services/kycs.js";
+import { fetchSubAccountKycEnableStatus } from "../services/redbillerAccountProxy.js";
+import { ErrorClass } from "../utils/errorClass/index.js";
 import { parsePagination, paginatedResponse } from "../utils/pagination/index.js";
 
 const kycService = new KYCService();
@@ -37,9 +39,18 @@ export const updateKYC = async (request, reply) => {
   });
 };
 
-/** Proxies Redbiller GET /v1/auth/sub-accounts/kyc/status/enable; returns exact upstream body. */
-export const getCustomerSubAccountKycEnableStatus = async (request, reply) => {
-  const upstream = await kycService.getSubAccountKycEnableStatus(request.params.identifier);
+/** Proxies Redbiller GET /v1/auth/sub-accounts/kyc/status/enable; forwards `key` + `account_key` headers. */
+export const getSubAccountKycEnableStatus = async (request, reply) => {
+  const userKey = String(request.headers.key || "").trim();
+  const accountKey = String(
+    request.headers.account_key || request.headers["account-key"] || "",
+  ).trim();
+
+  if (!userKey || !accountKey) {
+    throw new ErrorClass("key and account_key headers are required", 400);
+  }
+
+  const upstream = await fetchSubAccountKycEnableStatus({ userKey, accountKey });
   const httpStatus =
     upstream.status >= 100 && upstream.status < 600 ? upstream.status : 502;
 
