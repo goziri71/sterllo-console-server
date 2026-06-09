@@ -39,18 +39,25 @@ export const updateKYC = async (request, reply) => {
   });
 };
 
-/** Proxies Redbiller GET /v1/auth/sub-accounts/kyc/status/enable; forwards `key` + `account_key` headers. */
+/** Proxies Redbiller GET /v1/auth/sub-accounts/kyc/status/enable; forwards `key`, `account_key`, `session_id`. */
 export const getSubAccountKycEnableStatus = async (request, reply) => {
   const userKey = String(request.headers.key || "").trim();
   const accountKey = String(
     request.headers.account_key || request.headers["account-key"] || "",
   ).trim();
+  const sessionId = String(
+    request.headers.session_id || request.headers["session-id"] || "",
+  ).trim();
 
-  if (!userKey || !accountKey) {
-    throw new ErrorClass("key and account_key headers are required", 400);
+  if (!userKey || !accountKey || !sessionId) {
+    throw new ErrorClass("key, account_key, and session_id headers are required", 400);
   }
 
-  const upstream = await fetchSubAccountKycEnableStatus({ userKey, accountKey });
+  const upstream = await fetchSubAccountKycEnableStatus({
+    userKey,
+    accountKey,
+    sessionId,
+  });
   const httpStatus =
     upstream.status >= 100 && upstream.status < 600 ? upstream.status : 502;
 
