@@ -52,7 +52,7 @@ Use the same API version prefix as the rest of the console (e.g. `/1.202602.0`).
   }
 }
 ```
-- Do **not** send a separate `Credentials` header; `client.key` belongs in **`data.client.key`** only (per Link contract).
+- `Credentials` is sent to ISVS as an HTTP header. If omitted in `headers`, the server sets it from **`data.client.key`** (decrypted when AES/base64).
 - Header values that are AES/base64 are decrypted server-side before ISVS; plaintext values are sent unchanged.
 
 ### Update
