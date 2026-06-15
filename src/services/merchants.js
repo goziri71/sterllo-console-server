@@ -6,8 +6,10 @@ import { merchants, merchantLedgers, settlementLedgers } from "../db/schema/merc
 import { udara360APICredentials } from "../db/schema/vendor.js";
 import {
   decryptFromPlainPair,
+  encryptAesBase64WithExplicitIv,
   encryptFromPlainPair,
   looksLikeBase64,
+  randomAesIv16,
   stripWrappingQuotes,
 } from "../utils/decryptProdSecret.js";
 import { customers } from "../db/schema/customers.js";
@@ -133,33 +135,35 @@ function resolveBeamerProductKeysFromMaterial(material) {
   return { sourceProductKey, targetProductKey };
 }
 
-function encryptForIsvs(plain, targetProductKey) {
-  const text = stripWrappingQuotes(String(plain ?? "").trim());
-  if (!text) return "";
-  return encryptFromPlainPair(text, targetProductKey, { valueName: "ISVS field" });
-}
+/**
+ * ISVS outbound: encrypt whole headers + data objects (not field-by-field).
+ * - HTTP headers: decrypted product keys + random 16-char IV (IV not on payload).
+ * - Body: { headers: <encrypted headers object>, data: <encrypted data object> }.
+ * Headers object uses the random IV; data object uses keychain-derived IV (last 16 of product key).
+ */
+function buildIsvsEncryptedOutbound(productKeys, plainHeadersObject, plainDataObject) {
+  const iv = randomAesIv16();
+  const encryptedHeaders = encryptAesBase64WithExplicitIv(
+    JSON.stringify(plainHeadersObject),
+    productKeys.targetProductKey,
+    iv,
+    { valueName: "ISVS headers object" },
+  );
+  const encryptedData = encryptFromPlainPair(
+    JSON.stringify(plainDataObject),
+    productKeys.targetProductKey,
+    { valueName: "ISVS data object" },
+  );
 
-function encryptBeamerLinkData(data, targetProductKey) {
-  const d = asPlainObject(data) || {};
-  const client = asPlainObject(d.client) || {};
   return {
-    account_number: encryptForIsvs(d.account_number, targetProductKey),
-    client: {
-      id: encryptForIsvs(client.id, targetProductKey),
-      key: encryptForIsvs(client.key, targetProductKey),
+    axiosHeaders: {
+      "Target-Product-Key": productKeys.targetProductKey,
+      "Source-Product-Key": productKeys.sourceProductKey,
+      IV: iv,
     },
-  };
-}
-
-function encryptBeamerUpdateData(data, targetProductKey) {
-  const d = asPlainObject(data) || {};
-  const client = asPlainObject(d.client) || {};
-  return {
-    id: encryptForIsvs(d.id, targetProductKey),
-    account_number: encryptForIsvs(d.account_number, targetProductKey),
-    client: {
-      id: encryptForIsvs(client.id, targetProductKey),
-      key: encryptForIsvs(client.key, targetProductKey),
+    isvsBody: {
+      headers: encryptedHeaders,
+      data: encryptedData,
     },
   };
 }
@@ -169,13 +173,11 @@ const ISVS_BEAMER_LINK_URL =
 const ISVS_BEAMER_UPDATE_URL =
   "https://api.isvs.sterllo.com/1.202510.0/Integrations/Beamer/Account/Update";
 
-/** ISVS link headers — Link.json: decrypted product keys + plaintext User/Accout/Request-Id. */
-function buildIsvsBeamerLinkHeaders(productKeys, requestHeaders) {
+/** Plain header object (encrypted as one blob before ISVS). Excludes product keys. */
+function buildPlainBeamerLinkHeaders(requestHeaders) {
   const h = asPlainObject(requestHeaders) || {};
 
-  const outbound = {
-    "Target-Product-Key": productKeys.targetProductKey,
-    "Source-Product-Key": productKeys.sourceProductKey,
+  const inner = {
     "User-Key": beamerHeaderValue(h["User-Key"]),
     "Accout-Key": beamerHeaderValue(h["Accout-Key"]),
     "Request-Id": pickFirstNonEmpty(h["Request-Id"], crypto.randomUUID()),
@@ -183,19 +185,15 @@ function buildIsvsBeamerLinkHeaders(productKeys, requestHeaders) {
 
   const requestIp = beamerHeaderValue(h["Request-IP-Address"]);
   if (requestIp) {
-    outbound["Request-IP-Address"] = requestIp;
+    inner["Request-IP-Address"] = requestIp;
   }
 
-  return outbound;
+  return inner;
 }
 
-/** ISVS update headers — Link.json shape (no Credentials). */
-function buildIsvsBeamerUpdateHeaders(productKeys, requestHeaders) {
+function buildPlainBeamerUpdateHeaders(requestHeaders) {
   const h = asPlainObject(requestHeaders) || {};
-
   return {
-    "Target-Product-Key": productKeys.targetProductKey,
-    "Source-Product-Key": productKeys.sourceProductKey,
     "Request-Id": pickFirstNonEmpty(h["Request-Id"], crypto.randomUUID()),
   };
 }
@@ -710,8 +708,8 @@ export default class MerchantService {
     const productKeyMaterial = getBeamerProductKeyMaterial();
     const productKeys = resolveBeamerProductKeysFromMaterial(productKeyMaterial);
     const { headers, data } = extractBeamerLinkRequest(payload, merchant);
-    const axiosHeaders = buildIsvsBeamerLinkHeaders(productKeys, headers);
-    const isvsBody = encryptBeamerLinkData(data, productKeys.targetProductKey);
+    const plainHeaders = buildPlainBeamerLinkHeaders(headers);
+    const { axiosHeaders, isvsBody } = buildIsvsEncryptedOutbound(productKeys, plainHeaders, data);
 
     try {
       const response = await axios.post(ISVS_BEAMER_LINK_URL, isvsBody, {
@@ -739,8 +737,8 @@ export default class MerchantService {
     const productKeyMaterial = getBeamerProductKeyMaterial();
     const productKeys = resolveBeamerProductKeysFromMaterial(productKeyMaterial);
     const { headers, data } = extractBeamerUpdateRequest(payload);
-    const axiosHeaders = buildIsvsBeamerUpdateHeaders(productKeys, headers);
-    const isvsBody = encryptBeamerUpdateData(data, productKeys.targetProductKey);
+    const plainHeaders = buildPlainBeamerUpdateHeaders(headers);
+    const { axiosHeaders, isvsBody } = buildIsvsEncryptedOutbound(productKeys, plainHeaders, data);
 
     try {
       const response = await axios.post(ISVS_BEAMER_UPDATE_URL, isvsBody, {
