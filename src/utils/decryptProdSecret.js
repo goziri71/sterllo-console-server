@@ -105,3 +105,26 @@ export function encryptFromPlainPair(plainValue, keychainValue, { valueName = "s
   const { key, iv } = getKeyIvFromKeychain(keychainValue, "keychain");
   return encryptAesBase64({ plainValue: plainValue, key, iv, valueName });
 }
+
+/** Random 16-character IV for ISVS header-object encryption (AES-256-CBC). */
+export function randomAesIv16() {
+  return crypto.randomBytes(8).toString("hex");
+}
+
+/**
+ * Encrypt with AES-256-CBC using key = first 32 chars of keychain and an explicit IV.
+ * Used for ISVS request header objects (IV sent separately on HTTP headers).
+ */
+export function encryptAesBase64WithExplicitIv(
+  plainValue,
+  keychainValue,
+  iv,
+  { valueName = "value" } = {},
+) {
+  const { key } = getKeyIvFromKeychain(keychainValue, "keychain");
+  const normalizedIv = stripWrappingQuotes(required(iv, "iv"));
+  if (normalizedIv.length !== 16) {
+    throw new Error("IV must be exactly 16 characters");
+  }
+  return encryptAesBase64({ plainValue, key, iv: normalizedIv, valueName });
+}
