@@ -81,3 +81,27 @@ export function decryptFromPlainPair(encryptedValue, keychainValue, { valueName 
   const { key, iv } = getKeyIvFromKeychain(keyc, "keychain");
   return decryptAesBase64({ encryptedValue: enc, key, iv, valueName });
 }
+
+export const encryptAesBase64 = ({ plainValue, key, iv, valueName = "value" }) => {
+  const plain = stripWrappingQuotes(required(plainValue, valueName));
+
+  try {
+    const cipher = crypto.createCipheriv(
+      "aes-256-cbc",
+      Buffer.from(key, "utf8"),
+      Buffer.from(iv, "utf8"),
+    );
+    return cipher.update(plain, "utf8", "base64") + cipher.final("base64");
+  } catch {
+    throw new Error(`Unable to encrypt ${valueName}. Check keychain format.`);
+  }
+};
+
+/**
+ * Encrypt with AES-256-CBC (inverse of decryptFromPlainPair).
+ * key = first 32 UTF-8 chars of keychain, IV = last 16 UTF-8 chars of keychain.
+ */
+export function encryptFromPlainPair(plainValue, keychainValue, { valueName = "secret" } = {}) {
+  const { key, iv } = getKeyIvFromKeychain(keychainValue, "keychain");
+  return encryptAesBase64({ plainValue: plainValue, key, iv, valueName });
+}

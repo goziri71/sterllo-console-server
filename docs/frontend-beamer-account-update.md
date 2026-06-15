@@ -52,8 +52,8 @@ Use the same API version prefix as the rest of the console (e.g. `/1.202602.0`).
   }
 }
 ```
-- `Credentials` is sent to ISVS as an HTTP header. If omitted in `headers`, the server sets it from **`data.client.key`** (decrypted when AES/base64).
-- Header values that are AES/base64 are decrypted server-side before ISVS; plaintext values are sent unchanged.
+- Server decrypts env product keys internally, **encrypts** outbound ISVS headers/body with the target product key, and sends env ciphertext for `Target-Product-Key` / `Source-Product-Key` on the wire.
+- `Credentials` is sent to ISVS as an encrypted HTTP header (from `data.client.key`). Console accepts plaintext in the request body and encrypts before ISVS.
 
 ### Update
 
