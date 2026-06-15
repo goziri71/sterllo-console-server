@@ -31,6 +31,10 @@
   - `DB_USERNAME_KEY`
   - `DB_PASSWORD_KEY`
   - `DB_NAME_KEY`
+- Beamer / ISVS (account-link & account-update):
+  - `SOURCE_PRODUCT_KEY` + `SOURCE_PRODUCT_KEYCHAIN` (or `SOURCE_PRODUCT_KEY_KEYCHAIN`)
+  - `TARGET_PRODUCT_KEY` + `TARGET_PRODUCT_KEYCHAIN` (or `TARGET_PRODUCT_KEY_KEYCHAIN`)
+  - Server decrypts these before setting `Source-Product-Key` / `Target-Product-Key` on ISVS requests.
 
 ## 4) Release flow
 
