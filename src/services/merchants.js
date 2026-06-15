@@ -436,15 +436,19 @@ function buildIsvsUpstreamResult(body, axiosStatus) {
   };
 }
 
-/** Return ISVS axios response; decrypt `{ response }` wrapper only so UI sees plain ISVS JSON. */
+/** Return ISVS axios response; decrypt `{ response }` wrapper when present, then passthrough body. */
 function isvsAxiosResult(response, productKeys, outboundHeaders) {
   const body = tryDecryptIsvsResponse(response.data, productKeys, outboundHeaders);
   return buildIsvsUpstreamResult(body, response.status);
 }
 
-function isvsResultFromAxiosError(error) {
+function isvsResultFromAxiosError(error, productKeys, outboundHeaders) {
   const status = error?.response?.status;
-  const body = error?.response?.data ?? null;
+  const raw = error?.response?.data ?? null;
+  const body =
+    raw != null && productKeys
+      ? tryDecryptIsvsResponse(raw, productKeys, outboundHeaders)
+      : raw;
   return buildIsvsUpstreamResult(body, status);
 }
 
@@ -770,7 +774,7 @@ export default class MerchantService {
       return isvsAxiosResult(response, productKeys, axiosHeaders);
     } catch (error) {
       if (error instanceof ErrorClass) throw error;
-      return isvsResultFromAxiosError(error);
+      return isvsResultFromAxiosError(error, productKeys, axiosHeaders);
     }
   }
 
@@ -798,7 +802,7 @@ export default class MerchantService {
       return isvsAxiosResult(response, productKeys, axiosHeaders);
     } catch (error) {
       if (error instanceof ErrorClass) throw error;
-      return isvsResultFromAxiosError(error);
+      return isvsResultFromAxiosError(error, productKeys, axiosHeaders);
     }
   }
 }
