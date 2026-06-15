@@ -72,11 +72,12 @@ function getBeamerProductKeyMaterial() {
 }
 
 function beamerDecryptKeychains(material = {}, productKeys = {}) {
+  // ISVS encrypts inbound headers with decrypted product keys (<STERLLO_ISVS>…), not env keychains.
   return [
-    material.sourceProductKeyKeychain,
-    material.targetProductKeyKeychain,
-    productKeys.sourceProductKey,
     productKeys.targetProductKey,
+    productKeys.sourceProductKey,
+    material.targetProductKeyKeychain,
+    material.sourceProductKeyKeychain,
   ].filter((value) => String(value || "").trim().length >= 32);
 }
 
@@ -142,10 +143,10 @@ function resolveBeamerProductKeysFromMaterial(material) {
 }
 
 /**
- * Inbound Beamer headers (User-Key, Accout-Key, Request-Id, …): try AES decrypt with product
- * keychains first; if not ciphertext or decrypt fails, send plaintext unchanged.
+ * Inbound Beamer headers: try AES decrypt (target/source product keys first, then env keychains).
+ * Plaintext values are sent unchanged. Base64 that cannot be decrypted throws when `strict`.
  */
-function decryptBeamerRequestHeaderOptional(raw, material, productKeys) {
+function decryptBeamerRequestHeaderOptional(raw, material, productKeys, { strict = false } = {}) {
   const text = stripWrappingQuotes(String(raw ?? "").trim());
   if (!text) return "";
 
@@ -161,6 +162,13 @@ function decryptBeamerRequestHeaderOptional(raw, material, productKeys) {
     } catch {
       /* try next keychain */
     }
+  }
+
+  if (strict) {
+    throw new ErrorClass(
+      "Unable to decrypt encrypted Beamer header for ISVS. Send plaintext or encrypt with the target product key.",
+      400,
+    );
   }
 
   return text;
@@ -207,6 +215,7 @@ function buildIsvsBeamerLinkHeaders(material, requestHeaders, data = null) {
       credentialsRaw,
       material,
       productKeys,
+      { strict: true },
     );
   }
 
@@ -238,6 +247,7 @@ function buildIsvsBeamerUpdateHeaders(material, requestHeaders, data = null) {
       credentialsRaw,
       material,
       productKeys,
+      { strict: true },
     );
   }
 
