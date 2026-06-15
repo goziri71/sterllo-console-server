@@ -52,8 +52,8 @@ Use the same API version prefix as the rest of the console (e.g. `/1.202602.0`).
   }
 }
 ```
-- Server decrypts env product keys internally, **encrypts** outbound ISVS headers/body with the target product key, and sends env ciphertext for `Target-Product-Key` / `Source-Product-Key` on the wire.
-- `Credentials` is sent to ISVS as an encrypted HTTP header (from `data.client.key`). Console accepts plaintext in the request body and encrypts before ISVS.
+- Server decrypts env product keys for `Target-Product-Key` / `Source-Product-Key` headers (plaintext on wire to ISVS).
+- All other header fields and all `data` body fields are AES-encrypted with the decrypted **target** product key before ISVS.
 
 ### Update
 
