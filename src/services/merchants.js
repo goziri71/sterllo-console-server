@@ -137,9 +137,8 @@ function resolveBeamerProductKeysFromMaterial(material) {
 
 /**
  * ISVS outbound: encrypt whole headers + data objects (not field-by-field).
- * - HTTP headers: decrypted product keys + random 16-char IV (IV not on payload).
- * - Body: { headers: <encrypted headers object>, data: <encrypted data object> }.
- * Headers object uses the random IV; data object uses keychain-derived IV (last 16 of product key).
+ * - HTTP headers: decrypted product keys, random 16-char IV, Credentials = encrypted headers object.
+ * - Body: encrypted data object only (no IV on payload; uses keychain-derived IV).
  */
 function buildIsvsEncryptedOutbound(productKeys, plainHeadersObject, plainDataObject) {
   const iv = randomAesIv16();
@@ -160,9 +159,9 @@ function buildIsvsEncryptedOutbound(productKeys, plainHeadersObject, plainDataOb
       "Target-Product-Key": productKeys.targetProductKey,
       "Source-Product-Key": productKeys.sourceProductKey,
       IV: iv,
+      Credentials: encryptedHeaders,
     },
     isvsBody: {
-      headers: encryptedHeaders,
       data: encryptedData,
     },
   };
