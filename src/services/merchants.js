@@ -5,9 +5,11 @@ import { db } from "../db/index.js";
 import { merchants, merchantLedgers, settlementLedgers } from "../db/schema/merchants.js";
 import { udara360APICredentials } from "../db/schema/vendor.js";
 import {
+  decryptAesBase64WithExplicitIv,
   decryptFromPlainPair,
   encryptAesBase64WithExplicitIv,
   encryptFromPlainPair,
+  getKeyIvFromKeychain,
   looksLikeBase64,
   randomAesIv16,
   stripWrappingQuotes,
@@ -164,7 +166,78 @@ function buildIsvsEncryptedOutbound(productKeys, plainHeadersObject, plainDataOb
     isvsBody: {
       data: encryptedData,
     },
+    _isvsPlain: {
+      headers: plainHeadersObject,
+      data: plainDataObject,
+      iv,
+    },
   };
+}
+
+/** Server-side audit: verify we can round-trip decrypt what we send to ISVS. */
+function auditIsvsOutboundEncryption(productKeys, outbound) {
+  const target = productKeys.targetProductKey;
+  const iv = outbound.axiosHeaders.IV;
+  const { key: aesKey, iv: dataIv } = getKeyIvFromKeychain(target, "targetProductKey");
+
+  const checks = [];
+
+  try {
+    const decrypted = decryptAesBase64WithExplicitIv(
+      outbound.axiosHeaders.Credentials,
+      target,
+      iv,
+      { valueName: "Credentials" },
+    );
+    JSON.parse(decrypted);
+    checks.push({ part: "Credentials (HTTP header, uses IV header)", ok: true });
+  } catch (error) {
+    checks.push({
+      part: "Credentials (HTTP header, uses IV header)",
+      ok: false,
+      error: error.message,
+    });
+  }
+
+  try {
+    const decrypted = decryptFromPlainPair(outbound.isvsBody.data, target, {
+      valueName: "body.data",
+    });
+    JSON.parse(decrypted);
+    checks.push({ part: "body.data (JSON field, keychain IV)", ok: true });
+  } catch (error) {
+    checks.push({
+      part: "body.data (JSON field, keychain IV)",
+      ok: false,
+      error: error.message,
+    });
+  }
+
+  return {
+    isvsUrl: null,
+    targetKeyLength: target.length,
+    targetKeyPreview: `${target.slice(0, 12)}…${target.slice(-4)}`,
+    aesKeyPreview: `${aesKey.slice(0, 8)}…`,
+    dataIvPreview: `${dataIv.slice(0, 4)}…${dataIv.slice(-4)}`,
+    requestIv: iv,
+    httpHeaderNames: Object.keys(outbound.axiosHeaders),
+    bodyShape: Object.keys(outbound.isvsBody),
+    credentialsCiphertextLength: String(outbound.axiosHeaders.Credentials || "").length,
+    dataCiphertextLength: String(outbound.isvsBody.data || "").length,
+    plainHeaderKeys: Object.keys(outbound._isvsPlain?.headers || {}),
+    plainDataKeys: Object.keys(outbound._isvsPlain?.data || {}),
+    selfDecryptChecks: checks,
+    allSelfDecryptOk: checks.every((c) => c.ok),
+  };
+}
+
+function logBeamerIsvsOutbound(label, audit, extra = {}) {
+  console.warn(`[beamer-isvs] ${label}`, JSON.stringify({ ...audit, ...extra }));
+}
+
+function stripIsvsOutboundDebug(outbound) {
+  const { axiosHeaders, isvsBody } = outbound;
+  return { axiosHeaders, isvsBody };
 }
 
 const ISVS_BEAMER_LINK_URL =
@@ -708,14 +781,35 @@ export default class MerchantService {
     const productKeys = resolveBeamerProductKeysFromMaterial(productKeyMaterial);
     const { headers, data } = extractBeamerLinkRequest(payload, merchant);
     const plainHeaders = buildPlainBeamerLinkHeaders(headers);
-    const { axiosHeaders, isvsBody } = buildIsvsEncryptedOutbound(productKeys, plainHeaders, data);
+    const outbound = buildIsvsEncryptedOutbound(productKeys, plainHeaders, data);
+    const audit = auditIsvsOutboundEncryption(productKeys, outbound);
+    audit.isvsUrl = ISVS_BEAMER_LINK_URL;
+
+    if (process.env.BEAMER_ISVS_DEBUG === "true") {
+      logBeamerIsvsOutbound("outbound (link)", audit);
+    }
+
+    const { axiosHeaders, isvsBody } = stripIsvsOutboundDebug(outbound);
 
     try {
       const response = await axios.post(ISVS_BEAMER_LINK_URL, isvsBody, {
         headers: axiosHeaders,
         validateStatus: () => true,
       });
-      return isvsAxiosResult(response, productKeys, axiosHeaders);
+      const result = isvsAxiosResult(response, productKeys, axiosHeaders);
+
+      if (result.body?.code === 5000) {
+        logBeamerIsvsOutbound("ISVS decryption failed (link)", audit, {
+          isvsCode: result.body.code,
+          isvsMessage: result.body.message,
+          hint:
+            audit.allSelfDecryptOk
+              ? "Console round-trip decrypt succeeded — ISVS likely expects a different wire format or key material."
+              : "Console round-trip decrypt failed — fix local encryption before retrying ISVS.",
+        });
+      }
+
+      return result;
     } catch (error) {
       if (error instanceof ErrorClass) throw error;
       return isvsResultFromAxiosError(error, productKeys, axiosHeaders);
@@ -737,14 +831,35 @@ export default class MerchantService {
     const productKeys = resolveBeamerProductKeysFromMaterial(productKeyMaterial);
     const { headers, data } = extractBeamerUpdateRequest(payload);
     const plainHeaders = buildPlainBeamerUpdateHeaders(headers);
-    const { axiosHeaders, isvsBody } = buildIsvsEncryptedOutbound(productKeys, plainHeaders, data);
+    const outbound = buildIsvsEncryptedOutbound(productKeys, plainHeaders, data);
+    const audit = auditIsvsOutboundEncryption(productKeys, outbound);
+    audit.isvsUrl = ISVS_BEAMER_UPDATE_URL;
+
+    if (process.env.BEAMER_ISVS_DEBUG === "true") {
+      logBeamerIsvsOutbound("outbound (update)", audit);
+    }
+
+    const { axiosHeaders, isvsBody } = stripIsvsOutboundDebug(outbound);
 
     try {
       const response = await axios.post(ISVS_BEAMER_UPDATE_URL, isvsBody, {
         headers: axiosHeaders,
         validateStatus: () => true,
       });
-      return isvsAxiosResult(response, productKeys, axiosHeaders);
+      const result = isvsAxiosResult(response, productKeys, axiosHeaders);
+
+      if (result.body?.code === 5000) {
+        logBeamerIsvsOutbound("ISVS decryption failed (update)", audit, {
+          isvsCode: result.body.code,
+          isvsMessage: result.body.message,
+          hint:
+            audit.allSelfDecryptOk
+              ? "Console round-trip decrypt succeeded — ISVS likely expects a different wire format or key material."
+              : "Console round-trip decrypt failed — fix local encryption before retrying ISVS.",
+        });
+      }
+
+      return result;
     } catch (error) {
       if (error instanceof ErrorClass) throw error;
       return isvsResultFromAxiosError(error, productKeys, axiosHeaders);
