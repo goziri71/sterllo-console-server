@@ -128,3 +128,21 @@ export function encryptAesBase64WithExplicitIv(
   }
   return encryptAesBase64({ plainValue, key, iv: normalizedIv, valueName });
 }
+
+/**
+ * Decrypt with AES-256-CBC using key = first 32 chars of keychain and an explicit IV.
+ * Inverse of encryptAesBase64WithExplicitIv (ISVS Credentials header).
+ */
+export function decryptAesBase64WithExplicitIv(
+  encryptedValue,
+  keychainValue,
+  iv,
+  { valueName = "value" } = {},
+) {
+  const { key } = getKeyIvFromKeychain(keychainValue, "keychain");
+  const normalizedIv = stripWrappingQuotes(required(iv, "iv"));
+  if (normalizedIv.length !== 16) {
+    throw new Error("IV must be exactly 16 characters");
+  }
+  return decryptAesBase64({ encryptedValue, key, iv: normalizedIv, valueName });
+}
