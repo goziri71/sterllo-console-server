@@ -52,8 +52,8 @@ Use the same API version prefix as the rest of the console (e.g. `/1.202602.0`).
   }
 }
 ```
-- Server decrypts env product keys for `Target-Product-Key` / `Source-Product-Key` headers (plaintext on wire to ISVS).
-- All other header fields and all `data` body fields are AES-encrypted with the decrypted **target** product key before ISVS.
+- Server sets `Target-Product-Key` / `Source-Product-Key` from env (decrypted). `User-Key`, `Accout-Key`, `Request-Id` sent plaintext per Link.json.
+- `data` body fields (`account_number`, `client.id`, `client.key`) are AES-encrypted with the decrypted target product key before ISVS. No `Credentials` header.
 
 ### Update
 
