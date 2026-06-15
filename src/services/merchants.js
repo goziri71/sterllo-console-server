@@ -171,8 +171,8 @@ const ISVS_BEAMER_LINK_URL =
 const ISVS_BEAMER_UPDATE_URL =
   "https://api.isvs.sterllo.com/1.202510.0/Integrations/Beamer/Account/Update";
 
-/** Axios headers for ISVS — matches Integration-Account/Link.json (no extra proxy headers). */
-function buildIsvsBeamerLinkHeaders(material, requestHeaders) {
+/** Axios headers for ISVS — Link + ISVS-required `Credentials` (from header or `data.client.key`). */
+function buildIsvsBeamerLinkHeaders(material, requestHeaders, data = null) {
   const productKeys = resolveBeamerProductKeysFromMaterial(material);
   const h = asPlainObject(requestHeaders) || {};
 
@@ -197,15 +197,28 @@ function buildIsvsBeamerLinkHeaders(material, requestHeaders) {
     );
   }
 
+  const credentialsRaw = pickFirstNonEmpty(
+    h.Credentials,
+    h.credentials,
+    asPlainObject(data)?.client?.key,
+  );
+  if (credentialsRaw) {
+    outbound.Credentials = decryptBeamerRequestHeaderOptional(
+      credentialsRaw,
+      material,
+      productKeys,
+    );
+  }
+
   return outbound;
 }
 
-/** Axios headers for ISVS — matches Integration-Account/Update.json. */
-function buildIsvsBeamerUpdateHeaders(material, requestHeaders) {
+/** Axios headers for ISVS Update + `Credentials` when provided. */
+function buildIsvsBeamerUpdateHeaders(material, requestHeaders, data = null) {
   const productKeys = resolveBeamerProductKeysFromMaterial(material);
   const h = asPlainObject(requestHeaders) || {};
 
-  return {
+  const outbound = {
     "Target-Product-Key": productKeys.targetProductKey,
     "Source-Product-Key": productKeys.sourceProductKey,
     "Request-Id": decryptBeamerRequestHeaderOptional(
@@ -214,6 +227,21 @@ function buildIsvsBeamerUpdateHeaders(material, requestHeaders) {
       productKeys,
     ),
   };
+
+  const credentialsRaw = pickFirstNonEmpty(
+    h.Credentials,
+    h.credentials,
+    asPlainObject(data)?.client?.key,
+  );
+  if (credentialsRaw) {
+    outbound.Credentials = decryptBeamerRequestHeaderOptional(
+      credentialsRaw,
+      material,
+      productKeys,
+    );
+  }
+
+  return outbound;
 }
 
 function beamerHeaderValue(raw) {
@@ -721,7 +749,7 @@ export default class MerchantService {
 
     const productKeyMaterial = getBeamerProductKeyMaterial();
     const { headers, data } = extractBeamerLinkRequest(payload, merchant);
-    const axiosHeaders = buildIsvsBeamerLinkHeaders(productKeyMaterial, headers);
+    const axiosHeaders = buildIsvsBeamerLinkHeaders(productKeyMaterial, headers, data);
     const productKeys = getBeamerProductKeys();
 
     try {
@@ -749,7 +777,7 @@ export default class MerchantService {
 
     const productKeyMaterial = getBeamerProductKeyMaterial();
     const { headers, data } = extractBeamerUpdateRequest(payload);
-    const axiosHeaders = buildIsvsBeamerUpdateHeaders(productKeyMaterial, headers);
+    const axiosHeaders = buildIsvsBeamerUpdateHeaders(productKeyMaterial, headers, data);
     const productKeys = getBeamerProductKeys();
 
     try {
