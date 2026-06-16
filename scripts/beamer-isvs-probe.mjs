@@ -12,11 +12,10 @@ import dotenv from "dotenv";
 import { decryptFromPlainPair, encryptAesBase64WithExplicitIv, encryptFromPlainPair, randomAesIv16, stripWrappingQuotes } from "../src/utils/decryptProdSecret.js";
 import {
   buildIsvsCredentialsHeader,
-  decryptIsvsJson,
+  decryptIsvsApiResponse,
   encryptIsvsJson,
   generateIsvsIv,
   resolveIsvsEncryptionKey,
-  splitIsvsCredentialsHeader,
 } from "../src/utils/isvsCryptoJs.js";
 
 dotenv.config();
@@ -36,13 +35,8 @@ function decryptEnvKey(encName, kcNames) {
 
 function summarizeEncryptedApiCall(data, credentialsHeader, encryptionKey) {
   if (!data || typeof data !== "object") return data;
-  if (typeof data.response !== "string" || !credentialsHeader) return data;
-  try {
-    const { iv } = splitIsvsCredentialsHeader(credentialsHeader);
-    return decryptIsvsJson(data.response, encryptionKey, iv);
-  } catch {
-    return { wrapped: true };
-  }
+  const iv = credentialsHeader?.slice(-16);
+  return decryptIsvsApiResponse(data, encryptionKey, iv);
 }
 
 function summarizeLegacy(data, decryptKeys) {

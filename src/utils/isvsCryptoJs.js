@@ -2,6 +2,7 @@ import CryptoJS from "crypto-js";
 import crypto from "node:crypto";
 import { ErrorClass } from "./errorClass/index.js";
 import { stripWrappingQuotes } from "./decryptProdSecret.js";
+import { encryptionDecryption } from "./encryptionDecryption.js";
 
 /** Random 16-char IV (UTF-8), appended to ISVS `Credentials` header. */
 export function generateIsvsIv() {
@@ -54,58 +55,65 @@ export function getIsvsKeyAndIv(secret, { secretName = "KEYCHAIN" } = {}) {
 
 /** AES-256-CBC encrypt; `data` is JSON.stringify'd before encrypt (same as colleague). */
 export function encryptIsvsJson(data, key, iv) {
-  try {
-    const secretKey = CryptoJS.enc.Utf8.parse(key);
-    const ivParams = CryptoJS.enc.Utf8.parse(iv);
-    const cipherText = CryptoJS.enc.Utf8.parse(JSON.stringify(data));
-    const encrypted = CryptoJS.AES.encrypt(cipherText, secretKey, {
-      iv: ivParams,
-      mode: CryptoJS.mode.CBC,
-      padding: CryptoJS.pad.Pkcs7,
-    });
-    return encrypted.toString();
-  } catch (error) {
-    throw new ErrorClass(`Failed to encrypt ISVS data: ${error.message}`, 500);
-  }
+  return encryptionDecryption.encrypt(data, key, iv);
 }
 
 /** Inverse of encryptIsvsJson (colleague decrypt). */
 export function decryptIsvsJson(cipherText, key, iv) {
+  return encryptionDecryption.decrypt(cipherText, key, iv);
+}
+
+/** Non-throwing decrypt for response probing. */
+export function tryDecryptIsvsJson(cipherText, key, iv) {
   try {
-    const normalizedKey = String(key).length > 32 ? String(key).slice(0, 32) : String(key);
-    let cleanedCipherText = cipherText;
-
-    if (typeof cipherText === "string") {
-      cleanedCipherText = cipherText.replace(/\\\//g, "/");
-    }
-
-    const secretKey = CryptoJS.enc.Utf8.parse(normalizedKey);
-    const ivParams = CryptoJS.enc.Utf8.parse(iv);
-
-    const parsedCipherText = CryptoJS.enc.Base64.parse(cleanedCipherText);
-    const cipherParams = CryptoJS.lib.CipherParams.create({
-      ciphertext: parsedCipherText,
-    });
-
-    const decrypted = CryptoJS.AES.decrypt(cipherParams, secretKey, {
-      iv: ivParams,
-      mode: CryptoJS.mode.CBC,
-      padding: CryptoJS.pad.Pkcs7,
-    });
-
-    const utf8Text = decrypted.toString(CryptoJS.enc.Utf8);
-    if (!utf8Text) {
-      throw new Error("Empty decrypt result");
-    }
-
-    try {
-      return JSON.parse(utf8Text);
-    } catch {
-      return utf8Text;
-    }
-  } catch (error) {
-    throw new ErrorClass(`Failed to decrypt ISVS data: ${error.message}`, 500);
+    return decryptIsvsJson(cipherText, key, iv);
+  } catch {
+    return null;
   }
+}
+
+/** Colleague initializeProductKeys: CryptoJS decrypt env ciphertext, then Base64 unwrap. */
+export function decryptIsvsProductKeyFromEnv(encryptedValue, keychainValue, { valueName = "product key" } = {}) {
+  const enc = stripWrappingQuotes(String(encryptedValue ?? "").trim());
+  const kc = stripWrappingQuotes(String(keychainValue ?? "").trim());
+  if (!enc) return "";
+  if (!kc) return enc;
+
+  const { key, iv } = getIsvsKeyAndIv(kc, { secretName: valueName });
+  const step1 = decryptIsvsJson(enc, key, iv);
+  if (typeof step1 !== "string") {
+    return stripWrappingQuotes(String(step1));
+  }
+  try {
+    return stripWrappingQuotes(CryptoJS.enc.Base64.parse(step1).toString(CryptoJS.enc.Utf8));
+  } catch {
+    return stripWrappingQuotes(step1);
+  }
+}
+
+/** Colleague makeEncryptedApiCall response decrypt: `data.response` with request key + IV. */
+export function decryptIsvsApiResponse(rawBody, encryptionKey, iv) {
+  const payload = rawBody && typeof rawBody === "object" ? rawBody : null;
+  if (!payload) return rawBody;
+
+  const ciphertext =
+    typeof payload.response === "string" && payload.response.trim()
+      ? payload.response.trim()
+      : typeof payload.data?.response === "string" && payload.data.response.trim()
+        ? payload.data.response.trim()
+        : null;
+
+  if (!ciphertext || !encryptionKey || !iv || String(iv).length !== 16) {
+    return rawBody;
+  }
+
+  const key = String(encryptionKey).length > 32 ? String(encryptionKey).slice(0, 32) : String(encryptionKey);
+  const decrypted = tryDecryptIsvsJson(ciphertext, key, iv);
+  if (decrypted == null) return rawBody;
+  if (decrypted && typeof decrypted === "object" && !Array.isArray(decrypted)) {
+    return decrypted;
+  }
+  return rawBody;
 }
 
 export function encryptIsvsWithKeychain(data, keychainSecret, options = {}) {
@@ -121,5 +129,5 @@ export function decryptIsvsWithKeychain(cipherText, keychainSecret, options = {}
 /** Decrypt ISVS `Credentials` header (ciphertext + trailing IV). */
 export function decryptIsvsCredentialsHeader(credentialsHeader, encryptionKey) {
   const { ciphertext, iv } = splitIsvsCredentialsHeader(credentialsHeader);
-  return decryptIsvsJson(ciphertext, encryptionKey, iv);
+  return encryptionDecryption.decrypt(ciphertext, encryptionKey, iv);
 }
