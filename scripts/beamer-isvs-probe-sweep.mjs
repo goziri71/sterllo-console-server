@@ -12,6 +12,7 @@ import {
   randomAesIv16,
   stripWrappingQuotes,
 } from "../src/utils/decryptProdSecret.js";
+import { decryptIsvsWithKeychain, encryptIsvsWithKeychain } from "../src/utils/isvsCryptoJs.js";
 
 dotenv.config();
 
@@ -316,12 +317,51 @@ async function main() {
     }, plainData, decryptKeys);
   }
 
+  const cjs = (material, value) =>
+    encryptIsvsWithKeychain(value, material, { secretName: "cjs" });
+  const plainCredBase = {
+    "Target-Product-Key": targetPlain,
+    "Source-Product-Key": sourcePlain || targetPlain,
+    ...plainHeaders,
+  };
+
+  if (targetKc.length >= 48) {
+    await probe("19 CJS: enc Credentials client.key (targetKc)", {
+      ...plainCredBase,
+      Credentials: cjs(targetKc, plainData.client.key),
+    }, plainData, decryptKeys);
+  }
+  if (sourceKc.length >= 48) {
+    await probe("20 CJS: enc Credentials client.key (sourceKc)", {
+      ...plainCredBase,
+      Credentials: cjs(sourceKc, plainData.client.key),
+    }, plainData, decryptKeys);
+  }
+  await probe("21 CJS: enc Credentials client.key (targetPlain)", {
+    ...plainCredBase,
+    Credentials: cjs(targetPlain, plainData.client.key),
+  }, plainData, decryptKeys);
+  if (targetKc.length >= 48) {
+    await probe("22 CJS: enc Credentials client object (targetKc)", {
+      ...plainCredBase,
+      Credentials: cjs(targetKc, plainData.client),
+    }, plainData, decryptKeys);
+    await probe("23 CJS: enc Credentials whole data (targetKc)", {
+      ...plainCredBase,
+      Credentials: cjs(targetKc, plainData),
+    }, plainData, decryptKeys);
+    await probe("24 CJS: enc Credentials plainHeaders (targetKc)", {
+      ...plainCredBase,
+      Credentials: cjs(targetKc, plainHeaders),
+    }, plainData, decryptKeys);
+  }
+
   console.log("\n--- how to read ---");
   console.log("4013                    → missing Credentials header");
-  console.log("5000 no data found      → plain HTTP headers (tests 1,3,9–14)");
-  console.log("5000 decryption failed  → encrypted headers found, wrong key (tests 4–8,15–18)");
+  console.log("5000 no data found      → plain Credentials (nothing to decrypt)");
+  console.log("5000 decryption failed  → encrypted Credentials found, wrong key/plaintext");
   console.log("anything else           → crypto accepted");
-  console.log("\nDefault code format is now headers (test 15). Run: node scripts/beamer-isvs-probe.mjs");
+  console.log("\nDefault code format is cryptojs (test 19). Run: node scripts/beamer-isvs-probe.mjs");
 }
 
 main().catch((e) => {
