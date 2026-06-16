@@ -3,13 +3,21 @@
  *
  * Usage:
  *   node scripts/beamer-isvs-probe.mjs
- *   BEAMER_ISVS_ENCRYPT_KEY=target-keychain node scripts/beamer-isvs-probe.mjs
- *   node scripts/beamer-isvs-probe-sweep.mjs   (compare many variants)
+ *   BEAMER_ISVS_ENCRYPT_KEY=source node scripts/beamer-isvs-probe.mjs
+ *   node scripts/beamer-isvs-probe-sweep.mjs   (compare legacy variants)
  */
 import axios from "axios";
 import crypto from "crypto";
 import dotenv from "dotenv";
-import { decryptFromPlainPair, stripWrappingQuotes } from "../src/utils/decryptProdSecret.js";
+import { decryptFromPlainPair, encryptAesBase64WithExplicitIv, encryptFromPlainPair, randomAesIv16, stripWrappingQuotes } from "../src/utils/decryptProdSecret.js";
+import {
+  buildIsvsCredentialsHeader,
+  decryptIsvsJson,
+  encryptIsvsJson,
+  generateIsvsIv,
+  resolveIsvsEncryptionKey,
+  splitIsvsCredentialsHeader,
+} from "../src/utils/isvsCryptoJs.js";
 
 dotenv.config();
 
@@ -26,7 +34,18 @@ function decryptEnvKey(encName, kcNames) {
   return stripWrappingQuotes(decryptFromPlainPair(enc, kc, { valueName: encName }));
 }
 
-function summarize(data, decryptKeys) {
+function summarizeEncryptedApiCall(data, credentialsHeader, encryptionKey) {
+  if (!data || typeof data !== "object") return data;
+  if (typeof data.response !== "string" || !credentialsHeader) return data;
+  try {
+    const { iv } = splitIsvsCredentialsHeader(credentialsHeader);
+    return decryptIsvsJson(data.response, encryptionKey, iv);
+  } catch {
+    return { wrapped: true };
+  }
+}
+
+function summarizeLegacy(data, decryptKeys) {
   if (!data || typeof data !== "object") return data;
   if (typeof data.response !== "string") return data;
   for (const key of decryptKeys) {
@@ -58,131 +77,111 @@ async function main() {
     process.exit(1);
   }
 
-  const wireFormat = (process.env.BEAMER_ISVS_WIRE_FORMAT || "credentials").toLowerCase();
-  const encryptKey = (process.env.BEAMER_ISVS_ENCRYPT_KEY || "target").toLowerCase();
-  const encryptMaterial =
-    encryptKey === "target-keychain"
-      ? targetKc
-      : encryptKey === "source"
-        ? source || target
-        : encryptKey === "source-keychain"
-          ? stripWrappingQuotes(
-              process.env.SOURCE_PRODUCT_KEYCHAIN || process.env.SOURCE_PRODUCT_KEY_KEYCHAIN || "",
-            )
-          : target;
+  const wireFormat = (process.env.BEAMER_ISVS_WIRE_FORMAT || "cryptojs").toLowerCase();
+  const encryptKeyChoice = (process.env.BEAMER_ISVS_ENCRYPT_KEY || "target").toLowerCase();
+  const encryptionKey = resolveIsvsEncryptionKey(
+    encryptKeyChoice === "source" ? source || target : target,
+  );
 
   console.log("Wire format:", wireFormat);
-  console.log("Encrypt key:", encryptKey);
-  console.log("Target plain len:", target.length, "| keychain len:", targetKc.length);
-  console.log("Source plain len:", source?.length ?? 0);
+  console.log("Encrypt key:", encryptKeyChoice);
+  console.log("Encryption key (first 32):", encryptionKey);
+  console.log("Target plain len:", target.length, "| Source plain len:", source?.length ?? 0);
   console.log("Probing ISVS...\n");
 
-  const { default: MerchantService } = await import("../src/services/merchants.js");
-  const service = new MerchantService();
-  const payload = {
-    headers: {
-      "User-Key": "probe-user-key",
-      "Accout-Key": "probe-account-key",
-      "Request-Id": crypto.randomUUID(),
-    },
-    data: {
-      account_number: "0000000000",
-      client: { id: "probe-client-id", key: "probe-client-key" },
-    },
+  const plainHeaders = {
+    "User-Key": "probe-user-key",
+    "Accout-Key": "probe-account-key",
+    "Request-Id": crypto.randomUUID(),
   };
-
-  // Use service path end-to-end (same as production proxy)
-  const material = {
-    sourceProductKey: stripWrappingQuotes(process.env.SOURCE_PRODUCT_KEY || ""),
-    targetProductKey: stripWrappingQuotes(process.env.TARGET_PRODUCT_KEY || ""),
-    sourceProductKeyKeychain: stripWrappingQuotes(
-      process.env.SOURCE_PRODUCT_KEYCHAIN || process.env.SOURCE_PRODUCT_KEY_KEYCHAIN || "",
-    ),
-    targetProductKeyKeychain: targetKc,
+  const plainData = {
+    account_number: "0000000000",
+    client: { id: "probe-client-id", key: "probe-client-key" },
   };
-
-  // Minimal inline build via duplicated logic — call linkBeamer would need DB merchant.
-  // Import internal build through a fake account by using extract + build from module scope isn't exported.
-  // Fall back: dynamic import merchants and invoke via eval of exported class method with mock — skip, use direct axios with same env-driven helpers duplicated in probe-sweep.
-
-  const mod = await import("../src/services/merchants.js");
-  void mod;
-  void service;
-
-  const { encryptFromPlainPair, encryptAesBase64WithExplicitIv, randomAesIv16 } = await import(
-    "../src/utils/decryptProdSecret.js"
-  );
-  const enc = (v) => encryptFromPlainPair(String(v), encryptMaterial, { valueName: "field" });
-  const plainHeaders = payload.headers;
-  const plainData = payload.data;
 
   let axiosHeaders;
   let isvsBody;
 
-  if (wireFormat === "object") {
-    const iv = randomAesIv16();
-    axiosHeaders = {
-      "Target-Product-Key": target,
+  if (wireFormat === "cryptojs") {
+    const iv = generateIsvsIv();
+    const credentialsObject = {
       "Source-Product-Key": source || target,
-      IV: iv,
-      Credentials: encryptAesBase64WithExplicitIv(JSON.stringify(plainHeaders), encryptMaterial, iv, {
-        valueName: "headers",
-      }),
-    };
-    isvsBody = { data: enc(JSON.stringify(plainData)) };
-  } else if (wireFormat === "full-field" || wireFormat === "field") {
-    axiosHeaders = {
       "Target-Product-Key": target,
-      "Source-Product-Key": source || target,
-      "User-Key": enc(plainHeaders["User-Key"]),
-      "Accout-Key": enc(plainHeaders["Accout-Key"]),
-      "Request-Id": enc(plainHeaders["Request-Id"]),
-      Credentials: enc(plainData.client.key),
+      "User-Key": plainHeaders["User-Key"],
+      "Account-Key": plainHeaders["Accout-Key"],
+      "Request-Id": plainHeaders["Request-Id"],
     };
-    isvsBody = {
-      account_number: enc(plainData.account_number),
-      client: { id: enc(plainData.client.id), key: enc(plainData.client.key) },
-    };
-  } else if (wireFormat === "enc-body" || wireFormat === "link") {
     axiosHeaders = {
-      "Target-Product-Key": target,
-      "Source-Product-Key": source || target,
-      ...plainHeaders,
-      Credentials: plainData.client.key,
+      Credentials: buildIsvsCredentialsHeader(credentialsObject, encryptionKey, iv),
+      "Content-Type": "application/json",
     };
-    isvsBody = {
-      account_number: enc(plainData.account_number),
-      client: { id: enc(plainData.client.id), key: enc(plainData.client.key) },
-    };
-  } else if (wireFormat === "headers") {
-    axiosHeaders = {
-      "Target-Product-Key": target,
-      "Source-Product-Key": source || target,
-      "User-Key": enc(plainHeaders["User-Key"]),
-      "Accout-Key": enc(plainHeaders["Accout-Key"]),
-      "Request-Id": enc(plainHeaders["Request-Id"]),
-      Credentials: plainData.client.key,
-    };
-    isvsBody = plainData;
+    isvsBody = { payload: encryptIsvsJson(plainData, encryptionKey, iv) };
   } else {
-    axiosHeaders = {
-      "Target-Product-Key": target,
-      "Source-Product-Key": source || target,
-      ...plainHeaders,
-      Credentials: enc(plainData.client.key),
-    };
-    isvsBody = plainData;
+    const encryptMaterial =
+      encryptKeyChoice === "source"
+        ? source || target
+        : encryptKeyChoice === "source-keychain"
+          ? stripWrappingQuotes(
+              process.env.SOURCE_PRODUCT_KEYCHAIN || process.env.SOURCE_PRODUCT_KEY_KEYCHAIN || "",
+            )
+          : encryptKeyChoice === "target-keychain"
+            ? targetKc
+            : target;
+    const enc = (v) => encryptFromPlainPair(String(v), encryptMaterial, { valueName: "field" });
+
+    if (wireFormat === "object") {
+      const iv = randomAesIv16();
+      axiosHeaders = {
+        "Target-Product-Key": target,
+        "Source-Product-Key": source || target,
+        IV: iv,
+        Credentials: encryptAesBase64WithExplicitIv(JSON.stringify(plainHeaders), encryptMaterial, iv, {
+          valueName: "headers",
+        }),
+      };
+      isvsBody = { data: enc(JSON.stringify(plainData)) };
+    } else if (wireFormat === "full-field" || wireFormat === "field") {
+      axiosHeaders = {
+        "Target-Product-Key": target,
+        "Source-Product-Key": source || target,
+        "User-Key": enc(plainHeaders["User-Key"]),
+        "Accout-Key": enc(plainHeaders["Accout-Key"]),
+        "Request-Id": enc(plainHeaders["Request-Id"]),
+        Credentials: enc(plainData.client.key),
+      };
+      isvsBody = {
+        account_number: enc(plainData.account_number),
+        client: { id: enc(plainData.client.id), key: enc(plainData.client.key) },
+      };
+    } else if (wireFormat === "headers") {
+      axiosHeaders = {
+        "Target-Product-Key": target,
+        "Source-Product-Key": source || target,
+        "User-Key": enc(plainHeaders["User-Key"]),
+        "Accout-Key": enc(plainHeaders["Accout-Key"]),
+        "Request-Id": enc(plainHeaders["Request-Id"]),
+        Credentials: plainData.client.key,
+      };
+      isvsBody = plainData;
+    } else {
+      axiosHeaders = {
+        "Target-Product-Key": target,
+        "Source-Product-Key": source || target,
+        ...plainHeaders,
+        Credentials: enc(plainData.client.key),
+      };
+      isvsBody = plainData;
+    }
   }
 
   const res = await axios.post(URL, isvsBody, { headers: axiosHeaders, validateStatus: () => true });
-  const body = summarize(res.data, [target, targetKc, source].filter(Boolean));
+  const body =
+    wireFormat === "cryptojs"
+      ? summarizeEncryptedApiCall(res.data, axiosHeaders.Credentials, encryptionKey)
+      : summarizeLegacy(res.data, [target, source, targetKc].filter(Boolean));
 
   console.log("HTTP status:", res.status);
   console.log("ISVS body:", JSON.stringify(body, null, 2));
-  console.log("\nMessages seen in sweep:");
-  console.log('- "No data found to decrypt" → plain Credentials (nothing for ISVS to decrypt)');
-  console.log('- "Decryption failed" → encrypted Credentials found but wrong AES key');
-  console.log("- 4013 → missing Credentials header");
 }
 
 main().catch((err) => {

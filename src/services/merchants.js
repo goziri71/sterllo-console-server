@@ -14,6 +14,16 @@ import {
   randomAesIv16,
   stripWrappingQuotes,
 } from "../utils/decryptProdSecret.js";
+import {
+  buildIsvsCredentialsHeader,
+  decryptIsvsCredentialsHeader,
+  decryptIsvsJson,
+  decryptIsvsWithKeychain,
+  encryptIsvsJson,
+  generateIsvsIv,
+  resolveIsvsEncryptionKey,
+  splitIsvsCredentialsHeader,
+} from "../utils/isvsCryptoJs.js";
 import { customers } from "../db/schema/customers.js";
 import { kycs } from "../db/schema/kycs.js";
 import { ErrorClass } from "../utils/errorClass/index.js";
@@ -144,34 +154,121 @@ function resolveBeamerProductKeysFromMaterial(material) {
 
 /**
  * ISVS wire format (BEAMER_ISVS_WIRE_FORMAT):
- * - "credentials" (default): plain Link.json headers + body; encrypt Credentials (client.key) only
- * - "headers": encrypt User-Key/Accout-Key/Request-Id; plain Credentials + plain body
- * - "enc-body": plain headers + plain Credentials + encrypted body
- * - "full-field": encrypt every header/body field + encrypted Credentials
- * - "object": whole headers blob in Credentials + IV; body as { data: encrypted blob }
+ * - "cryptojs" (default): colleague makeEncryptedApiCall — encrypted Credentials (+ IV suffix),
+ *   body `{ payload }`, key = decrypted product key first 32 chars
+ * - "credentials" | "headers" | "enc-body" | "full-field" | "object": legacy sweeps
  *
- * BEAMER_ISVS_ENCRYPT_KEY: target | target-keychain | source | source-keychain (default: target)
+ * BEAMER_ISVS_ENCRYPT_KEY: target (default) | source — which decrypted product key supplies encryption key
  */
 function beamerIsvsWireFormat() {
-  const format = stripWrappingQuotes(process.env.BEAMER_ISVS_WIRE_FORMAT || "credentials").toLowerCase();
+  const format = stripWrappingQuotes(process.env.BEAMER_ISVS_WIRE_FORMAT || "cryptojs").toLowerCase();
   if (format === "object" || format === "full-field" || format === "field") return format;
   if (format === "enc-body" || format === "link") return "enc-body";
   if (format === "headers") return "headers";
-  return "credentials";
+  if (format === "credentials") return "credentials";
+  return "cryptojs";
+}
+
+function resolveIsvsEncryptionKeyFromProductKeys(productKeys) {
+  const choice = stripWrappingQuotes(process.env.BEAMER_ISVS_ENCRYPT_KEY || "target").toLowerCase();
+  if (choice === "source") {
+    return resolveIsvsEncryptionKey(productKeys.sourceProductKey, { secretName: "SOURCE_PRODUCT_KEY" });
+  }
+  return resolveIsvsEncryptionKey(productKeys.targetProductKey, { secretName: "TARGET_PRODUCT_KEY" });
 }
 
 function resolveIsvsEncryptMaterial(productKeys) {
-  const choice = stripWrappingQuotes(process.env.BEAMER_ISVS_ENCRYPT_KEY || "target").toLowerCase();
-  if (choice === "target-keychain") return productKeys.targetProductKeyKeychain;
+  const choice = stripWrappingQuotes(process.env.BEAMER_ISVS_ENCRYPT_KEY || "target-keychain").toLowerCase();
+  if (choice === "target" || choice === "target-plain") return productKeys.targetProductKey;
   if (choice === "source") return productKeys.sourceProductKey;
   if (choice === "source-keychain") return productKeys.sourceProductKeyKeychain;
-  return productKeys.targetProductKey;
+  return productKeys.targetProductKeyKeychain;
 }
 
 function encryptForIsvs(plain, encryptMaterial) {
   const text = stripWrappingQuotes(String(plain ?? "").trim());
   if (!text) return "";
   return encryptFromPlainPair(text, encryptMaterial, { valueName: "ISVS field" });
+}
+
+function buildIsvsEncryptedCredentialsObject(productKeys, plainHeadersObject) {
+  const credentials = {
+    "Source-Product-Key": productKeys.sourceProductKey,
+    "Target-Product-Key": productKeys.targetProductKey,
+  };
+
+  const userKey = beamerHeaderValue(plainHeadersObject["User-Key"]);
+  const accountKey = pickFirstNonEmpty(
+    plainHeadersObject["Accout-Key"],
+    plainHeadersObject["Account-Key"],
+  );
+  const requestId = beamerHeaderValue(plainHeadersObject["Request-Id"]);
+
+  if (userKey) credentials["User-Key"] = userKey;
+  if (accountKey) credentials["Account-Key"] = accountKey;
+  if (requestId) credentials["Request-Id"] = requestId;
+
+  const requestIp = beamerHeaderValue(plainHeadersObject["Request-IP-Address"]);
+  if (requestIp) credentials["Request-IP-Address"] = requestIp;
+
+  return credentials;
+}
+
+/** Colleague makeEncryptedApiCall (isvs: true): Credentials + IV suffix; body `{ payload }`. */
+function buildIsvsCryptoJsWireLink(productKeys, plainHeadersObject, plainDataObject) {
+  const encryptionKey = resolveIsvsEncryptionKeyFromProductKeys(productKeys);
+  const iv = generateIsvsIv();
+  const credentialsObject = buildIsvsEncryptedCredentialsObject(productKeys, plainHeadersObject);
+  const payload = buildPlainIsvsLinkBody(plainDataObject);
+  const encryptedPayload = encryptIsvsJson(payload, encryptionKey, iv);
+
+  return {
+    axiosHeaders: {
+      Credentials: buildIsvsCredentialsHeader(credentialsObject, encryptionKey, iv),
+      "Content-Type": "application/json",
+    },
+    isvsBody: { payload: encryptedPayload },
+    _isvsPlain: {
+      headers: plainHeadersObject,
+      data: plainDataObject,
+      wireFormat: "cryptojs",
+      iv,
+      encryptionKey,
+      encryptMaterialKind: process.env.BEAMER_ISVS_ENCRYPT_KEY || "target",
+    },
+  };
+}
+
+function buildIsvsCryptoJsWireUpdate(productKeys, plainHeadersObject, plainDataObject) {
+  const encryptionKey = resolveIsvsEncryptionKeyFromProductKeys(productKeys);
+  const iv = generateIsvsIv();
+  const credentialsObject = buildIsvsEncryptedCredentialsObject(productKeys, plainHeadersObject);
+  const client = asPlainObject(plainDataObject.client) || {};
+  const payload = {
+    id: beamerHeaderValue(plainDataObject.id),
+    account_number: beamerHeaderValue(plainDataObject.account_number),
+    client: {
+      id: beamerHeaderValue(client.id),
+      key: beamerHeaderValue(client.key),
+    },
+  };
+  const encryptedPayload = encryptIsvsJson(payload, encryptionKey, iv);
+
+  return {
+    axiosHeaders: {
+      Credentials: buildIsvsCredentialsHeader(credentialsObject, encryptionKey, iv),
+      "Content-Type": "application/json",
+    },
+    isvsBody: { payload: encryptedPayload },
+    _isvsPlain: {
+      headers: plainHeadersObject,
+      data: plainDataObject,
+      wireFormat: "cryptojs",
+      iv,
+      encryptionKey,
+      encryptMaterialKind: process.env.BEAMER_ISVS_ENCRYPT_KEY || "target",
+    },
+  };
 }
 
 function resolveIsvsCredentialsPlain(plainHeadersObject, plainDataObject) {
@@ -198,7 +295,7 @@ function buildPlainIsvsLinkBody(plainDataObject) {
   };
 }
 
-/** Sweep-proven: ISVS decrypts Credentials header; Link.json headers + body stay plaintext. */
+/** Node crypto: plain Link.json; encrypted Credentials = client.key. */
 function buildIsvsCredentialsWireLink(productKeys, plainHeadersObject, plainDataObject) {
   const encryptMaterial = resolveIsvsEncryptMaterial(productKeys);
   const credentialsPlain = resolveIsvsCredentialsPlain(plainHeadersObject, plainDataObject);
@@ -536,9 +633,14 @@ function buildIsvsOutbound(productKeys, plainHeadersObject, plainDataObject, { l
       ? buildIsvsHeadersWireLink(productKeys, plainHeadersObject, plainDataObject)
       : buildIsvsHeadersWireUpdate(productKeys, plainHeadersObject, plainDataObject);
   }
+  if (format === "credentials") {
+    return link
+      ? buildIsvsCredentialsWireLink(productKeys, plainHeadersObject, plainDataObject)
+      : buildIsvsCredentialsWireUpdate(productKeys, plainHeadersObject, plainDataObject);
+  }
   return link
-    ? buildIsvsCredentialsWireLink(productKeys, plainHeadersObject, plainDataObject)
-    : buildIsvsCredentialsWireUpdate(productKeys, plainHeadersObject, plainDataObject);
+    ? buildIsvsCryptoJsWireLink(productKeys, plainHeadersObject, plainDataObject)
+    : buildIsvsCryptoJsWireUpdate(productKeys, plainHeadersObject, plainDataObject);
 }
 
 /** Server-side audit: verify we can round-trip decrypt what we send to ISVS. */
@@ -623,6 +725,27 @@ function auditIsvsOutboundEncryption(productKeys, outbound) {
         });
       }
       checks.push({ part: "body (plaintext Link.json)", ok: true });
+    } else if (wireFormat === "cryptojs") {
+      const encryptionKey = outbound._isvsPlain?.encryptionKey;
+      const iv = outbound._isvsPlain?.iv;
+      try {
+        const credPlain = decryptIsvsCredentialsHeader(outbound.axiosHeaders.Credentials, encryptionKey);
+        if (!credPlain || typeof credPlain !== "object") throw new Error("Empty credentials decrypt");
+        checks.push({ part: "Credentials (makeEncryptedApiCall wire)", ok: true });
+      } catch (error) {
+        checks.push({
+          part: "Credentials (makeEncryptedApiCall wire)",
+          ok: false,
+          error: error.message,
+        });
+      }
+      try {
+        const bodyPlain = decryptIsvsJson(outbound.isvsBody.payload, encryptionKey, iv);
+        if (!bodyPlain) throw new Error("Empty payload decrypt");
+        checks.push({ part: "body.payload", ok: true });
+      } catch (error) {
+        checks.push({ part: "body.payload", ok: false, error: error.message });
+      }
     } else if (wireFormat === "enc-body") {
       checks.push({ part: "HTTP headers (enc-body, plaintext)", ok: true });
       checks.push({
@@ -631,7 +754,7 @@ function auditIsvsOutboundEncryption(productKeys, outbound) {
       });
     }
 
-    if (wireFormat !== "headers" && wireFormat !== "credentials") {
+    if (wireFormat !== "headers" && wireFormat !== "credentials" && wireFormat !== "cryptojs") {
       const body = outbound.isvsBody || {};
       const fieldChecks = [
         ["account_number", body.account_number],
@@ -847,12 +970,75 @@ function collectIsvsResponseDecryptAttempts(encrypted, keys = {}, outboundHeader
   return attempts;
 }
 
+function collectIsvsKeychainDecryptCandidates(keys = {}, outboundHeaders = {}, material = {}) {
+  const seen = new Set();
+  const keychains = [];
+  const push = (kc) => {
+    const k = stripWrappingQuotes(String(kc ?? "").trim());
+    if (!k || k.length < 48 || seen.has(k)) return;
+    seen.add(k);
+    keychains.push(k);
+  };
+
+  const resolved = resolveBeamerProductKeysFromMaterial(material);
+  push(resolved.targetProductKeyKeychain);
+  push(resolved.sourceProductKeyKeychain);
+  push(keys.targetProductKeyKeychain);
+  push(keys.sourceProductKeyKeychain);
+  push(material.targetProductKeyKeychain);
+  push(material.sourceProductKeyKeychain);
+  return keychains;
+}
+
 function tryDecryptIsvsResponse(raw, productKeys = {}, outboundHeaders = {}) {
   const payload = coerceIsvsPayload(raw);
   const encrypted = isvsEncryptedBlob(payload);
   if (!encrypted) return payload;
 
   const material = getBeamerProductKeyMaterial();
+  const resolvedKeys = resolveBeamerProductKeysFromMaterial(material);
+  const credentialsHeader = outboundHeaders?.Credentials;
+
+  if (credentialsHeader) {
+    try {
+      const { iv } = splitIsvsCredentialsHeader(credentialsHeader);
+      const encryptionKeyCandidates = [
+        productKeys.targetProductKey,
+        productKeys.sourceProductKey,
+        resolvedKeys.targetProductKey,
+        resolvedKeys.sourceProductKey,
+      ];
+
+      for (const decryptedKey of encryptionKeyCandidates) {
+        if (!decryptedKey) continue;
+        try {
+          const encryptionKey = resolveIsvsEncryptionKey(decryptedKey);
+          const plain = decryptIsvsJson(encrypted, encryptionKey, iv);
+          const parsed = parseDecryptedIsvsPlain(plain);
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && !isvsEncryptedBlob(parsed)) {
+            return parsed;
+          }
+        } catch {
+          /* try next key */
+        }
+      }
+    } catch {
+      /* fall through to legacy attempts */
+    }
+  }
+
+  for (const keychain of collectIsvsKeychainDecryptCandidates(productKeys, outboundHeaders, material)) {
+    try {
+      const plain = decryptIsvsWithKeychain(encrypted, keychain, { secretName: "ISVS response keychain" });
+      const parsed = parseDecryptedIsvsPlain(plain);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && !isvsEncryptedBlob(parsed)) {
+        return parsed;
+      }
+    } catch {
+      /* try next keychain */
+    }
+  }
+
   for (const [enc, keychain] of collectIsvsResponseDecryptAttempts(
     encrypted,
     productKeys,
