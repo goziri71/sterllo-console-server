@@ -16,8 +16,10 @@ import {
 } from "../utils/decryptProdSecret.js";
 import {
   buildIsvsCredentialsHeader,
+  decryptIsvsApiResponse,
   decryptIsvsCredentialsHeader,
   decryptIsvsJson,
+  decryptIsvsProductKeyFromEnv,
   decryptIsvsWithKeychain,
   encryptIsvsJson,
   generateIsvsIv,
@@ -86,13 +88,13 @@ function getBeamerProductKeyMaterial() {
   };
 }
 
-/** Env product keys: decrypt ciphertext with its own *_KEYCHAIN (same AES rules as DB secrets). */
+/** Env product keys: CryptoJS decrypt + Base64 unwrap (colleague initializeProductKeys). */
 function decryptBeamerEnvProductKey(encrypted, keychain, label) {
   const enc = stripWrappingQuotes(String(encrypted ?? "").trim());
   if (!enc) return "";
   const kc = stripWrappingQuotes(String(keychain ?? "").trim());
   if (!kc) return enc;
-  return stripWrappingQuotes(decryptFromPlainPair(enc, kc, { valueName: label }));
+  return stripWrappingQuotes(decryptIsvsProductKeyFromEnv(enc, kc, { valueName: label }));
 }
 
 function looksLikeUndecryptedEnvCiphertext(value) {
@@ -925,6 +927,9 @@ function isvsEncryptedBlob(payload) {
 }
 
 function parseDecryptedIsvsPlain(plain) {
+  if (plain && typeof plain === "object" && !Array.isArray(plain)) {
+    return plain;
+  }
   const trimmed = stripWrappingQuotes(String(plain ?? "").trim());
   if (!trimmed) return null;
   try {
@@ -934,6 +939,15 @@ function parseDecryptedIsvsPlain(plain) {
     /* fall through */
   }
   return coerceIsvsPayload(trimmed);
+}
+
+function resolveIsvsResponseDecryptMaterial(productKeys = {}, outboundContext = {}) {
+  const iv = stripWrappingQuotes(String(outboundContext?.iv ?? "").trim());
+  const encryptionKey = stripWrappingQuotes(String(outboundContext?.encryptionKey ?? "").trim());
+  if (iv.length === 16 && encryptionKey.length >= 32) {
+    return { iv, encryptionKey: encryptionKey.slice(0, 32) };
+  }
+  return null;
 }
 
 function collectIsvsResponseDecryptAttempts(encrypted, keys = {}, outboundHeaders = {}, material = {}) {
@@ -990,7 +1004,7 @@ function collectIsvsKeychainDecryptCandidates(keys = {}, outboundHeaders = {}, m
   return keychains;
 }
 
-function tryDecryptIsvsResponse(raw, productKeys = {}, outboundHeaders = {}) {
+function tryDecryptIsvsResponse(raw, productKeys = {}, outboundHeaders = {}, outboundContext = {}) {
   const payload = coerceIsvsPayload(raw);
   const encrypted = isvsEncryptedBlob(payload);
   if (!encrypted) return payload;
@@ -999,10 +1013,24 @@ function tryDecryptIsvsResponse(raw, productKeys = {}, outboundHeaders = {}) {
   const resolvedKeys = resolveBeamerProductKeysFromMaterial(material);
   const credentialsHeader = outboundHeaders?.Credentials;
 
+  const fromOutbound = resolveIsvsResponseDecryptMaterial(productKeys, outboundContext);
+  if (fromOutbound) {
+    try {
+      const plain = decryptIsvsJson(encrypted, fromOutbound.encryptionKey, fromOutbound.iv);
+      const parsed = parseDecryptedIsvsPlain(plain);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && !isvsEncryptedBlob(parsed)) {
+        return parsed;
+      }
+    } catch {
+      /* fall through */
+    }
+  }
+
   if (credentialsHeader) {
     try {
       const { iv } = splitIsvsCredentialsHeader(credentialsHeader);
       const encryptionKeyCandidates = [
+        outboundContext?.encryptionKey,
         productKeys.targetProductKey,
         productKeys.sourceProductKey,
         resolvedKeys.targetProductKey,
@@ -1012,7 +1040,10 @@ function tryDecryptIsvsResponse(raw, productKeys = {}, outboundHeaders = {}) {
       for (const decryptedKey of encryptionKeyCandidates) {
         if (!decryptedKey) continue;
         try {
-          const encryptionKey = resolveIsvsEncryptionKey(decryptedKey);
+          const encryptionKey =
+            String(decryptedKey).length === 32
+              ? String(decryptedKey)
+              : resolveIsvsEncryptionKey(decryptedKey);
           const plain = decryptIsvsJson(encrypted, encryptionKey, iv);
           const parsed = parseDecryptedIsvsPlain(plain);
           if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && !isvsEncryptedBlob(parsed)) {
@@ -1077,19 +1108,30 @@ function buildIsvsUpstreamResult(body, axiosStatus) {
   };
 }
 
-/** Return ISVS axios response; decrypt `{ response }` wrapper when present, then passthrough body. */
-function isvsAxiosResult(response, productKeys, outboundHeaders) {
-  const body = tryDecryptIsvsResponse(response.data, productKeys, outboundHeaders);
+/** Return ISVS axios response; decrypt `{ response }` with request key + IV (colleague makeEncryptedApiCall). */
+function isvsAxiosResult(response, productKeys, outboundHeaders, outboundContext = {}) {
+  const iv = outboundContext?.iv;
+  const encryptionKey = outboundContext?.encryptionKey;
+  const body =
+    iv && encryptionKey
+      ? decryptIsvsApiResponse(response.data, encryptionKey, iv)
+      : tryDecryptIsvsResponse(response.data, productKeys, outboundHeaders, outboundContext);
   return buildIsvsUpstreamResult(body, response.status);
 }
 
-function isvsResultFromAxiosError(error, productKeys, outboundHeaders) {
+function isvsResultFromAxiosError(error, productKeys, outboundHeaders, outboundContext = {}) {
   const status = error?.response?.status;
   const raw = error?.response?.data ?? null;
+  const iv = outboundContext?.iv;
+  const encryptionKey = outboundContext?.encryptionKey;
   const body =
-    raw != null && productKeys
-      ? tryDecryptIsvsResponse(raw, productKeys, outboundHeaders)
-      : raw;
+    raw == null
+      ? raw
+      : iv && encryptionKey
+        ? decryptIsvsApiResponse(raw, encryptionKey, iv)
+        : productKeys
+          ? tryDecryptIsvsResponse(raw, productKeys, outboundHeaders, outboundContext)
+          : raw;
   return buildIsvsUpstreamResult(body, status);
 }
 
@@ -1421,7 +1463,7 @@ export default class MerchantService {
         headers: axiosHeaders,
         validateStatus: () => true,
       });
-      const result = isvsAxiosResult(response, productKeys, axiosHeaders);
+      const result = isvsAxiosResult(response, productKeys, axiosHeaders, outbound._isvsPlain);
 
       if (result.body?.code === 5000) {
         logBeamerIsvsOutbound("ISVS decryption failed (link)", audit, {
@@ -1437,7 +1479,7 @@ export default class MerchantService {
       return result;
     } catch (error) {
       if (error instanceof ErrorClass) throw error;
-      return isvsResultFromAxiosError(error, productKeys, axiosHeaders);
+      return isvsResultFromAxiosError(error, productKeys, axiosHeaders, outbound._isvsPlain);
     }
   }
 
@@ -1471,7 +1513,7 @@ export default class MerchantService {
         headers: axiosHeaders,
         validateStatus: () => true,
       });
-      const result = isvsAxiosResult(response, productKeys, axiosHeaders);
+      const result = isvsAxiosResult(response, productKeys, axiosHeaders, outbound._isvsPlain);
 
       if (result.body?.code === 5000) {
         logBeamerIsvsOutbound("ISVS decryption failed (update)", audit, {
@@ -1487,7 +1529,7 @@ export default class MerchantService {
       return result;
     } catch (error) {
       if (error instanceof ErrorClass) throw error;
-      return isvsResultFromAxiosError(error, productKeys, axiosHeaders);
+      return isvsResultFromAxiosError(error, productKeys, axiosHeaders, outbound._isvsPlain);
     }
   }
 }
