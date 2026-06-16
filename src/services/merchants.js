@@ -134,15 +134,356 @@ function resolveBeamerProductKeysFromMaterial(material) {
     );
   }
 
-  return { sourceProductKey, targetProductKey };
+  return {
+    sourceProductKey,
+    targetProductKey,
+    sourceProductKeyKeychain: sourceKeychain,
+    targetProductKeyKeychain: targetKeychain,
+  };
 }
 
 /**
- * ISVS outbound: encrypt whole headers + data objects (not field-by-field).
- * - HTTP headers: decrypted product keys, random 16-char IV, Credentials = encrypted headers object.
- * - Body: encrypted data object only (no IV on payload; uses keychain-derived IV).
+ * ISVS wire format (BEAMER_ISVS_WIRE_FORMAT):
+ * - "credentials" (default): plain Link.json headers + body; encrypt Credentials (client.key) only
+ * - "headers": encrypt User-Key/Accout-Key/Request-Id; plain Credentials + plain body
+ * - "enc-body": plain headers + plain Credentials + encrypted body
+ * - "full-field": encrypt every header/body field + encrypted Credentials
+ * - "object": whole headers blob in Credentials + IV; body as { data: encrypted blob }
+ *
+ * BEAMER_ISVS_ENCRYPT_KEY: target | target-keychain | source | source-keychain (default: target)
  */
-function buildIsvsEncryptedOutbound(productKeys, plainHeadersObject, plainDataObject) {
+function beamerIsvsWireFormat() {
+  const format = stripWrappingQuotes(process.env.BEAMER_ISVS_WIRE_FORMAT || "credentials").toLowerCase();
+  if (format === "object" || format === "full-field" || format === "field") return format;
+  if (format === "enc-body" || format === "link") return "enc-body";
+  if (format === "headers") return "headers";
+  return "credentials";
+}
+
+function resolveIsvsEncryptMaterial(productKeys) {
+  const choice = stripWrappingQuotes(process.env.BEAMER_ISVS_ENCRYPT_KEY || "target").toLowerCase();
+  if (choice === "target-keychain") return productKeys.targetProductKeyKeychain;
+  if (choice === "source") return productKeys.sourceProductKey;
+  if (choice === "source-keychain") return productKeys.sourceProductKeyKeychain;
+  return productKeys.targetProductKey;
+}
+
+function encryptForIsvs(plain, encryptMaterial) {
+  const text = stripWrappingQuotes(String(plain ?? "").trim());
+  if (!text) return "";
+  return encryptFromPlainPair(text, encryptMaterial, { valueName: "ISVS field" });
+}
+
+function resolveIsvsCredentialsPlain(plainHeadersObject, plainDataObject) {
+  const client = asPlainObject(plainDataObject.client) || {};
+  const credentialsPlain = pickFirstNonEmpty(
+    plainHeadersObject.Credentials,
+    plainHeadersObject.credentials,
+    client.key,
+  );
+  if (!credentialsPlain) {
+    throw new ErrorClass("data.client.key is required for ISVS Credentials header", 400);
+  }
+  return credentialsPlain;
+}
+
+function buildPlainIsvsLinkBody(plainDataObject) {
+  const client = asPlainObject(plainDataObject.client) || {};
+  return {
+    account_number: beamerHeaderValue(plainDataObject.account_number),
+    client: {
+      id: beamerHeaderValue(client.id),
+      key: beamerHeaderValue(client.key),
+    },
+  };
+}
+
+/** Sweep-proven: ISVS decrypts Credentials header; Link.json headers + body stay plaintext. */
+function buildIsvsCredentialsWireLink(productKeys, plainHeadersObject, plainDataObject) {
+  const encryptMaterial = resolveIsvsEncryptMaterial(productKeys);
+  const credentialsPlain = resolveIsvsCredentialsPlain(plainHeadersObject, plainDataObject);
+
+  const axiosHeaders = {
+    "Target-Product-Key": productKeys.targetProductKey,
+    "Source-Product-Key": productKeys.sourceProductKey,
+    "User-Key": beamerHeaderValue(plainHeadersObject["User-Key"]),
+    "Accout-Key": beamerHeaderValue(plainHeadersObject["Accout-Key"]),
+    "Request-Id": beamerHeaderValue(plainHeadersObject["Request-Id"]),
+    Credentials: encryptForIsvs(credentialsPlain, encryptMaterial),
+  };
+
+  const requestIp = beamerHeaderValue(plainHeadersObject["Request-IP-Address"]);
+  if (requestIp) {
+    axiosHeaders["Request-IP-Address"] = requestIp;
+  }
+
+  return {
+    axiosHeaders,
+    isvsBody: buildPlainIsvsLinkBody(plainDataObject),
+    _isvsPlain: {
+      headers: plainHeadersObject,
+      data: plainDataObject,
+      wireFormat: "credentials",
+      encryptMaterialKind: process.env.BEAMER_ISVS_ENCRYPT_KEY || "target",
+    },
+  };
+}
+
+function buildIsvsCredentialsWireUpdate(productKeys, plainHeadersObject, plainDataObject) {
+  const encryptMaterial = resolveIsvsEncryptMaterial(productKeys);
+  const credentialsPlain = resolveIsvsCredentialsPlain(plainHeadersObject, plainDataObject);
+  const client = asPlainObject(plainDataObject.client) || {};
+
+  const axiosHeaders = {
+    "Target-Product-Key": productKeys.targetProductKey,
+    "Source-Product-Key": productKeys.sourceProductKey,
+    "Request-Id": beamerHeaderValue(plainHeadersObject["Request-Id"]),
+    Credentials: encryptForIsvs(credentialsPlain, encryptMaterial),
+  };
+
+  const isvsBody = {
+    id: beamerHeaderValue(plainDataObject.id),
+    account_number: beamerHeaderValue(plainDataObject.account_number),
+    client: {
+      id: beamerHeaderValue(client.id),
+      key: beamerHeaderValue(client.key),
+    },
+  };
+
+  return {
+    axiosHeaders,
+    isvsBody,
+    _isvsPlain: {
+      headers: plainHeadersObject,
+      data: plainDataObject,
+      wireFormat: "credentials",
+      encryptMaterialKind: process.env.BEAMER_ISVS_ENCRYPT_KEY || "target",
+    },
+  };
+}
+
+/** Legacy: encrypt User-Key/Accout-Key/Request-Id; plain Credentials + plain body. */
+function buildIsvsHeadersWireLink(productKeys, plainHeadersObject, plainDataObject) {
+  const encryptMaterial = resolveIsvsEncryptMaterial(productKeys);
+  const credentialsPlain = resolveIsvsCredentialsPlain(plainHeadersObject, plainDataObject);
+
+  const axiosHeaders = {
+    "Target-Product-Key": productKeys.targetProductKey,
+    "Source-Product-Key": productKeys.sourceProductKey,
+    "User-Key": encryptForIsvs(plainHeadersObject["User-Key"], encryptMaterial),
+    "Accout-Key": encryptForIsvs(plainHeadersObject["Accout-Key"], encryptMaterial),
+    "Request-Id": encryptForIsvs(plainHeadersObject["Request-Id"], encryptMaterial),
+    Credentials: credentialsPlain,
+  };
+
+  const requestIp = beamerHeaderValue(plainHeadersObject["Request-IP-Address"]);
+  if (requestIp) {
+    axiosHeaders["Request-IP-Address"] = encryptForIsvs(requestIp, encryptMaterial);
+  }
+
+  const isvsBody = buildPlainIsvsLinkBody(plainDataObject);
+
+  return {
+    axiosHeaders,
+    isvsBody,
+    _isvsPlain: {
+      headers: plainHeadersObject,
+      data: plainDataObject,
+      wireFormat: "headers",
+      encryptMaterialKind: process.env.BEAMER_ISVS_ENCRYPT_KEY || "target",
+    },
+  };
+}
+
+function buildIsvsHeadersWireUpdate(productKeys, plainHeadersObject, plainDataObject) {
+  const encryptMaterial = resolveIsvsEncryptMaterial(productKeys);
+  const credentialsPlain = resolveIsvsCredentialsPlain(plainHeadersObject, plainDataObject);
+  const client = asPlainObject(plainDataObject.client) || {};
+
+  const axiosHeaders = {
+    "Target-Product-Key": productKeys.targetProductKey,
+    "Source-Product-Key": productKeys.sourceProductKey,
+    "Request-Id": encryptForIsvs(plainHeadersObject["Request-Id"], encryptMaterial),
+    Credentials: credentialsPlain,
+  };
+
+  const isvsBody = {
+    id: beamerHeaderValue(plainDataObject.id),
+    account_number: beamerHeaderValue(plainDataObject.account_number),
+    client: {
+      id: beamerHeaderValue(client.id),
+      key: beamerHeaderValue(client.key),
+    },
+  };
+
+  return {
+    axiosHeaders,
+    isvsBody,
+    _isvsPlain: {
+      headers: plainHeadersObject,
+      data: plainDataObject,
+      wireFormat: "headers",
+      encryptMaterialKind: process.env.BEAMER_ISVS_ENCRYPT_KEY || "target",
+    },
+  };
+}
+
+/** Legacy attempt: plain HTTP headers + encrypted body (ISVS sweep: body crypto not detected). */
+function buildIsvsEncBodyWireLink(productKeys, plainHeadersObject, plainDataObject) {
+  const encryptMaterial = resolveIsvsEncryptMaterial(productKeys);
+  const credentialsPlain = resolveIsvsCredentialsPlain(plainHeadersObject, plainDataObject);
+
+  const axiosHeaders = {
+    "Target-Product-Key": productKeys.targetProductKey,
+    "Source-Product-Key": productKeys.sourceProductKey,
+    "User-Key": beamerHeaderValue(plainHeadersObject["User-Key"]),
+    "Accout-Key": beamerHeaderValue(plainHeadersObject["Accout-Key"]),
+    "Request-Id": beamerHeaderValue(plainHeadersObject["Request-Id"]),
+    Credentials: credentialsPlain,
+  };
+
+  const requestIp = beamerHeaderValue(plainHeadersObject["Request-IP-Address"]);
+  if (requestIp) {
+    axiosHeaders["Request-IP-Address"] = requestIp;
+  }
+
+  const isvsBody = {
+    account_number: encryptForIsvs(plainDataObject.account_number, encryptMaterial),
+    client: {
+      id: encryptForIsvs(client.id, encryptMaterial),
+      key: encryptForIsvs(client.key, encryptMaterial),
+    },
+  };
+
+  return {
+    axiosHeaders,
+    isvsBody,
+    _isvsPlain: {
+      headers: plainHeadersObject,
+      data: plainDataObject,
+      wireFormat: "enc-body",
+      encryptMaterialKind: process.env.BEAMER_ISVS_ENCRYPT_KEY || "target",
+    },
+  };
+}
+
+function buildIsvsEncBodyWireUpdate(productKeys, plainHeadersObject, plainDataObject) {
+  const encryptMaterial = resolveIsvsEncryptMaterial(productKeys);
+  const credentialsPlain = resolveIsvsCredentialsPlain(plainHeadersObject, plainDataObject);
+  const client = asPlainObject(plainDataObject.client) || {};
+
+  const axiosHeaders = {
+    "Target-Product-Key": productKeys.targetProductKey,
+    "Source-Product-Key": productKeys.sourceProductKey,
+    "Request-Id": beamerHeaderValue(plainHeadersObject["Request-Id"]),
+    Credentials: credentialsPlain,
+  };
+
+  const isvsBody = {
+    id: encryptForIsvs(plainDataObject.id, encryptMaterial),
+    account_number: encryptForIsvs(plainDataObject.account_number, encryptMaterial),
+    client: {
+      id: encryptForIsvs(client.id, encryptMaterial),
+      key: encryptForIsvs(client.key, encryptMaterial),
+    },
+  };
+
+  return {
+    axiosHeaders,
+    isvsBody,
+    _isvsPlain: {
+      headers: plainHeadersObject,
+      data: plainDataObject,
+      wireFormat: "enc-body",
+      encryptMaterialKind: process.env.BEAMER_ISVS_ENCRYPT_KEY || "target",
+    },
+  };
+}
+
+/** Legacy: encrypted HTTP headers + encrypted body fields + encrypted Credentials. */
+function buildIsvsFieldWireLink(productKeys, plainHeadersObject, plainDataObject) {
+  const encryptMaterial = resolveIsvsEncryptMaterial(productKeys);
+  const client = asPlainObject(plainDataObject.client) || {};
+  const credentialsPlain = pickFirstNonEmpty(
+    plainHeadersObject.Credentials,
+    plainHeadersObject.credentials,
+    client.key,
+  );
+
+  if (!credentialsPlain) {
+    throw new ErrorClass("data.client.key is required for ISVS Credentials header", 400);
+  }
+
+  const axiosHeaders = {
+    "Target-Product-Key": productKeys.targetProductKey,
+    "Source-Product-Key": productKeys.sourceProductKey,
+    "User-Key": encryptForIsvs(plainHeadersObject["User-Key"], encryptMaterial),
+    "Accout-Key": encryptForIsvs(plainHeadersObject["Accout-Key"], encryptMaterial),
+    "Request-Id": encryptForIsvs(plainHeadersObject["Request-Id"], encryptMaterial),
+    Credentials: encryptForIsvs(credentialsPlain, encryptMaterial),
+  };
+
+  const requestIp = beamerHeaderValue(plainHeadersObject["Request-IP-Address"]);
+  if (requestIp) {
+    axiosHeaders["Request-IP-Address"] = encryptForIsvs(requestIp, encryptMaterial);
+  }
+
+  const isvsBody = {
+    account_number: encryptForIsvs(plainDataObject.account_number, encryptMaterial),
+    client: {
+      id: encryptForIsvs(client.id, encryptMaterial),
+      key: encryptForIsvs(client.key, encryptMaterial),
+    },
+  };
+
+  return {
+    axiosHeaders,
+    isvsBody,
+    _isvsPlain: { headers: plainHeadersObject, data: plainDataObject, wireFormat: "full-field" },
+  };
+}
+
+function buildIsvsFieldWireUpdate(productKeys, plainHeadersObject, plainDataObject) {
+  const encryptMaterial = resolveIsvsEncryptMaterial(productKeys);
+  const client = asPlainObject(plainDataObject.client) || {};
+  const credentialsPlain = pickFirstNonEmpty(
+    plainHeadersObject.Credentials,
+    plainHeadersObject.credentials,
+    client.key,
+  );
+
+  if (!credentialsPlain) {
+    throw new ErrorClass("data.client.key is required for ISVS Credentials header", 400);
+  }
+
+  const axiosHeaders = {
+    "Target-Product-Key": productKeys.targetProductKey,
+    "Source-Product-Key": productKeys.sourceProductKey,
+    "Request-Id": encryptForIsvs(plainHeadersObject["Request-Id"], encryptMaterial),
+    Credentials: encryptForIsvs(credentialsPlain, encryptMaterial),
+  };
+
+  const isvsBody = {
+    id: encryptForIsvs(plainDataObject.id, encryptMaterial),
+    account_number: encryptForIsvs(plainDataObject.account_number, encryptMaterial),
+    client: {
+      id: encryptForIsvs(client.id, encryptMaterial),
+      key: encryptForIsvs(client.key, encryptMaterial),
+    },
+  };
+
+  return {
+    axiosHeaders,
+    isvsBody,
+    _isvsPlain: { headers: plainHeadersObject, data: plainDataObject, wireFormat: "full-field" },
+  };
+}
+
+/**
+ * Object wire (experimental): encrypted headers blob in Credentials + random IV;
+ * body as { data: encrypted blob }.
+ */
+function buildIsvsObjectWire(productKeys, plainHeadersObject, plainDataObject) {
   const iv = randomAesIv16();
   const encryptedHeaders = encryptAesBase64WithExplicitIv(
     JSON.stringify(plainHeadersObject),
@@ -170,60 +511,158 @@ function buildIsvsEncryptedOutbound(productKeys, plainHeadersObject, plainDataOb
       headers: plainHeadersObject,
       data: plainDataObject,
       iv,
+      wireFormat: "object",
     },
   };
 }
 
+function buildIsvsOutbound(productKeys, plainHeadersObject, plainDataObject, { link = true } = {}) {
+  const format = beamerIsvsWireFormat();
+  if (format === "object") {
+    return buildIsvsObjectWire(productKeys, plainHeadersObject, plainDataObject);
+  }
+  if (format === "full-field" || format === "field") {
+    return link
+      ? buildIsvsFieldWireLink(productKeys, plainHeadersObject, plainDataObject)
+      : buildIsvsFieldWireUpdate(productKeys, plainHeadersObject, plainDataObject);
+  }
+  if (format === "enc-body") {
+    return link
+      ? buildIsvsEncBodyWireLink(productKeys, plainHeadersObject, plainDataObject)
+      : buildIsvsEncBodyWireUpdate(productKeys, plainHeadersObject, plainDataObject);
+  }
+  if (format === "headers") {
+    return link
+      ? buildIsvsHeadersWireLink(productKeys, plainHeadersObject, plainDataObject)
+      : buildIsvsHeadersWireUpdate(productKeys, plainHeadersObject, plainDataObject);
+  }
+  return link
+    ? buildIsvsCredentialsWireLink(productKeys, plainHeadersObject, plainDataObject)
+    : buildIsvsCredentialsWireUpdate(productKeys, plainHeadersObject, plainDataObject);
+}
+
 /** Server-side audit: verify we can round-trip decrypt what we send to ISVS. */
 function auditIsvsOutboundEncryption(productKeys, outbound) {
-  const target = productKeys.targetProductKey;
-  const iv = outbound.axiosHeaders.IV;
-  const { key: aesKey, iv: dataIv } = getKeyIvFromKeychain(target, "targetProductKey");
-
+  const wireFormat = outbound._isvsPlain?.wireFormat || beamerIsvsWireFormat();
+  const encryptMaterial = resolveIsvsEncryptMaterial(productKeys);
+  const { key: aesKey, iv: dataIv } = getKeyIvFromKeychain(encryptMaterial, "encryptMaterial");
   const checks = [];
 
-  try {
-    const decrypted = decryptAesBase64WithExplicitIv(
-      outbound.axiosHeaders.Credentials,
-      target,
-      iv,
-      { valueName: "Credentials" },
-    );
-    JSON.parse(decrypted);
-    checks.push({ part: "Credentials (HTTP header, uses IV header)", ok: true });
-  } catch (error) {
-    checks.push({
-      part: "Credentials (HTTP header, uses IV header)",
-      ok: false,
-      error: error.message,
-    });
-  }
+  if (wireFormat === "object") {
+    const target = productKeys.targetProductKey;
+    const iv = outbound.axiosHeaders.IV;
+    try {
+      const decrypted = decryptAesBase64WithExplicitIv(
+        outbound.axiosHeaders.Credentials,
+        target,
+        iv,
+        { valueName: "Credentials" },
+      );
+      JSON.parse(decrypted);
+      checks.push({ part: "Credentials (object wire, IV header)", ok: true });
+    } catch (error) {
+      checks.push({
+        part: "Credentials (object wire, IV header)",
+        ok: false,
+        error: error.message,
+      });
+    }
 
-  try {
-    const decrypted = decryptFromPlainPair(outbound.isvsBody.data, target, {
-      valueName: "body.data",
-    });
-    JSON.parse(decrypted);
-    checks.push({ part: "body.data (JSON field, keychain IV)", ok: true });
-  } catch (error) {
-    checks.push({
-      part: "body.data (JSON field, keychain IV)",
-      ok: false,
-      error: error.message,
-    });
+    try {
+      const decrypted = decryptFromPlainPair(outbound.isvsBody.data, target, {
+        valueName: "body.data",
+      });
+      JSON.parse(decrypted);
+      checks.push({ part: "body.data (object wire)", ok: true });
+    } catch (error) {
+      checks.push({
+        part: "body.data (object wire)",
+        ok: false,
+        error: error.message,
+      });
+    }
+  } else {
+    if (wireFormat === "full-field" || wireFormat === "field") {
+      for (const [name, value] of Object.entries(outbound.axiosHeaders)) {
+        if (name === "Target-Product-Key" || name === "Source-Product-Key") continue;
+        try {
+          decryptFromPlainPair(value, encryptMaterial, { valueName: name });
+          checks.push({ part: `HTTP header ${name}`, ok: true });
+        } catch (error) {
+          checks.push({ part: `HTTP header ${name}`, ok: false, error: error.message });
+        }
+      }
+    } else if (wireFormat === "headers") {
+      for (const name of ["User-Key", "Accout-Key", "Request-Id", "Request-IP-Address"]) {
+        const value = outbound.axiosHeaders[name];
+        if (!value) continue;
+        try {
+          decryptFromPlainPair(value, encryptMaterial, { valueName: name });
+          checks.push({ part: `HTTP header ${name}`, ok: true });
+        } catch (error) {
+          checks.push({ part: `HTTP header ${name}`, ok: false, error: error.message });
+        }
+      }
+      checks.push({
+        part: "Credentials (plaintext client.key)",
+        ok: Boolean(outbound.axiosHeaders.Credentials),
+      });
+      checks.push({ part: "body (plaintext Link.json)", ok: true });
+    } else if (wireFormat === "credentials") {
+      checks.push({ part: "HTTP headers (credentials wire, plaintext)", ok: true });
+      try {
+        decryptFromPlainPair(outbound.axiosHeaders.Credentials, encryptMaterial, {
+          valueName: "Credentials",
+        });
+        checks.push({ part: "Credentials (encrypted client.key)", ok: true });
+      } catch (error) {
+        checks.push({
+          part: "Credentials (encrypted client.key)",
+          ok: false,
+          error: error.message,
+        });
+      }
+      checks.push({ part: "body (plaintext Link.json)", ok: true });
+    } else if (wireFormat === "enc-body") {
+      checks.push({ part: "HTTP headers (enc-body, plaintext)", ok: true });
+      checks.push({
+        part: "Credentials (enc-body, plaintext client.key)",
+        ok: Boolean(outbound.axiosHeaders.Credentials),
+      });
+    }
+
+    if (wireFormat !== "headers" && wireFormat !== "credentials") {
+      const body = outbound.isvsBody || {};
+      const fieldChecks = [
+        ["account_number", body.account_number],
+        ["client.id", body.client?.id],
+        ["client.key", body.client?.key],
+        ["id", body.id],
+      ];
+      for (const [name, value] of fieldChecks) {
+        if (!value) continue;
+        try {
+          decryptFromPlainPair(value, encryptMaterial, { valueName: name });
+          checks.push({ part: `body.${name}`, ok: true });
+        } catch (error) {
+          checks.push({ part: `body.${name}`, ok: false, error: error.message });
+        }
+      }
+    }
   }
 
   return {
+    wireFormat,
+    encryptMaterialKind: outbound._isvsPlain?.encryptMaterialKind || process.env.BEAMER_ISVS_ENCRYPT_KEY || "target",
     isvsUrl: null,
-    targetKeyLength: target.length,
-    targetKeyPreview: `${target.slice(0, 12)}…${target.slice(-4)}`,
+    targetKeyLength: productKeys.targetProductKey.length,
+    targetKeyPreview: `${productKeys.targetProductKey.slice(0, 12)}…${productKeys.targetProductKey.slice(-4)}`,
     aesKeyPreview: `${aesKey.slice(0, 8)}…`,
     dataIvPreview: `${dataIv.slice(0, 4)}…${dataIv.slice(-4)}`,
-    requestIv: iv,
+    requestIv: outbound.axiosHeaders.IV || null,
     httpHeaderNames: Object.keys(outbound.axiosHeaders),
-    bodyShape: Object.keys(outbound.isvsBody),
-    credentialsCiphertextLength: String(outbound.axiosHeaders.Credentials || "").length,
-    dataCiphertextLength: String(outbound.isvsBody.data || "").length,
+    bodyShape: Object.keys(outbound.isvsBody || {}),
+    credentialsLength: String(outbound.axiosHeaders.Credentials || "").length,
     plainHeaderKeys: Object.keys(outbound._isvsPlain?.headers || {}),
     plainDataKeys: Object.keys(outbound._isvsPlain?.data || {}),
     selfDecryptChecks: checks,
@@ -781,7 +1220,7 @@ export default class MerchantService {
     const productKeys = resolveBeamerProductKeysFromMaterial(productKeyMaterial);
     const { headers, data } = extractBeamerLinkRequest(payload, merchant);
     const plainHeaders = buildPlainBeamerLinkHeaders(headers);
-    const outbound = buildIsvsEncryptedOutbound(productKeys, plainHeaders, data);
+    const outbound = buildIsvsOutbound(productKeys, plainHeaders, data, { link: true });
     const audit = auditIsvsOutboundEncryption(productKeys, outbound);
     audit.isvsUrl = ISVS_BEAMER_LINK_URL;
 
@@ -831,7 +1270,7 @@ export default class MerchantService {
     const productKeys = resolveBeamerProductKeysFromMaterial(productKeyMaterial);
     const { headers, data } = extractBeamerUpdateRequest(payload);
     const plainHeaders = buildPlainBeamerUpdateHeaders(headers);
-    const outbound = buildIsvsEncryptedOutbound(productKeys, plainHeaders, data);
+    const outbound = buildIsvsOutbound(productKeys, plainHeaders, data, { link: false });
     const audit = auditIsvsOutboundEncryption(productKeys, outbound);
     audit.isvsUrl = ISVS_BEAMER_UPDATE_URL;
 
