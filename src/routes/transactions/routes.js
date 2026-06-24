@@ -8,12 +8,37 @@ import {
   getCryptoDeposits,
   getCryptoPayouts,
   getTransactionStatement,
+  getPendingTransactionReview,
+  getPendingTransactionReviewSummary,
+  approvePendingTransaction,
+  cancelPendingTransaction,
 } from "../../controllers/transactions.js";
 import { authenticate, requirePermission } from "../../middleware/auth.js";
 import { PERMISSIONS } from "../../config/permissions.js";
 
 export default async function transactionRoutes(fastify) {
   fastify.addHook("preHandler", authenticate);
+
+  fastify.get(
+    "/pending-review/summary",
+    { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) },
+    getPendingTransactionReviewSummary,
+  );
+  fastify.get(
+    "/pending-review",
+    { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) },
+    getPendingTransactionReview,
+  );
+  fastify.post(
+    "/review/:transaction_type/:reference/approve",
+    { preHandler: requirePermission(PERMISSIONS.DISPUTE_UPDATE) },
+    approvePendingTransaction,
+  );
+  fastify.post(
+    "/review/:transaction_type/:reference/cancel",
+    { preHandler: requirePermission(PERMISSIONS.DISPUTE_UPDATE) },
+    cancelPendingTransaction,
+  );
 
   fastify.get("/deposits", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getDeposits);
   fastify.get("/withdrawals", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getWithdrawals);

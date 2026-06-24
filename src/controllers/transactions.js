@@ -16,6 +16,8 @@ function extractFilters(query) {
     identifier: query.identifier,
     wallet_key: query.wallet_key,
     status: query.status,
+    pending: query.pending,
+    transaction_type: query.transaction_type,
     currency_code: query.currency_code,
     search: query.search,
     from_date: query.from_date,
@@ -131,5 +133,57 @@ export const getTransactionStatement = async (request, reply) => {
     message: "Transaction statement fetched successfully",
     success: true,
     ...paginatedResponse(data, page, limit),
+  });
+};
+
+export const getPendingTransactionReview = async (request, reply) => {
+  const { page, limit, offset } = parsePagination(request.query);
+  const raw = await txService.getPendingReview({ limit, offset, filters: extractFilters(request.query) });
+  const data = maybeRedactTxPage(raw, request.user);
+
+  return reply.code(200).send({
+    code: 200,
+    message: "Pending transactions fetched successfully",
+    success: true,
+    ...paginatedResponse(data, page, limit),
+  });
+};
+
+export const getPendingTransactionReviewSummary = async (request, reply) => {
+  const data = await txService.getPendingReviewSummary(extractFilters(request.query));
+
+  return reply.code(200).send({
+    code: 200,
+    message: "Pending transaction summary fetched successfully",
+    success: true,
+    data,
+  });
+};
+
+export const approvePendingTransaction = async (request, reply) => {
+  const result = await txService.approveTransaction(
+    request.params.transaction_type,
+    request.params.reference,
+  );
+
+  return reply.code(200).send({
+    code: 200,
+    success: true,
+    message: "Transaction approved successfully",
+    data: result,
+  });
+};
+
+export const cancelPendingTransaction = async (request, reply) => {
+  const result = await txService.cancelTransaction(
+    request.params.transaction_type,
+    request.params.reference,
+  );
+
+  return reply.code(200).send({
+    code: 200,
+    success: true,
+    message: "Transaction cancelled successfully",
+    data: result,
   });
 };
