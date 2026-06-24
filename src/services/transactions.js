@@ -202,6 +202,201 @@ function whereFromConditions(conditions) {
   return parts.length > 0 ? and(...parts) : undefined;
 }
 
+function isPendingFilter(filters) {
+  const value = filters?.pending;
+  if (value === undefined || value === null || value === "") return false;
+  return ["true", "1", "yes"].includes(String(value).toLowerCase());
+}
+
+/** Pending queue uses UPPER(status) = 'PENDING' (same as wallet pending counts). */
+function appendTransactionStatusFilter(conditions, statusColumn, filters) {
+  if (isPendingFilter(filters)) {
+    conditions.push(sql`UPPER(${statusColumn}) = 'PENDING'`);
+    return;
+  }
+  if (filters?.status) {
+    conditions.push(sql`UPPER(${statusColumn}) = ${String(filters.status).toUpperCase()}`);
+  }
+}
+
+function searchLike(term) {
+  return `%${String(term ?? "").trim()}%`;
+}
+
+function appendNgnDepositSearch(conditions, term) {
+  if (!term) return;
+  const pattern = searchLike(term);
+  conditions.push(
+    sql`(
+      ${ngnDeposits.wallet_key} LIKE ${pattern}
+      OR ${ngnDeposits.deposit_reference} LIKE ${pattern}
+      OR ${ngnDeposits.recipient_account_number} LIKE ${pattern}
+      OR ${ngnDeposits.sender_account_number} LIKE ${pattern}
+      OR ${ngnDeposits.sender_account_name} LIKE ${pattern}
+      OR ${ngnDeposits.sender_bank_name} LIKE ${pattern}
+      OR ${ngnDeposits.sender_bank_code} LIKE ${pattern}
+      OR ${ngnDeposits.amount} LIKE ${pattern}
+      OR ${ngnDeposits.session_id} LIKE ${pattern}
+      OR ${ngnDeposits.ip_address} LIKE ${pattern}
+      OR CAST(${ngnDeposits.id} AS CHAR) LIKE ${pattern}
+    )`,
+  );
+}
+
+function appendNgnPayoutSearch(conditions, term) {
+  if (!term) return;
+  const pattern = searchLike(term);
+  conditions.push(
+    sql`(
+      ${ngnPayouts.source_wallet_key} LIKE ${pattern}
+      OR ${ngnPayouts.live_reference} LIKE ${pattern}
+      OR ${ngnPayouts.recipient_account_number} LIKE ${pattern}
+      OR ${ngnPayouts.recipient_account_name} LIKE ${pattern}
+      OR ${ngnPayouts.recipient_institution_name} LIKE ${pattern}
+      OR ${ngnPayouts.source_account_number} LIKE ${pattern}
+      OR ${ngnPayouts.source_account_name} LIKE ${pattern}
+      OR ${ngnPayouts.narration} LIKE ${pattern}
+      OR ${ngnPayouts.amount} LIKE ${pattern}
+      OR ${ngnPayouts.session_id} LIKE ${pattern}
+      OR CAST(${ngnPayouts.id} AS CHAR) LIKE ${pattern}
+    )`,
+  );
+}
+
+function appendLedgerReferenceSearch(conditions, table, term, extraColumns = []) {
+  if (!term) return;
+  const pattern = searchLike(term);
+  const parts = [
+    sql`${table.source_wallet_key} LIKE ${pattern}`,
+    sql`${table.source_reference} LIKE ${pattern}`,
+  ];
+  if (table.target_reference) {
+    parts.push(sql`${table.target_reference} LIKE ${pattern}`);
+  }
+  if (table.target_wallet_key) {
+    parts.push(sql`${table.target_wallet_key} LIKE ${pattern}`);
+  }
+  if (table.amount) {
+    parts.push(sql`${table.amount} LIKE ${pattern}`);
+  }
+  if (table.session_id) {
+    parts.push(sql`${table.session_id} LIKE ${pattern}`);
+  }
+  for (const col of extraColumns) {
+    parts.push(sql`${col} LIKE ${pattern}`);
+  }
+  conditions.push(sql`(${sql.join(parts, sql` OR `)})`);
+}
+
+const TX_REVIEW_TYPES = new Set([
+  "deposits",
+  "withdrawals",
+  "transfers",
+  "ngn-deposits",
+  "ngn-payouts",
+  "crypto-deposits",
+  "crypto-payouts",
+]);
+
+const TX_REVIEW_CONFIG = {
+  deposits: {
+    table: deposits,
+    refColumn: deposits.source_reference,
+    statusColumn: deposits.status,
+    statusField: "status",
+    refField: "source_reference",
+    approvedStatus: "SUCCESSFUL",
+    cancelledStatus: "FAILED",
+    modifiedField: "date_modified",
+    transactionType: "deposit",
+  },
+  withdrawals: {
+    table: withdrawals,
+    refColumn: withdrawals.source_reference,
+    statusColumn: withdrawals.status,
+    statusField: "status",
+    refField: "source_reference",
+    approvedStatus: "SUCCESSFUL",
+    cancelledStatus: "FAILED",
+    modifiedField: "date_modified",
+    transactionType: "withdrawal",
+  },
+  transfers: {
+    table: transfers,
+    refColumn: transfers.source_reference,
+    statusColumn: transfers.status,
+    statusField: "status",
+    refField: "source_reference",
+    approvedStatus: "SUCCESSFUL",
+    cancelledStatus: "FAILED",
+    modifiedField: "date_modified",
+    transactionType: "transfer",
+  },
+  "ngn-deposits": {
+    table: ngnDeposits,
+    refColumn: ngnDeposits.deposit_reference,
+    statusColumn: ngnDeposits.credit_status,
+    statusField: "credit_status",
+    refField: "deposit_reference",
+    approvedStatus: "SUCCESSFUL",
+    cancelledStatus: "FAILED",
+    modifiedField: "date_modified",
+    transactionType: "ngn_deposit",
+  },
+  "ngn-payouts": {
+    table: ngnPayouts,
+    refColumn: ngnPayouts.live_reference,
+    statusColumn: ngnPayouts.payout_status,
+    statusField: "payout_status",
+    refField: "live_reference",
+    approvedStatus: "successful",
+    cancelledStatus: "failed",
+    modifiedField: "date_modified",
+    transactionType: "ngn_payout",
+  },
+  "crypto-deposits": {
+    table: cryptoDeposits,
+    refColumn: cryptoDeposits.deposit_reference,
+    statusColumn: cryptoDeposits.credit_status,
+    statusField: "credit_status",
+    refField: "deposit_reference",
+    approvedStatus: "SUCCESSFUL",
+    cancelledStatus: "FAILED",
+    modifiedField: "date_modified",
+    transactionType: "crypto_deposit",
+  },
+  "crypto-payouts": {
+    table: cryptoPayouts,
+    refColumn: cryptoPayouts.live_reference,
+    statusColumn: cryptoPayouts.payout_status,
+    statusField: "payout_status",
+    refField: "live_reference",
+    approvedStatus: "successful",
+    cancelledStatus: "failed",
+    modifiedField: "date_modified",
+    transactionType: "crypto_payout",
+  },
+};
+
+function normalizePendingReviewRow(transactionType, reference, row, statusValue) {
+  return {
+    transaction_type: transactionType,
+    reference,
+    wallet_key:
+      row.wallet_key ||
+      row.source_wallet_key ||
+      row.target_wallet_key ||
+      null,
+    amount: row.amount ?? row.source_amount ?? null,
+    status: statusValue,
+    date_created: row.date_created,
+    review_state: "pending",
+    can_approve: true,
+    can_cancel: true,
+    record: row,
+  };
+}
+
 function rowTouchesWalletKeys(row, keys) {
   if (!keys || keys.size === 0) return false;
   const ks = [row.wallet_key, row.counterpart_wallet_key, row.swap_wallet_key_3, row.swap_wallet_key_4];
@@ -330,13 +525,14 @@ export default class TransactionService {
       scope.walletKeys,
     );
     if (touch) conditions.push(touch);
-    if (filters.status) conditions.push(eq(deposits.status, filters.status));
+    appendTransactionStatusFilter(conditions, deposits.status, filters);
     if (filters.currency_code) conditions.push(eq(deposits.currency_code, filters.currency_code));
     if (filters.search) {
-      const pattern = `%${filters.search}%`;
-      conditions.push(
-        sql`(${deposits.source_wallet_key} LIKE ${pattern} OR ${deposits.source_reference} LIKE ${pattern} OR ${deposits.target_reference} LIKE ${pattern})`,
-      );
+      appendLedgerReferenceSearch(conditions, deposits, filters.search, [
+        deposits.target_identifier,
+        deposits.user_key,
+        deposits.account_key,
+      ]);
     }
     appendDateRange(conditions, deposits, filters);
 
@@ -355,13 +551,14 @@ export default class TransactionService {
       scope.walletKeys,
     );
     if (touch) conditions.push(touch);
-    if (filters.status) conditions.push(eq(withdrawals.status, filters.status));
+    appendTransactionStatusFilter(conditions, withdrawals.status, filters);
     if (filters.currency_code) conditions.push(eq(withdrawals.currency_code, filters.currency_code));
     if (filters.search) {
-      const pattern = `%${filters.search}%`;
-      conditions.push(
-        sql`(${withdrawals.source_wallet_key} LIKE ${pattern} OR ${withdrawals.source_reference} LIKE ${pattern} OR ${withdrawals.target_reference} LIKE ${pattern})`,
-      );
+      appendLedgerReferenceSearch(conditions, withdrawals, filters.search, [
+        withdrawals.user_key,
+        withdrawals.account_key,
+        withdrawals.source_identifier,
+      ]);
     }
     appendDateRange(conditions, withdrawals, filters);
 
@@ -380,13 +577,15 @@ export default class TransactionService {
       scope.walletKeys,
     );
     if (touch) conditions.push(touch);
-    if (filters.status) conditions.push(eq(transfers.status, filters.status));
+    appendTransactionStatusFilter(conditions, transfers.status, filters);
     if (filters.currency_code) conditions.push(eq(transfers.currency_code, filters.currency_code));
     if (filters.search) {
-      const pattern = `%${filters.search}%`;
-      conditions.push(
-        sql`(${transfers.source_wallet_key} LIKE ${pattern} OR ${transfers.source_reference} LIKE ${pattern} OR ${transfers.target_reference} LIKE ${pattern})`,
-      );
+      appendLedgerReferenceSearch(conditions, transfers, filters.search, [
+        transfers.user_key,
+        transfers.account_key,
+        transfers.source_identifier,
+        transfers.target_identifier,
+      ]);
     }
     appendDateRange(conditions, transfers, filters);
 
@@ -411,16 +610,18 @@ export default class TransactionService {
       scope.walletKeys,
     );
     if (touch) conditions.push(touch);
-    if (filters.status) conditions.push(eq(swaps.status, filters.status));
+    appendTransactionStatusFilter(conditions, swaps.status, filters);
     if (filters.currency_code) conditions.push(eq(swaps.source_currency_code, filters.currency_code));
     if (filters.search) {
-      const pattern = `%${filters.search}%`;
+      const pattern = searchLike(filters.search);
       conditions.push(
         sql`(
           ${swaps.source_from_wallet_key} LIKE ${pattern}
           OR ${swaps.source_to_wallet_key} LIKE ${pattern}
           OR ${swaps.source_from_reference} LIKE ${pattern}
           OR ${swaps.source_to_reference} LIKE ${pattern}
+          OR ${swaps.source_amount} LIKE ${pattern}
+          OR ${swaps.session_id} LIKE ${pattern}
         )`,
       );
     }
@@ -442,16 +643,8 @@ export default class TransactionService {
     appendWalletKeyFilter(conditions, ngnDeposits.wallet_key, null, filters);
     const touch = walletKeysTouchCondition([ngnDeposits.wallet_key], scope.walletKeys);
     if (touch) conditions.push(touch);
-    if (filters.status) conditions.push(eq(ngnDeposits.credit_status, filters.status));
-    if (filters.search) {
-      conditions.push(
-        sql`(
-          ${ngnDeposits.wallet_key} LIKE ${`%${filters.search}%`}
-          OR ${ngnDeposits.deposit_reference} LIKE ${`%${filters.search}%`}
-          OR ${ngnDeposits.recipient_account_number} LIKE ${`%${filters.search}%`}
-        )`,
-      );
-    }
+    appendTransactionStatusFilter(conditions, ngnDeposits.credit_status, filters);
+    if (filters.search) appendNgnDepositSearch(conditions, filters.search);
     appendDateRange(conditions, ngnDeposits, filters);
 
     return paginatedOrEmpty(ngnDeposits, { where: whereFromConditions(conditions), limit, offset });
@@ -469,16 +662,8 @@ export default class TransactionService {
     if (filters.account_key) conditions.push(eq(ngnPayouts.account_key, filters.account_key));
     if (filters.wallet_key) conditions.push(eq(ngnPayouts.source_wallet_key, filters.wallet_key));
     appendPayoutCustomerScope(conditions, ngnPayouts.source_wallet_key, ngnPayouts.source_identifier, scope);
-    if (filters.status) conditions.push(eq(ngnPayouts.payout_status, filters.status));
-    if (filters.search) {
-      conditions.push(
-        sql`(
-          ${ngnPayouts.source_wallet_key} LIKE ${`%${filters.search}%`}
-          OR ${ngnPayouts.live_reference} LIKE ${`%${filters.search}%`}
-          OR ${ngnPayouts.recipient_account_number} LIKE ${`%${filters.search}%`}
-        )`,
-      );
-    }
+    appendTransactionStatusFilter(conditions, ngnPayouts.payout_status, filters);
+    if (filters.search) appendNgnPayoutSearch(conditions, filters.search);
     appendDateRange(conditions, ngnPayouts, filters);
 
     return paginatedOrEmpty(ngnPayouts, { where: whereFromConditions(conditions), limit, offset });
@@ -492,13 +677,18 @@ export default class TransactionService {
     appendWalletKeyFilter(conditions, cryptoDeposits.wallet_key, null, filters);
     const touch = walletKeysTouchCondition([cryptoDeposits.wallet_key], scope.walletKeys);
     if (touch) conditions.push(touch);
-    if (filters.status) conditions.push(eq(cryptoDeposits.credit_status, filters.status));
+    appendTransactionStatusFilter(conditions, cryptoDeposits.credit_status, filters);
     if (filters.search) {
+      const pattern = searchLike(filters.search);
       conditions.push(
         sql`(
-          ${cryptoDeposits.wallet_key} LIKE ${`%${filters.search}%`}
-          OR ${cryptoDeposits.deposit_reference} LIKE ${`%${filters.search}%`}
-          OR ${cryptoDeposits.hash} LIKE ${`%${filters.search}%`}
+          ${cryptoDeposits.wallet_key} LIKE ${pattern}
+          OR ${cryptoDeposits.deposit_reference} LIKE ${pattern}
+          OR ${cryptoDeposits.hash} LIKE ${pattern}
+          OR ${cryptoDeposits.sender_address} LIKE ${pattern}
+          OR ${cryptoDeposits.recipient_address} LIKE ${pattern}
+          OR ${cryptoDeposits.amount} LIKE ${pattern}
+          OR ${cryptoDeposits.session_id} LIKE ${pattern}
         )`,
       );
     }
@@ -515,14 +705,19 @@ export default class TransactionService {
     if (filters.account_key) conditions.push(eq(cryptoPayouts.account_key, filters.account_key));
     if (filters.wallet_key) conditions.push(eq(cryptoPayouts.source_wallet_key, filters.wallet_key));
     appendPayoutCustomerScope(conditions, cryptoPayouts.source_wallet_key, cryptoPayouts.source_identifier, scope);
-    if (filters.status) conditions.push(eq(cryptoPayouts.payout_status, filters.status));
+    appendTransactionStatusFilter(conditions, cryptoPayouts.payout_status, filters);
     if (filters.currency_code) conditions.push(eq(cryptoPayouts.asset, filters.currency_code));
     if (filters.search) {
+      const pattern = searchLike(filters.search);
       conditions.push(
         sql`(
-          ${cryptoPayouts.source_wallet_key} LIKE ${`%${filters.search}%`}
-          OR ${cryptoPayouts.live_reference} LIKE ${`%${filters.search}%`}
-          OR ${cryptoPayouts.hash} LIKE ${`%${filters.search}%`}
+          ${cryptoPayouts.source_wallet_key} LIKE ${pattern}
+          OR ${cryptoPayouts.live_reference} LIKE ${pattern}
+          OR ${cryptoPayouts.hash} LIKE ${pattern}
+          OR ${cryptoPayouts.source_address} LIKE ${pattern}
+          OR ${cryptoPayouts.recipient_address} LIKE ${pattern}
+          OR ${cryptoPayouts.amount} LIKE ${pattern}
+          OR ${cryptoPayouts.session_id} LIKE ${pattern}
         )`,
       );
     }
@@ -1148,6 +1343,252 @@ export default class TransactionService {
     return {
       count: out.length,
       rows: out.slice(offset, offset + limit),
+    };
+  }
+
+  async getPendingReviewSummary(filters = {}) {
+    const scope = await resolveCustomerWalletScope(filters);
+    if (scope.empty) {
+      return {
+        total_pending: 0,
+        by_type: {},
+      };
+    }
+
+    const pendingFilters = { ...filters, pending: true };
+    const types = filters.transaction_type
+      ? [String(filters.transaction_type).trim()]
+      : [...TX_REVIEW_TYPES];
+
+    const counts = await Promise.all(
+      types.map(async (typeKey) => {
+        if (!TX_REVIEW_TYPES.has(typeKey)) return [typeKey, 0];
+        const total = await this.countPendingByType(typeKey, pendingFilters, scope);
+        return [typeKey, total];
+      }),
+    );
+
+    const byType = Object.fromEntries(counts);
+    const total = Object.values(byType).reduce((sum, n) => sum + Number(n || 0), 0);
+    return { total_pending: total, by_type: byType };
+  }
+
+  async getPendingReview({ limit, offset, filters }) {
+    const scope = await resolveCustomerWalletScope(filters);
+    if (scope.empty) return emptyTxPage();
+
+    const types = filters.transaction_type
+      ? [String(filters.transaction_type).trim()]
+      : [...TX_REVIEW_TYPES];
+
+    const perSource = Math.min(2000, Math.max(limit + offset + 100, 200));
+    const pendingFilters = { ...filters, pending: true };
+    const batches = await Promise.all(
+      types
+        .filter((typeKey) => TX_REVIEW_TYPES.has(typeKey))
+        .map((typeKey) => this.fetchPendingByType(typeKey, pendingFilters, scope, perSource)),
+    );
+
+    const merged = batches.flat().sort((a, b) => new Date(b.date_created) - new Date(a.date_created));
+    return {
+      count: merged.length,
+      rows: merged.slice(offset, offset + limit),
+    };
+  }
+
+  buildPendingConditionsForType(typeKey, filters, scope) {
+    const cfg = TX_REVIEW_CONFIG[typeKey];
+    if (!cfg) return null;
+
+    const conditions = [sql`UPPER(${cfg.statusColumn}) = 'PENDING'`];
+
+    if (typeKey === "deposits") {
+      if (filters.account_key) conditions.push(eq(deposits.account_key, filters.account_key));
+      appendWalletKeyFilter(conditions, deposits.source_wallet_key, deposits.target_wallet_key, filters);
+      const touch = walletKeysTouchCondition(
+        [deposits.source_wallet_key, deposits.target_wallet_key],
+        scope.walletKeys,
+      );
+      if (touch) conditions.push(touch);
+      if (filters.search) {
+        appendLedgerReferenceSearch(conditions, deposits, filters.search, [
+          deposits.target_identifier,
+          deposits.user_key,
+        ]);
+      }
+      appendDateRange(conditions, deposits, filters);
+    } else if (typeKey === "withdrawals") {
+      if (filters.account_key) conditions.push(eq(withdrawals.account_key, filters.account_key));
+      appendWalletKeyFilter(conditions, withdrawals.source_wallet_key, withdrawals.target_wallet_key, filters);
+      const touch = walletKeysTouchCondition(
+        [withdrawals.source_wallet_key, withdrawals.target_wallet_key],
+        scope.walletKeys,
+      );
+      if (touch) conditions.push(touch);
+      if (filters.search) {
+        appendLedgerReferenceSearch(conditions, withdrawals, filters.search, [withdrawals.source_identifier]);
+      }
+      appendDateRange(conditions, withdrawals, filters);
+    } else if (typeKey === "transfers") {
+      if (filters.account_key) conditions.push(eq(transfers.account_key, filters.account_key));
+      appendWalletKeyFilter(conditions, transfers.source_wallet_key, transfers.target_wallet_key, filters);
+      const touch = walletKeysTouchCondition(
+        [transfers.source_wallet_key, transfers.target_wallet_key],
+        scope.walletKeys,
+      );
+      if (touch) conditions.push(touch);
+      if (filters.search) {
+        appendLedgerReferenceSearch(conditions, transfers, filters.search, [
+          transfers.source_identifier,
+          transfers.target_identifier,
+        ]);
+      }
+      appendDateRange(conditions, transfers, filters);
+    } else if (typeKey === "ngn-deposits") {
+      appendWalletKeyFilter(conditions, ngnDeposits.wallet_key, null, filters);
+      const touch = walletKeysTouchCondition([ngnDeposits.wallet_key], scope.walletKeys);
+      if (touch) conditions.push(touch);
+      if (filters.search) appendNgnDepositSearch(conditions, filters.search);
+      appendDateRange(conditions, ngnDeposits, filters);
+    } else if (typeKey === "ngn-payouts") {
+      if (filters.account_key) conditions.push(eq(ngnPayouts.account_key, filters.account_key));
+      if (filters.wallet_key) conditions.push(eq(ngnPayouts.source_wallet_key, filters.wallet_key));
+      appendPayoutCustomerScope(conditions, ngnPayouts.source_wallet_key, ngnPayouts.source_identifier, scope);
+      if (filters.search) appendNgnPayoutSearch(conditions, filters.search);
+      appendDateRange(conditions, ngnPayouts, filters);
+    } else if (typeKey === "crypto-deposits") {
+      appendWalletKeyFilter(conditions, cryptoDeposits.wallet_key, null, filters);
+      const touch = walletKeysTouchCondition([cryptoDeposits.wallet_key], scope.walletKeys);
+      if (touch) conditions.push(touch);
+      if (filters.search) {
+        const pattern = searchLike(filters.search);
+        conditions.push(
+          sql`(
+            ${cryptoDeposits.wallet_key} LIKE ${pattern}
+            OR ${cryptoDeposits.deposit_reference} LIKE ${pattern}
+            OR ${cryptoDeposits.hash} LIKE ${pattern}
+          )`,
+        );
+      }
+      appendDateRange(conditions, cryptoDeposits, filters);
+    } else if (typeKey === "crypto-payouts") {
+      if (filters.account_key) conditions.push(eq(cryptoPayouts.account_key, filters.account_key));
+      if (filters.wallet_key) conditions.push(eq(cryptoPayouts.source_wallet_key, filters.wallet_key));
+      appendPayoutCustomerScope(conditions, cryptoPayouts.source_wallet_key, cryptoPayouts.source_identifier, scope);
+      if (filters.search) {
+        const pattern = searchLike(filters.search);
+        conditions.push(
+          sql`(
+            ${cryptoPayouts.source_wallet_key} LIKE ${pattern}
+            OR ${cryptoPayouts.live_reference} LIKE ${pattern}
+            OR ${cryptoPayouts.hash} LIKE ${pattern}
+          )`,
+        );
+      }
+      appendDateRange(conditions, cryptoPayouts, filters);
+    }
+
+    return { cfg, where: whereFromConditions(conditions) };
+  }
+
+  async countPendingByType(typeKey, filters, scope) {
+    const built = this.buildPendingConditionsForType(typeKey, filters, scope);
+    if (!built) return 0;
+    try {
+      const [{ total }] = await db
+        .select({ total: count() })
+        .from(built.cfg.table)
+        .where(built.where);
+      return Number(total || 0);
+    } catch (error) {
+      if (isMissingMysqlTableError(error)) return 0;
+      throw error;
+    }
+  }
+
+  async fetchPendingByType(typeKey, filters, scope, limit) {
+    const built = this.buildPendingConditionsForType(typeKey, filters, scope);
+    if (!built) return [];
+    const { cfg, where } = built;
+
+    try {
+      const rows = await db
+        .select()
+        .from(cfg.table)
+        .where(where)
+        .orderBy(desc(cfg.table.date_created))
+        .limit(limit);
+      return rows.map((row) =>
+        normalizePendingReviewRow(
+          cfg.transactionType,
+          row[cfg.refField],
+          row,
+          row[cfg.statusField],
+        ),
+      );
+    } catch (error) {
+      if (isMissingMysqlTableError(error)) return [];
+      throw error;
+    }
+  }
+
+  async approveTransaction(transactionType, reference) {
+    return this.reviewTransaction(transactionType, reference, "approve");
+  }
+
+  async cancelTransaction(transactionType, reference) {
+    return this.reviewTransaction(transactionType, reference, "cancel");
+  }
+
+  async reviewTransaction(transactionType, reference, action) {
+    const typeKey = String(transactionType ?? "").trim();
+    if (!TX_REVIEW_TYPES.has(typeKey)) {
+      throw new ErrorClass(
+        `Unsupported transaction type. Allowed: ${[...TX_REVIEW_TYPES].join(", ")}`,
+        400,
+      );
+    }
+    if (action !== "approve" && action !== "cancel") {
+      throw new ErrorClass("Invalid review action", 400);
+    }
+
+    const cfg = TX_REVIEW_CONFIG[typeKey];
+    const ref = String(reference ?? "").trim();
+    if (!ref) {
+      throw new ErrorClass("Transaction reference is required", 400);
+    }
+
+    const [row] = await db.select().from(cfg.table).where(eq(cfg.refColumn, ref)).limit(1);
+    if (!row) {
+      throw new ErrorClass("Transaction not found", 404);
+    }
+
+    const currentStatus = String(row[cfg.statusField] ?? "").trim();
+    if (currentStatus.toUpperCase() !== "PENDING") {
+      throw new ErrorClass(
+        `Only pending transactions can be ${action === "approve" ? "approved" : "cancelled"} (current status: ${currentStatus || "unknown"})`,
+        409,
+      );
+    }
+
+    const nextStatus = action === "approve" ? cfg.approvedStatus : cfg.cancelledStatus;
+    const now = new Date();
+    await db
+      .update(cfg.table)
+      .set({
+        [cfg.statusField]: nextStatus,
+        [cfg.modifiedField]: now,
+      })
+      .where(eq(cfg.refColumn, ref));
+
+    const [updated] = await db.select().from(cfg.table).where(eq(cfg.refColumn, ref)).limit(1);
+    return {
+      transaction_type: cfg.transactionType,
+      reference: ref,
+      action,
+      previous_status: currentStatus,
+      status: updated?.[cfg.statusField] ?? nextStatus,
+      record: updated,
     };
   }
 }
