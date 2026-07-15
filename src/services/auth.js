@@ -1,6 +1,6 @@
 import bcrypt from "bcrypt";
 import crypto from "crypto";
-import { eq } from "drizzle-orm";
+import { eq, or } from "drizzle-orm";
 import { authDb } from "../db/index.js";
 import { users } from "../db/schema/users.js";
 import { ErrorClass } from "../utils/errorClass/index.js";
@@ -8,6 +8,10 @@ import { generateToken } from "../utils/jwt/index.js";
 import { clearUserCache } from "../utils/userCache.js";
 import { loadUserAccess } from "./rbac.js";
 import { pickPrimaryRoleSlug } from "../config/roles.js";
+import {
+  validateCrosslinkToken,
+  extractCrosslinkIdentifiers,
+} from "./redbillerCrosslink.js";
 
 const SALT_ROUNDS = 6;
 
@@ -128,6 +132,94 @@ export default class AuthService {
     return {
       user: this._userWithAccess({ ...user, token_version: newTokenVersion }, access),
       token,
+    };
+  }
+
+  async _findUserByCrosslinkIdentifiers({ billerId, email }) {
+    const matchConditions = [];
+    if (billerId) matchConditions.push(eq(users.biller_id, billerId));
+    if (email) matchConditions.push(eq(users.email, email));
+
+    if (matchConditions.length === 0) {
+      return null;
+    }
+
+    const whereClause =
+      matchConditions.length === 1 ? matchConditions[0] : or(...matchConditions);
+
+    const [user] = await authDb
+      .select()
+      .from(users)
+      .where(whereClause)
+      .limit(1);
+
+    return user ?? null;
+  }
+
+  /**
+   * Login via Redbiller crosslink token (SSO).
+   * User must already exist in the auth DB (matched by biller_id or email).
+   */
+  async loginCrosslink({ token }) {
+    const result = await validateCrosslinkToken(token);
+    const data = result.data;
+
+    if (!data) {
+      throw new ErrorClass("Service temporarily down", 500);
+    }
+
+    const responseCode = data.code ?? data.data?.code;
+    if (responseCode === 7010) {
+      throw new ErrorClass("Crosslink has been used", 401);
+    }
+
+    if (result.success === false) {
+      throw new ErrorClass(
+        result.message || "Crosslink validation failed",
+        result.status >= 400 && result.status < 600 ? result.status : 502,
+      );
+    }
+
+    const { billerId, email, sessionID, userKey } =
+      extractCrosslinkIdentifiers(data);
+
+    if (!billerId && !email) {
+      throw new ErrorClass("missing identifier", 422);
+    }
+
+    const user = await this._findUserByCrosslinkIdentifiers({ billerId, email });
+
+    if (!user) {
+      throw new ErrorClass("User not provisioned. Contact admin", 404);
+    }
+
+    const newTokenVersion = (user.token_version || 0) + 1;
+
+    await authDb
+      .update(users)
+      .set({
+        last_login: new Date(),
+        date_modified: new Date(),
+        token_version: newTokenVersion,
+      })
+      .where(eq(users.id, user.id));
+
+    clearUserCache(user.user_key);
+
+    const access = await loadUserAccess(user.id);
+    const jwt = generateToken({
+      id: user.id,
+      user_key: user.user_key,
+      token_version: newTokenVersion,
+      roles: access.roleSlugs,
+    });
+
+    return {
+      user: this._userWithAccess({ ...user, token_version: newTokenVersion }, access),
+      token: jwt,
+      authToken: jwt,
+      sessionID,
+      userKey,
     };
   }
 

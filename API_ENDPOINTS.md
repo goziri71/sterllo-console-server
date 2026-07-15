@@ -27,7 +27,8 @@ Roles: `finance`, `operations`, `ops_support`, `compliance`, `growth`
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
 | POST | `/1.202602.0/auth/register` | None | Register a new user |
-| POST | `/1.202602.0/auth/login` | None | Login and get JWT token |
+| POST | `/1.202602.0/auth/login` | None | Login with email/password and get JWT token |
+| POST | `/1.202602.0/auth/login/crosslink` | None | Login via Redbiller crosslink token (SSO) |
 | POST | `/1.202602.0/auth/logout` | JWT | Logout (invalidates current token) |
 | GET | `/1.202602.0/auth/profile` | JWT | Get current user profile |
 | PATCH | `/1.202602.0/auth/change-password` | JWT | Change password |
@@ -52,6 +53,55 @@ Roles: `finance`, `operations`, `ops_support`, `compliance`, `growth`
   "password": "password123"
 }
 ```
+
+### POST `/1.202602.0/auth/login/crosslink`
+
+Redbiller SSO: validate a one-time crosslink token, match a pre-provisioned user in the auth DB (`biller_id` or `email`), return console JWT plus Redbiller session fields.
+
+**Request**
+
+```json
+{
+  "token": "<crosslink-token-from-redbiller>"
+}
+```
+
+**Success (200)**
+
+```json
+{
+  "code": 200,
+  "success": true,
+  "message": "Login successful",
+  "data": {
+    "token": "<console-jwt>",
+    "authToken": "<console-jwt>",
+    "sessionID": "<from-redbiller>",
+    "userKey": "<from-redbiller>",
+    "user": {
+      "id": 1,
+      "email": "user@example.com",
+      "biller_id": "RB123",
+      "roles": ["operations"],
+      "permissions": ["console.read"]
+    }
+  }
+}
+```
+
+**Errors**
+
+| Status | When |
+|--------|------|
+| 400 | Missing `token` |
+| 401 | Crosslink already used (`code` 7010 from Redbiller) |
+| 404 | User not provisioned in auth DB |
+| 422 | Redbiller response missing biller/email identifier |
+| 500/502 | Redbiller unreachable or invalid response |
+
+**Provisioning:** Users must exist in the auth `Users` table before crosslink login works. Set `email` and optionally `biller_id` to match Redbiller profile. Run `npm run migrate:biller-id` once on the auth DB to add the `biller_id` column.
+
+**Frontend:** Store `token` for `Authorization: Bearer …` on console APIs. Store `sessionID` and `userKey` for Redbiller proxy calls (e.g. KYC enable) that require those headers.
 
 ### PATCH `/1.202602.0/auth/change-password`
 

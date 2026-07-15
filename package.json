@@ -16,6 +16,7 @@
     "db:introspect": "npx drizzle-kit introspect",
     "db:check": "npx drizzle-kit check",
     "migrate:auth-rbac": "node scripts/run-auth-rbac-migration.js",
+    "migrate:biller-id": "node scripts/run-biller-id-migration.js",
     "inspect:user-rbac": "node scripts/inspect-user-rbac.js",
     "set:user-management-only": "node scripts/set-user-management-only.js",
     "decrypt:env": "node scripts/decrypt-env-value.js",
