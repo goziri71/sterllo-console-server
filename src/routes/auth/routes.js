@@ -1,4 +1,4 @@
-import { register, login, logout, changePassword, getProfile } from "../../controllers/auth.js";
+import { register, login, loginCrosslink, logout, changePassword, getProfile } from "../../controllers/auth.js";
 import { authenticate } from "../../middleware/auth.js";
 
 export default async function authRoutes(fastify) {
@@ -20,6 +20,15 @@ export default async function authRoutes(fastify) {
       },
     },
     login,
+  );
+  fastify.post(
+    "/login/crosslink",
+    {
+      config: {
+        rateLimit: { max: 30, timeWindow: "15 minutes" },
+      },
+    },
+    loginCrosslink,
   );
 
   // Protected routes (require valid JWT)

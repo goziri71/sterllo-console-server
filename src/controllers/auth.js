@@ -63,6 +63,27 @@ export const login = async (request, reply) => {
   });
 };
 
+export const loginCrosslink = async (request, reply) => {
+  const authService = new AuthService();
+  if (!request.body || Object.keys(request.body).length === 0) {
+    throw new ErrorClass("Request body is required", 400);
+  }
+
+  const { token } = request.body;
+  if (!token || typeof token !== "string" || !token.trim()) {
+    throw new ErrorClass("Missing required fields: token", 400);
+  }
+
+  const result = await authService.loginCrosslink({ token: token.trim() });
+
+  return reply.code(200).send({
+    code: 200,
+    success: true,
+    message: "Login successful",
+    data: result,
+  });
+};
+
 export const changePassword = async (request, reply) => {
   const authService = new AuthService();
   if (!request.body || Object.keys(request.body).length === 0) {

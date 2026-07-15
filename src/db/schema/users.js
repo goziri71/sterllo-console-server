@@ -8,6 +8,8 @@ export const users = mysqlTable("Users", {
 
   email: varchar("email", { length: 255 }).notNull().unique(),
 
+  biller_id: varchar("biller_id", { length: 255 }).unique(),
+
   password: varchar("password", { length: 255 }).notNull(),
 
   first_name: varchar("first_name", { length: 150 }),
