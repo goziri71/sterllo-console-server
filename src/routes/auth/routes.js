@@ -1,4 +1,17 @@
-import { register, login, loginCrosslink, logout, changePassword, getProfile } from "../../controllers/auth.js";
+import {
+  register,
+  login,
+  loginCrosslink,
+  confirmMfaEnrollment,
+  completeMfaLogin,
+  logout,
+  logoutAll,
+  listSessions,
+  regenerateRecoveryCodes,
+  verifyMfaStepUp,
+  changePassword,
+  getProfile,
+} from "../../controllers/auth.js";
 import { authenticate } from "../../middleware/auth.js";
 
 export default async function authRoutes(fastify) {
@@ -30,6 +43,24 @@ export default async function authRoutes(fastify) {
     },
     loginCrosslink,
   );
+  fastify.post(
+    "/mfa/enroll/confirm",
+    {
+      config: {
+        rateLimit: { max: 10, timeWindow: "15 minutes" },
+      },
+    },
+    confirmMfaEnrollment,
+  );
+  fastify.post(
+    "/mfa/challenge/verify",
+    {
+      config: {
+        rateLimit: { max: 10, timeWindow: "15 minutes" },
+      },
+    },
+    completeMfaLogin,
+  );
 
   // Protected routes (require valid JWT)
   fastify.post(
@@ -43,6 +74,37 @@ export default async function authRoutes(fastify) {
     logout,
   );
   fastify.get("/profile", { preHandler: authenticate }, getProfile);
+  fastify.get("/sessions", { preHandler: authenticate }, listSessions);
+  fastify.post(
+    "/logout-all",
+    {
+      preHandler: authenticate,
+      config: {
+        rateLimit: { max: 20, timeWindow: "15 minutes" },
+      },
+    },
+    logoutAll,
+  );
+  fastify.post(
+    "/mfa/recovery-codes/regenerate",
+    {
+      preHandler: authenticate,
+      config: {
+        rateLimit: { max: 5, timeWindow: "15 minutes" },
+      },
+    },
+    regenerateRecoveryCodes,
+  );
+  fastify.post(
+    "/mfa/step-up",
+    {
+      preHandler: authenticate,
+      config: {
+        rateLimit: { max: 10, timeWindow: "15 minutes" },
+      },
+    },
+    verifyMfaStepUp,
+  );
   fastify.patch(
     "/change-password",
     {

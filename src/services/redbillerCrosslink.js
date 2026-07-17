@@ -72,7 +72,12 @@ export function extractCrosslinkIdentifiers(data) {
 
   const billerId =
     profile.redbiller_id || root.redbiller_id || root.billerId || null;
-  const email = profile.redbiller_id || root.email || null;
+  const email =
+    profile.email ||
+    profile.email_address ||
+    root.email ||
+    root.email_address ||
+    null;
 
   return {
     billerId: billerId ? String(billerId).trim() : null,

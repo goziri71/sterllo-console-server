@@ -22,6 +22,11 @@
 - `PORT` (as required by host)
 - `JWT_SECRET`
 - `JWT_EXPIRES_IN`
+- `JWT_ISSUER`
+- `JWT_AUDIENCE`
+- `MFA_ENCRYPTION_KEY` (independent 32-byte base64 or 64-character hex key)
+- `MFA_ISSUER`
+- `AUTH_SESSION_TTL_HOURS`
 - Encrypted DB values and keychain values:
   - `INF_STERLLO_CONSOLE_DATABASE_HOST_KEYCHAIN`
   - `INF_STERLLO_CONSOLE_DATABASE_USERNAME_KEYCHAIN`
@@ -42,8 +47,9 @@
 2. Open PR to `main`
 3. Wait for CI checks to pass
 4. Merge PR to `main`
-5. Push `main` to production remote (or let deployment trigger from `main`)
-6. Verify health endpoint and logs
+5. Run `npm run migrate:mfa-security` against the auth database before enabling the new login flow
+6. Push `main` to production remote (or let deployment trigger from `main`)
+7. Verify health endpoint, forced enrollment, MFA login, and old-session revocation
 
 ## 5) Rollback flow
 

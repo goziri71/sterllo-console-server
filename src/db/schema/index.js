@@ -1,4 +1,11 @@
 export { users } from "./users.js";
+export {
+  authMfaFactors,
+  authMfaRecoveryCodes,
+  authLoginChallenges,
+  authSessions,
+  authSecurityEvents,
+} from "./authSecurity.js";
 export { merchants, merchantLedgers, settlementLedgers } from "./merchants.js";
 export { customers, customerWallets } from "./customers.js";
 export { deposits, withdrawals, transfers, swaps } from "./transactions.js";
