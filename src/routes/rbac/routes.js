@@ -7,16 +7,23 @@ import {
   assignUserRole,
   revokeUserRole,
 } from "../../controllers/rbac.js";
-import { authenticate, requireRbacManage } from "../../middleware/auth.js";
+import {
+  authenticate,
+  requireRbacManage,
+  requireRecentMfa,
+} from "../../middleware/auth.js";
 
 export default async function rbacRoutes(fastify) {
-  const guard = { preHandler: [authenticate, requireRbacManage] };
+  const readGuard = { preHandler: [authenticate, requireRbacManage] };
+  const writeGuard = {
+    preHandler: [authenticate, requireRbacManage, requireRecentMfa],
+  };
 
-  fastify.get("/users", guard, listUsers);
-  fastify.get("/permissions", guard, listPermissions);
-  fastify.get("/roles", guard, listRoles);
-  fastify.post("/roles", guard, createRole);
-  fastify.patch("/roles/:roleId/permissions", guard, updateRolePermissions);
-  fastify.post("/users/:userKey/roles", guard, assignUserRole);
-  fastify.delete("/users/:userKey/roles/:roleSlug", guard, revokeUserRole);
+  fastify.get("/users", readGuard, listUsers);
+  fastify.get("/permissions", readGuard, listPermissions);
+  fastify.get("/roles", readGuard, listRoles);
+  fastify.post("/roles", writeGuard, createRole);
+  fastify.patch("/roles/:roleId/permissions", writeGuard, updateRolePermissions);
+  fastify.post("/users/:userKey/roles", writeGuard, assignUserRole);
+  fastify.delete("/users/:userKey/roles/:roleSlug", writeGuard, revokeUserRole);
 }

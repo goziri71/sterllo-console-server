@@ -26,12 +26,18 @@ Roles: `finance`, `operations`, `ops_support`, `compliance`, `growth`
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| POST | `/1.202602.0/auth/register` | None | Register a new user |
-| POST | `/1.202602.0/auth/login` | None | Login with email/password and get JWT token |
-| POST | `/1.202602.0/auth/login/crosslink` | None | Login via Redbiller crosslink token (SSO) |
-| POST | `/1.202602.0/auth/logout` | JWT | Logout (invalidates current token) |
+| POST | `/1.202602.0/auth/register` | None | Register and begin mandatory MFA enrollment |
+| POST | `/1.202602.0/auth/login` | None | Verify email/password and begin MFA |
+| POST | `/1.202602.0/auth/login/crosslink` | None | Validate Crosslink and begin MFA |
+| POST | `/1.202602.0/auth/mfa/enroll/confirm` | Challenge | Confirm TOTP enrollment |
+| POST | `/1.202602.0/auth/mfa/challenge/verify` | Challenge | Complete login with TOTP or recovery code |
+| POST | `/1.202602.0/auth/logout` | JWT | Revoke the current device session |
+| POST | `/1.202602.0/auth/logout-all` | JWT | Revoke every session and token |
+| GET | `/1.202602.0/auth/sessions` | JWT | List device sessions |
+| POST | `/1.202602.0/auth/mfa/step-up` | JWT + TOTP | Refresh recent-MFA status |
+| POST | `/1.202602.0/auth/mfa/recovery-codes/regenerate` | JWT + TOTP | Replace recovery codes |
 | GET | `/1.202602.0/auth/profile` | JWT | Get current user profile |
-| PATCH | `/1.202602.0/auth/change-password` | JWT | Change password |
+| PATCH | `/1.202602.0/auth/change-password` | JWT | Change password and revoke all sessions |
 
 ### POST `/1.202602.0/auth/register`
 
@@ -41,7 +47,7 @@ Roles: `finance`, `operations`, `ops_support`, `compliance`, `growth`
   "password": "password123",
   "first_name": "John",
   "last_name": "Doe",
-  "role": "operations"
+  "device_label": "John's MacBook"
 }
 ```
 
@@ -50,58 +56,109 @@ Roles: `finance`, `operations`, `ops_support`, `compliance`, `growth`
 ```json
 {
   "email": "user@example.com",
-  "password": "password123"
+  "password": "password123",
+  "device_label": "John's MacBook"
 }
 ```
 
-### POST `/1.202602.0/auth/login/crosslink`
+Password, registration, and Crosslink authentication do not return a dashboard
+JWT immediately. They return either:
 
-Redbiller SSO: validate a one-time crosslink token, match a pre-provisioned user in the auth DB (`biller_id` or `email`), return console JWT plus Redbiller session fields.
+- `mfa_enrollment_required`: display `factor.otpauth_uri` as a QR code and
+  `factor.secret` as the manual-entry fallback.
+- `mfa_required`: prompt for a six-digit TOTP or one unused recovery code.
 
-**Request**
+The returned `challenge_token` expires quickly and is not a dashboard session.
 
-```json
-{
-  "token": "<crosslink-token-from-redbiller>"
-}
-```
-
-**Success (200)**
+**First-time enrollment response shape**
 
 ```json
 {
-  "code": 200,
-  "success": true,
-  "message": "Login successful",
   "data": {
-    "token": "<console-jwt>",
-    "authToken": "<console-jwt>",
-    "sessionID": "<from-redbiller>",
-    "userKey": "<from-redbiller>",
-    "user": {
-      "id": 1,
-      "email": "user@example.com",
-      "biller_id": "RB123",
-      "roles": ["operations"],
-      "permissions": ["console.read"]
+    "state": "mfa_enrollment_required",
+    "challenge_token": "<short-lived-random-token>",
+    "expires_in": 300,
+    "factor": {
+      "type": "totp",
+      "issuer": "Sterllo Console",
+      "account_name": "user@example.com",
+      "secret": "<manual-entry-secret>",
+      "otpauth_uri": "otpauth://totp/..."
     }
   }
 }
 ```
 
-**Errors**
+### POST `/1.202602.0/auth/mfa/enroll/confirm`
 
-| Status | When |
-|--------|------|
-| 400 | Missing `token` |
-| 401 | Crosslink already used (`code` 7010 from Redbiller) |
-| 404 | User not provisioned in auth DB |
-| 422 | Redbiller response missing biller/email identifier |
-| 500/502 | Redbiller unreachable or invalid response |
+```json
+{
+  "challenge_token": "<token-from-login>",
+  "code": "123456",
+  "device_label": "John's MacBook"
+}
+```
 
-**Provisioning:** Users must exist in the auth `Users` table before crosslink login works. Set `email` and optionally `biller_id` to match Redbiller profile. Run `npm run migrate:biller-id` once on the auth DB to add the `biller_id` column.
+Success contains the full dashboard `token`, current `session`, user, and
+`recovery_codes`. Display/download recovery codes once; only hashes are stored.
 
-**Frontend:** Store `token` for `Authorization: Bearer …` on console APIs. Store `sessionID` and `userKey` for Redbiller proxy calls (e.g. KYC enable) that require those headers.
+### POST `/1.202602.0/auth/mfa/challenge/verify`
+
+With TOTP:
+
+```json
+{
+  "challenge_token": "<token-from-login>",
+  "code": "123456",
+  "device_label": "John's MacBook"
+}
+```
+
+With a recovery code:
+
+```json
+{
+  "challenge_token": "<token-from-login>",
+  "recovery_code": "ABCD-EF12-3456-7890",
+  "device_label": "John's MacBook"
+}
+```
+
+Success returns `state: "authenticated"` and a JWT. Creating this session
+immediately revokes the user's previous device session.
+
+### POST `/1.202602.0/auth/login/crosslink`
+
+Redbiller SSO validates a one-time token and matches a pre-provisioned user, but
+still requires local MFA. `sessionID` and `userKey` are returned only after MFA.
+
+```json
+{
+  "token": "<crosslink-token-from-redbiller>",
+  "device_label": "John's MacBook"
+}
+```
+
+Users must exist in the auth `Users` table. Set `email` and optionally
+`biller_id` to match the Redbiller profile.
+
+### Device sessions and recovery codes
+
+`GET /auth/sessions` returns the current session ID plus up to 20 recent
+sessions, including the device label, IP, user agent, expiry, and revocation
+reason. Only one session can remain active.
+
+`POST /auth/mfa/recovery-codes/regenerate` accepts:
+
+```json
+{ "code": "123456" }
+```
+
+It invalidates every old recovery code and returns a new one-time list.
+
+Sensitive operations can return `403` with
+`data.code: "recent_mfa_required"` after the recent-MFA window. Call
+`POST /auth/mfa/step-up` with `{ "code": "123456" }`, then retry the operation.
 
 ### PATCH `/1.202602.0/auth/change-password`
 

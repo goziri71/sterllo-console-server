@@ -7,6 +7,8 @@ import { getCachedUser, setCachedUser } from "../utils/userCache.js";
 import { loadUserAccess } from "../services/rbac.js";
 import { PERMISSIONS } from "../config/permissions.js";
 import { pickPrimaryRoleSlug } from "../config/roles.js";
+import { env } from "../config/env.js";
+import MfaSecurityService from "../services/mfaSecurity.js";
 
 export { clearUserCache } from "../utils/userCache.js";
 
@@ -37,6 +39,16 @@ export const authenticate = async (request, reply) => {
       throw new ErrorClass("Invalid token", 401);
     }
     throw error;
+  }
+
+  if (!decoded.sid || !Array.isArray(decoded.amr) || !decoded.amr.includes("mfa")) {
+    throw new ErrorClass("MFA-authenticated session required", 401);
+  }
+
+  const mfaSecurity = new MfaSecurityService();
+  const session = await mfaSecurity.getActiveSession(decoded.sid, decoded.id);
+  if (!session) {
+    throw new ErrorClass("Session has expired or been revoked. Please login again", 401);
   }
 
   let user = getCachedUser(decoded.user_key);
@@ -70,6 +82,27 @@ export const authenticate = async (request, reply) => {
     permissionKeys: access.permissionKeys,
     role: pickPrimaryRoleSlug(access.roleSlugs) ?? user.role ?? null,
   };
+  request.authSession = session;
+
+  if (
+    !session.last_seen_at ||
+    Date.now() - session.last_seen_at.getTime() > 5 * 60 * 1000
+  ) {
+    await mfaSecurity.touchSession(session.id);
+  }
+};
+
+export const requireRecentMfa = async (request) => {
+  if (!request.authSession) {
+    throw new ErrorClass("Access denied. Not authenticated", 401);
+  }
+  const verifiedAt = request.authSession.mfa_verified_at;
+  const maxAgeMs = env.MFA_RECENT_WINDOW_MINUTES * 60 * 1000;
+  if (!verifiedAt || Date.now() - verifiedAt.getTime() > maxAgeMs) {
+    throw new ErrorClass("Recent MFA verification required", 403, {
+      code: "recent_mfa_required",
+    });
+  }
 };
 
 /**

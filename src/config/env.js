@@ -87,4 +87,15 @@ export const env = {
 
   JWT_SECRET: process.env.JWT_SECRET,
   JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || "24h",
+  JWT_ISSUER: process.env.JWT_ISSUER || "sterllo-console",
+  JWT_AUDIENCE: process.env.JWT_AUDIENCE || "sterllo-dashboard",
+
+  MFA_ENCRYPTION_KEY: stripWrappingQuotes(process.env.MFA_ENCRYPTION_KEY),
+  MFA_ISSUER: process.env.MFA_ISSUER || "Sterllo Console",
+  MFA_CHALLENGE_TTL_SECONDS: Number(process.env.MFA_CHALLENGE_TTL_SECONDS || 300),
+  MFA_MAX_ATTEMPTS: Number(process.env.MFA_MAX_ATTEMPTS || 5),
+  MFA_TOTP_TOLERANCE_SECONDS: Number(process.env.MFA_TOTP_TOLERANCE_SECONDS || 30),
+  MFA_RECOVERY_CODE_COUNT: Number(process.env.MFA_RECOVERY_CODE_COUNT || 10),
+  AUTH_SESSION_TTL_HOURS: Number(process.env.AUTH_SESSION_TTL_HOURS || 24),
+  MFA_RECENT_WINDOW_MINUTES: Number(process.env.MFA_RECENT_WINDOW_MINUTES || 10),
 };

@@ -12,10 +12,15 @@ import {
   validateCrosslinkToken,
   extractCrosslinkIdentifiers,
 } from "./redbillerCrosslink.js";
+import MfaSecurityService from "./mfaSecurity.js";
 
-const SALT_ROUNDS = 6;
+const SALT_ROUNDS = 12;
 
 export default class AuthService {
+  constructor() {
+    this.mfa = new MfaSecurityService();
+  }
+
   _generateUserKey() {
     return crypto.randomBytes(32).toString("hex");
   }
@@ -36,22 +41,90 @@ export default class AuthService {
     };
   }
 
-  async register({ email, password, first_name, last_name }) {
+  async _userById(userId) {
+    const [user] = await authDb
+      .select()
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    if (!user) throw new ErrorClass("User not found", 404);
+    return user;
+  }
+
+  async _beginMandatoryMfa(user, context, metadata) {
+    const mfaState = await this.mfa.beginAuthentication(user, {
+      context,
+      metadata,
+    });
+    return {
+      ...mfaState,
+      user: {
+        id: user.id,
+        email: user.email,
+        first_name: user.first_name,
+        last_name: user.last_name,
+      },
+    };
+  }
+
+  async _issueVerifiedSession(userId, authMethod, context, metadata) {
+    const user = await this._userById(userId);
+    const access = await loadUserAccess(user.id);
+    const session = await this.mfa.createSingleDeviceSession(
+      user.id,
+      authMethod,
+      metadata,
+    );
+    await authDb
+      .update(users)
+      .set({ last_login: new Date(), date_modified: new Date() })
+      .where(eq(users.id, user.id));
+    clearUserCache(user.user_key);
+
+    const token = generateToken({
+      sub: String(user.id),
+      id: user.id,
+      user_key: user.user_key,
+      token_version: user.token_version || 0,
+      roles: access.roleSlugs,
+      sid: session.id,
+      amr: ["mfa", authMethod],
+      mfa_verified_at: Math.floor(session.mfaVerifiedAt.getTime() / 1000),
+    });
+
+    const response = {
+      state: "authenticated",
+      user: this._userWithAccess(user, access),
+      token,
+      session: {
+        id: session.id,
+        expires_at: session.expiresAt,
+        device_label: metadata.deviceLabel || null,
+      },
+    };
+    if (context?.sessionID) response.sessionID = context.sessionID;
+    if (context?.userKey) response.userKey = context.userKey;
+    if (context?.source === "crosslink") response.authToken = token;
+    return response;
+  }
+
+  async register({ email, password, first_name, last_name, metadata }) {
+    const normalizedEmail = String(email).trim().toLowerCase();
     const [existingUser] = await authDb
       .select()
       .from(users)
-      .where(eq(users.email, email))
+      .where(eq(users.email, normalizedEmail))
       .limit(1);
 
     if (existingUser) {
-      throw new ErrorClass("Email already registered", 409);
+      throw new ErrorClass("Unable to register with the supplied details", 409);
     }
 
     const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
 
     const userValues = {
       user_key: this._generateUserKey(),
-      email,
+      email: normalizedEmail,
       password: hashedPassword,
       first_name,
       last_name,
@@ -68,71 +141,28 @@ export default class AuthService {
       .where(eq(users.id, insertId))
       .limit(1);
 
-    const access = await loadUserAccess(newUser.id);
-    const token = generateToken({
-      id: newUser.id,
-      user_key: newUser.user_key,
-      token_version: newUser.token_version,
-      roles: access.roleSlugs,
-    });
-
-    return {
-      user: this._userWithAccess(newUser, access),
-      token,
-    };
+    return this._beginMandatoryMfa(newUser, { source: "registration" }, metadata);
   }
 
   /**
    * Login with email and password
    */
-  async login({ email, password }) {
-    const invalidFields = [];
-
+  async login({ email, password, metadata }) {
+    const normalizedEmail = String(email).trim().toLowerCase();
     const [user] = await authDb
       .select()
       .from(users)
-      .where(eq(users.email, email))
+      .where(eq(users.email, normalizedEmail))
       .limit(1);
 
-    if (!user) {
-      invalidFields.push("email");
+    const isPasswordValid = user
+      ? await bcrypt.compare(password, user.password)
+      : false;
+    if (!user || !isPasswordValid) {
+      throw new ErrorClass("Invalid email or password", 401);
     }
 
-    if (user) {
-      const isPasswordValid = await bcrypt.compare(password, user.password);
-      if (!isPasswordValid) {
-        invalidFields.push("password");
-      }
-    }
-
-    if (invalidFields.length > 0) {
-      throw new ErrorClass(
-        `Invalid credentials: ${invalidFields.join(", ")}`,
-        401
-      );
-    }
-
-    const newTokenVersion = (user.token_version || 0) + 1;
-
-    await authDb
-      .update(users)
-      .set({ last_login: new Date(), date_modified: new Date(), token_version: newTokenVersion })
-      .where(eq(users.id, user.id));
-
-    clearUserCache(user.user_key);
-
-    const access = await loadUserAccess(user.id);
-    const token = generateToken({
-      id: user.id,
-      user_key: user.user_key,
-      token_version: newTokenVersion,
-      roles: access.roleSlugs,
-    });
-
-    return {
-      user: this._userWithAccess({ ...user, token_version: newTokenVersion }, access),
-      token,
-    };
+    return this._beginMandatoryMfa(user, { source: "password" }, metadata);
   }
 
   async _findUserByCrosslinkIdentifiers({ billerId, email }) {
@@ -147,20 +177,35 @@ export default class AuthService {
     const whereClause =
       matchConditions.length === 1 ? matchConditions[0] : or(...matchConditions);
 
-    const [user] = await authDb
+    const matches = await authDb
       .select()
       .from(users)
       .where(whereClause)
-      .limit(1);
+      .limit(2);
 
-    return user ?? null;
+    if (matches.length > 1) {
+      throw new ErrorClass("Crosslink identity is ambiguous. Contact admin", 409);
+    }
+    const user = matches[0] ?? null;
+    if (
+      user &&
+      billerId &&
+      email &&
+      user.biller_id &&
+      user.email &&
+      (String(user.biller_id) !== String(billerId) ||
+        String(user.email).toLowerCase() !== String(email).toLowerCase())
+    ) {
+      throw new ErrorClass("Crosslink identity does not match the provisioned user", 401);
+    }
+    return user;
   }
 
   /**
    * Login via Redbiller crosslink token (SSO).
    * User must already exist in the auth DB (matched by biller_id or email).
    */
-  async loginCrosslink({ token }) {
+  async loginCrosslink({ token, metadata }) {
     const result = await validateCrosslinkToken(token);
     const data = result.data;
 
@@ -193,40 +238,52 @@ export default class AuthService {
       throw new ErrorClass("User not provisioned. Contact admin", 404);
     }
 
-    const newTokenVersion = (user.token_version || 0) + 1;
+    return this._beginMandatoryMfa(
+      user,
+      { source: "crosslink", sessionID, userKey },
+      metadata,
+    );
+  }
 
-    await authDb
-      .update(users)
-      .set({
-        last_login: new Date(),
-        date_modified: new Date(),
-        token_version: newTokenVersion,
-      })
-      .where(eq(users.id, user.id));
-
-    clearUserCache(user.user_key);
-
-    const access = await loadUserAccess(user.id);
-    const jwt = generateToken({
-      id: user.id,
-      user_key: user.user_key,
-      token_version: newTokenVersion,
-      roles: access.roleSlugs,
+  async confirmMfaEnrollment({ challengeToken, code, metadata }) {
+    const result = await this.mfa.confirmEnrollment({
+      challengeToken,
+      code,
+      metadata,
     });
+    const authenticated = await this._issueVerifiedSession(
+      result.userId,
+      result.authMethod,
+      result.context,
+      metadata,
+    );
+    return { ...authenticated, recovery_codes: result.recoveryCodes };
+  }
 
-    return {
-      user: this._userWithAccess({ ...user, token_version: newTokenVersion }, access),
-      token: jwt,
-      authToken: jwt,
-      sessionID,
-      userKey,
-    };
+  async completeMfaLogin({
+    challengeToken,
+    code,
+    recoveryCode,
+    metadata,
+  }) {
+    const result = await this.mfa.completeLoginChallenge({
+      challengeToken,
+      code,
+      recoveryCode,
+      metadata,
+    });
+    return this._issueVerifiedSession(
+      result.userId,
+      result.authMethod,
+      result.context,
+      metadata,
+    );
   }
 
   /**
    * Change password (requires current password)
    */
-  async changePassword({ userKey, currentPassword, newPassword }) {
+  async changePassword({ userKey, currentPassword, newPassword, metadata }) {
     const [user] = await authDb
       .select()
       .from(users)
@@ -261,33 +318,44 @@ export default class AuthService {
       .set({ password: hashedPassword, date_modified: new Date(), token_version: newTokenVersion })
       .where(eq(users.id, user.id));
 
+    await this.mfa.revokeAllSessions(user.id, metadata, "password_changed");
     clearUserCache(user.user_key);
 
     return { message: "Password changed successfully" };
   }
 
   /**
-   * Logout - invalidates the current token by incrementing token_version
+   * Logout only the current device session.
    */
-  async logout(userKey) {
-    const [user] = await authDb
-      .select()
-      .from(users)
-      .where(eq(users.user_key, userKey))
-      .limit(1);
+  async logout(userId, sessionId, metadata) {
+    await this.mfa.revokeSession(sessionId, userId, metadata);
+    return { message: "Logged out successfully" };
+  }
 
-    if (!user) {
-      throw new ErrorClass("User not found", 404);
-    }
-
+  async logoutAll(userId, metadata) {
+    const user = await this._userById(userId);
     await authDb
       .update(users)
-      .set({ token_version: (user.token_version || 0) + 1, date_modified: new Date() })
+      .set({
+        token_version: (user.token_version || 0) + 1,
+        date_modified: new Date(),
+      })
       .where(eq(users.id, user.id));
-
+    await this.mfa.revokeAllSessions(user.id, metadata);
     clearUserCache(user.user_key);
+    return { message: "Logged out from all devices successfully" };
+  }
 
-    return { message: "Logged out successfully" };
+  async listSessions(userId) {
+    return this.mfa.listSessions(userId);
+  }
+
+  async regenerateRecoveryCodes(userId, code, metadata) {
+    return this.mfa.regenerateRecoveryCodes(userId, code, metadata);
+  }
+
+  async verifyMfaStepUp(userId, sessionId, code, metadata) {
+    return this.mfa.verifyStepUp(userId, sessionId, code, metadata);
   }
 
   /**

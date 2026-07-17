@@ -7,7 +7,7 @@
   "type": "module",
   "main": "src/server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node --test",
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
     "db:push": "npx drizzle-kit push",
@@ -17,6 +17,8 @@
     "db:check": "npx drizzle-kit check",
     "migrate:auth-rbac": "node scripts/run-auth-rbac-migration.js",
     "migrate:biller-id": "node scripts/run-biller-id-migration.js",
+    "migrate:mfa-security": "node scripts/run-mfa-security-migration.js",
+    "setup:mfa-key": "node scripts/setup-mfa-key.js",
     "inspect:user-rbac": "node scripts/inspect-user-rbac.js",
     "set:user-management-only": "node scripts/set-user-management-only.js",
     "decrypt:env": "node scripts/decrypt-env-value.js",
@@ -34,6 +36,7 @@
     "drizzle-orm": "^0.45.1",
     "fastify": "^5.7.4",
     "mysql2": "^3.16.3",
+    "otplib": "^13.4.1",
     "winston": "^3.19.0"
   },
   "devDependencies": {

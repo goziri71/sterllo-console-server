@@ -1,6 +1,6 @@
 import app from "../app.js";
 import { env } from "./config/env.js";
-import { db, pool } from "./db/index.js";
+import { db, pool, authPool } from "./db/index.js";
 import { sql } from "drizzle-orm";
 import { setApp } from "./utils/jwt/index.js";
 
@@ -30,8 +30,8 @@ const startServer = async () => {
 
     process.on("SIGTERM", () => {
       console.log("SIGTERM signal received: shutting down gracefully");
-      app.close().then(() => {
-        pool.end();
+      app.close().then(async () => {
+        await Promise.all([pool.end(), authPool.end()]);
         process.exit(0);
       });
     });

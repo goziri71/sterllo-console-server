@@ -61,7 +61,15 @@ app.setNotFoundHandler((request, reply) => {
 // Plugins
 app.register(fjwt, {
   secret: env.JWT_SECRET,
-  sign: { expiresIn: env.JWT_EXPIRES_IN },
+  sign: {
+    expiresIn: env.JWT_EXPIRES_IN,
+    iss: env.JWT_ISSUER,
+    aud: env.JWT_AUDIENCE,
+  },
+  verify: {
+    allowedIss: env.JWT_ISSUER,
+    allowedAud: env.JWT_AUDIENCE,
+  },
 });
 // CORS before helmet. Methods must include DELETE + PATCH (default cors only allows GET/HEAD/POST).
 // Do not set a narrow allowedHeaders list — @fastify/cors then reflects Access-Control-Request-Headers
