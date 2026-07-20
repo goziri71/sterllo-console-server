@@ -41,10 +41,8 @@ export const authenticate = async (request, reply) => {
     throw error;
   }
 
-  const amr = Array.isArray(decoded.amr) ? decoded.amr : [];
-  const hasTrustedAuth = amr.includes("mfa") || amr.includes("crosslink");
-  if (!decoded.sid || !hasTrustedAuth) {
-    throw new ErrorClass("Authenticated session required", 401);
+  if (!decoded.sid || !Array.isArray(decoded.amr) || !decoded.amr.includes("mfa")) {
+    throw new ErrorClass("MFA-authenticated session required", 401);
   }
 
   const mfaSecurity = new MfaSecurityService();

@@ -88,22 +88,27 @@ export const loginCrosslink = async (request, reply) => {
     metadata: requestSecurityMetadata(request, device_label),
   });
 
-  // Shape aligned with the other working Crosslink product, plus extras
-  // this console already uses (token alias, user, session).
+  const isAuthenticated = result.state === "authenticated";
   return reply.code(200).send({
     code: 200,
     success: true,
     status: true,
-    message: "Login successful",
-    data: {
-      authToken: result.authToken || result.token,
-      token: result.token,
-      sessionID: result.sessionID ?? null,
-      userKey: result.userKey ?? null,
-      user: result.user,
-      session: result.session,
-      state: result.state,
-    },
+    message: isAuthenticated
+      ? "Login successful"
+      : result.state === "mfa_enrollment_required"
+        ? "MFA enrollment required"
+        : "MFA verification required",
+    data: isAuthenticated
+      ? {
+          authToken: result.authToken || result.token,
+          token: result.token,
+          sessionID: result.sessionID ?? null,
+          userKey: result.userKey ?? null,
+          user: result.user,
+          session: result.session,
+          state: result.state,
+        }
+      : result,
   });
 };
 
@@ -127,8 +132,13 @@ export const confirmMfaEnrollment = async (request, reply) => {
   return reply.code(200).send({
     code: 200,
     success: true,
+    status: true,
     message: "MFA enrolled and login completed",
-    data: result,
+    data: {
+      ...result,
+      authToken: result.authToken || result.token,
+      token: result.token,
+    },
   });
 };
 
@@ -156,8 +166,13 @@ export const completeMfaLogin = async (request, reply) => {
   return reply.code(200).send({
     code: 200,
     success: true,
+    status: true,
     message: "Login successful",
-    data: result,
+    data: {
+      ...result,
+      authToken: result.authToken || result.token,
+      token: result.token,
+    },
   });
 };
 
