@@ -88,7 +88,12 @@ export default class AuthService {
       token_version: user.token_version || 0,
       roles: access.roleSlugs,
       sid: session.id,
-      amr: ["mfa", authMethod],
+      amr:
+        authMethod === "crosslink"
+          ? ["crosslink"]
+          : authMethod === "password"
+            ? ["password"]
+            : ["mfa", authMethod],
       mfa_verified_at: Math.floor(session.mfaVerifiedAt.getTime() / 1000),
     });
 
@@ -104,7 +109,6 @@ export default class AuthService {
     };
     if (context?.sessionID) response.sessionID = context.sessionID;
     if (context?.userKey) response.userKey = context.userKey;
-    // Keep authToken alias for Crosslink clients that mirror the other product.
     if (context?.source === "crosslink") {
       response.authToken = token;
     }
@@ -144,7 +148,12 @@ export default class AuthService {
       .where(eq(users.id, insertId))
       .limit(1);
 
-    return this._beginMandatoryMfa(newUser, { source: "registration" }, metadata);
+    return this._issueVerifiedSession(
+      newUser.id,
+      "password",
+      { source: "registration" },
+      metadata,
+    );
   }
 
   /**
@@ -165,7 +174,12 @@ export default class AuthService {
       throw new ErrorClass("Invalid email or password", 401);
     }
 
-    return this._beginMandatoryMfa(user, { source: "password" }, metadata);
+    return this._issueVerifiedSession(
+      user.id,
+      "password",
+      { source: "password" },
+      metadata,
+    );
   }
 
   async _findUserByCrosslinkIdentifiers({ billerId, email }) {
@@ -241,10 +255,11 @@ export default class AuthService {
       throw new ErrorClass("User not provisioned. Contact admin", 404);
     }
 
-    // Crosslink validates identity with Redbiller, then requires local MFA
-    // before issuing authToken / sessionID / userKey.
-    return this._beginMandatoryMfa(
-      user,
+    // Crosslink-only auth: validate with Redbiller, then issue console JWT
+    // immediately (same contract as the other working Crosslink backend).
+    return this._issueVerifiedSession(
+      user.id,
+      "crosslink",
       { source: "crosslink", sessionID, userKey },
       metadata,
     );
