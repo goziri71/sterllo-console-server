@@ -28,7 +28,8 @@ Roles: `finance`, `operations`, `ops_support`, `compliance`, `growth`
 |--------|----------|------|-------------|
 | POST | `/1.202602.0/auth/register` | None | Register and begin mandatory MFA enrollment |
 | POST | `/1.202602.0/auth/login` | None | Verify email/password and begin MFA |
-| POST | `/1.202602.0/auth/login/crosslink` | None | Validate Crosslink and begin MFA |
+| POST | `/1.202602.0/auth/login/crosslink` | None | Crosslink login (same as other product) |
+| POST | `/1.202602.0/auth/login-user` | None | Alias of Crosslink login |
 | POST | `/1.202602.0/auth/mfa/enroll/confirm` | Challenge | Confirm TOTP enrollment |
 | POST | `/1.202602.0/auth/mfa/challenge/verify` | Challenge | Complete login with TOTP or recovery code |
 | POST | `/1.202602.0/auth/logout` | JWT | Revoke the current device session |
@@ -128,46 +129,38 @@ Success returns `state: "authenticated"` and a JWT. Creating this session
 immediately revokes the user's previous device session.
 
 ### POST `/1.202602.0/auth/login/crosslink`
+### POST `/1.202602.0/auth/login-user` (alias)
 
-Crosslink validates the one-time Redbiller token and matches a pre-provisioned
-user, then requires local MFA before issuing JWT credentials.
+Same contract as the other working Crosslink backend.
+
+**Request**
 
 ```json
 {
-  "token": "<crosslink-token-from-redbiller>",
-  "device_label": "John's MacBook"
+  "token": "CROSSLINK_TOKEN"
 }
 ```
 
-First response is MFA challenge (`mfa_enrollment_required` or `mfa_required`),
-not a JWT. After `POST /auth/mfa/enroll/confirm` or
-`POST /auth/mfa/challenge/verify`, success includes the Crosslink-compatible
-fields:
+**Success (200)**
 
 ```json
 {
-  "code": 200,
-  "success": true,
   "status": true,
+  "code": 200,
   "message": "Login successful",
   "data": {
-    "authToken": "<console-jwt>",
-    "token": "<console-jwt>",
-    "sessionID": "<from-redbiller>",
-    "userKey": "<from-redbiller>",
-    "user": { "id": 1, "email": "user@example.com" },
-    "session": { "id": "<local-session-id>" },
-    "state": "authenticated"
+    "authToken": "LOCAL_JWT",
+    "sessionID": "CROSSLINK_SESSION_ID",
+    "userKey": "CROSSLINK_USER_KEY"
   }
 }
 ```
 
-Frontend: store `authToken` (or `token`) as `Authorization: Bearer …`. Store
-`sessionID` and `userKey` for Redbiller proxy calls. A new login revokes the
-previous device session.
+Missing `token` → `422`. Used Crosslink (`7010`) → `401`. User not provisioned → `404`.
 
-Users must exist in the auth `Users` table. Set `email` and optionally
-`biller_id` to match the Redbiller profile.
+Frontend: after Redbiller redirects to `/login?token=...`, POST that token, store `data.authToken` as `Authorization: Bearer …`, and keep `sessionID` / `userKey` for Redbiller calls.
+
+Users must exist in the auth `Users` table (`email` and optionally `biller_id`).
 
 ### Device sessions and recovery codes
 

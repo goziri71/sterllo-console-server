@@ -43,6 +43,16 @@ export default async function authRoutes(fastify) {
     },
     loginCrosslink,
   );
+  // Alias matching the other Crosslink product path name.
+  fastify.post(
+    "/login-user",
+    {
+      config: {
+        rateLimit: { max: 30, timeWindow: "15 minutes" },
+      },
+    },
+    loginCrosslink,
+  );
   fastify.post(
     "/mfa/enroll/confirm",
     {

@@ -64,11 +64,15 @@ export const login = async (request, reply) => {
   return reply.code(200).send({
     code: 200,
     success: true,
-    message:
-      result.state === "mfa_enrollment_required"
-        ? "MFA enrollment required"
-        : "MFA verification required",
-    data: result,
+    status: true,
+    message: "Login successful",
+    data: {
+      authToken: result.token,
+      token: result.token,
+      user: result.user,
+      session: result.session,
+      state: result.state,
+    },
   });
 };
 
@@ -80,7 +84,8 @@ export const loginCrosslink = async (request, reply) => {
 
   const { token, device_label } = request.body;
   if (!token || typeof token !== "string" || !token.trim()) {
-    throw new ErrorClass("Missing required fields: token", 400);
+    // Match the other Crosslink backend: missing token → 422
+    throw new ErrorClass("token is required", 422);
   }
 
   const result = await authService.loginCrosslink({
@@ -88,27 +93,16 @@ export const loginCrosslink = async (request, reply) => {
     metadata: requestSecurityMetadata(request, device_label),
   });
 
-  const isAuthenticated = result.state === "authenticated";
+  // Exact success contract from the other working Crosslink backend.
   return reply.code(200).send({
-    code: 200,
-    success: true,
     status: true,
-    message: isAuthenticated
-      ? "Login successful"
-      : result.state === "mfa_enrollment_required"
-        ? "MFA enrollment required"
-        : "MFA verification required",
-    data: isAuthenticated
-      ? {
-          authToken: result.authToken || result.token,
-          token: result.token,
-          sessionID: result.sessionID ?? null,
-          userKey: result.userKey ?? null,
-          user: result.user,
-          session: result.session,
-          state: result.state,
-        }
-      : result,
+    code: 200,
+    message: "Login successful",
+    data: {
+      authToken: result.authToken || result.token,
+      sessionID: result.sessionID ?? null,
+      userKey: result.userKey ?? null,
+    },
   });
 };
 
