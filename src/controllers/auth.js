@@ -88,14 +88,22 @@ export const loginCrosslink = async (request, reply) => {
     metadata: requestSecurityMetadata(request, device_label),
   });
 
+  // Shape aligned with the other working Crosslink product, plus extras
+  // this console already uses (token alias, user, session).
   return reply.code(200).send({
     code: 200,
     success: true,
-    message:
-      result.state === "mfa_enrollment_required"
-        ? "MFA enrollment required"
-        : "MFA verification required",
-    data: result,
+    status: true,
+    message: "Login successful",
+    data: {
+      authToken: result.authToken || result.token,
+      token: result.token,
+      sessionID: result.sessionID ?? null,
+      userKey: result.userKey ?? null,
+      user: result.user,
+      session: result.session,
+      state: result.state,
+    },
   });
 };
 
