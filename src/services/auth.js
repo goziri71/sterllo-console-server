@@ -81,11 +81,6 @@ export default class AuthService {
       .where(eq(users.id, user.id));
     clearUserCache(user.user_key);
 
-    // Crosslink SSO matches the other working product: issue a session JWT
-    // immediately. Password login still requires local MFA first.
-    const amr =
-      authMethod === "crosslink" ? ["crosslink"] : ["mfa", authMethod];
-
     const token = generateToken({
       sub: String(user.id),
       id: user.id,
@@ -93,7 +88,7 @@ export default class AuthService {
       token_version: user.token_version || 0,
       roles: access.roleSlugs,
       sid: session.id,
-      amr,
+      amr: ["mfa", authMethod],
       mfa_verified_at: Math.floor(session.mfaVerifiedAt.getTime() / 1000),
     });
 
@@ -109,6 +104,7 @@ export default class AuthService {
     };
     if (context?.sessionID) response.sessionID = context.sessionID;
     if (context?.userKey) response.userKey = context.userKey;
+    // Keep authToken alias for Crosslink clients that mirror the other product.
     if (context?.source === "crosslink") {
       response.authToken = token;
     }
@@ -245,11 +241,10 @@ export default class AuthService {
       throw new ErrorClass("User not provisioned. Contact admin", 404);
     }
 
-    // Same contract as the other Crosslink backend: validate once, then
-    // return local JWT + Redbiller session fields immediately.
-    return this._issueVerifiedSession(
-      user.id,
-      "crosslink",
+    // Crosslink validates identity with Redbiller, then requires local MFA
+    // before issuing authToken / sessionID / userKey.
+    return this._beginMandatoryMfa(
+      user,
       { source: "crosslink", sessionID, userKey },
       metadata,
     );
