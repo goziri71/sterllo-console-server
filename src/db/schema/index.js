@@ -31,5 +31,6 @@ export {
   customSaaSDepositFees, customSaaSPayoutFees, customSaaSSwapFees,
   customSaaSTransferFees, customSaaSWithdrawalFees,
 } from "./customSaasFees.js";
+export { pricingFeeAuditEvents } from "./pricingAudit.js";
 export { depositMethods } from "./depositMethods.js";
 export { udara360APICredentials } from "./vendor.js";

@@ -19,6 +19,8 @@
     "migrate:biller-id": "node scripts/run-biller-id-migration.js",
     "migrate:mfa-security": "node scripts/run-mfa-security-migration.js",
     "migrate:crosslink-only-users": "node scripts/run-crosslink-only-users-migration.js",
+    "migrate:pricing-permissions": "node scripts/run-pricing-permissions-migration.js",
+    "migrate:baas-pricing": "node scripts/run-baas-pricing-migration.js",
     "setup:mfa-key": "node scripts/setup-mfa-key.js",
     "inspect:user-rbac": "node scripts/inspect-user-rbac.js",
     "set:user-management-only": "node scripts/set-user-management-only.js",

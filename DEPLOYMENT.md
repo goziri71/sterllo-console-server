@@ -47,9 +47,10 @@
 2. Open PR to `main`
 3. Wait for CI checks to pass
 4. Merge PR to `main`
-5. Run `npm run migrate:mfa-security` and `npm run migrate:crosslink-only-users` against the auth database before enabling the new login flow
-6. Push `main` to production remote (or let deployment trigger from `main`)
-7. Verify health, administrator provisioning, Crosslink MFA, and old-session revocation
+5. Run the auth-database migrations: `npm run migrate:mfa-security`, `npm run migrate:crosslink-only-users`, and `npm run migrate:pricing-permissions` (the last command creates pricing permissions and audit history in `AUTH_DB_NAME`)
+6. Run `npm run migrate:baas-pricing` against the main Sterllo database; it only adds natural-key indexes and stops if pricing keys contain nulls or duplicates
+7. Push `main` to production remote (or let deployment trigger from `main`)
+8. Verify health, Crosslink MFA, old-session replacement, pricing fallback, permissions, and audit events
 
 ## 5) Rollback flow
 

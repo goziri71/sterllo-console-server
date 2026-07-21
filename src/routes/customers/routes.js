@@ -43,7 +43,7 @@ export default async function customerRoutes(fastify) {
     f.get("/:identifier/wallets", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getEnrichedCustomerWallets);
     f.get("/:identifier/wallets/:wallet_key/ledger", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getCustomerWalletLedger);
     f.get("/:identifier/wallets/:wallet_key", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getCustomerWalletDetail);
-    f.get("/:identifier/fees", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getCustomerFees);
+    f.get("/:identifier/fees", { preHandler: requirePermission(PERMISSIONS.PRICING_READ) }, getCustomerFees);
     f.get("/:identifier/kycs", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getCustomerKYCs);
 
     f.patch("/:identifier", { preHandler: requirePermission(PERMISSIONS.CUSTOMER_UPDATE) }, updateCustomer);

@@ -86,6 +86,18 @@ test(
         context: { source: "crosslink", sessionID: "crosslink-session-2" },
         metadata: { ...metadata, deviceLabel: "Replacement Device" },
       });
+      assert.ok(await security.getActiveSession(first.session.id, userId));
+
+      await assert.rejects(
+        auth.completeMfaLogin({
+          challengeToken: loginChallenge.challenge_token,
+          code,
+          metadata: { ...metadata, deviceLabel: "Replacement Device" },
+        }),
+        /Invalid authentication code/,
+      );
+      assert.ok(await security.getActiveSession(first.session.id, userId));
+
       const second = await auth.completeMfaLogin({
         challengeToken: loginChallenge.challenge_token,
         recoveryCode: first.recovery_codes[0],
