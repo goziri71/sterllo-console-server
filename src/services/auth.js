@@ -1,5 +1,3 @@
-import bcrypt from "bcrypt";
-import crypto from "crypto";
 import { eq, or } from "drizzle-orm";
 import { authDb } from "../db/index.js";
 import { users } from "../db/schema/users.js";
@@ -14,15 +12,9 @@ import {
 } from "./redbillerCrosslink.js";
 import MfaSecurityService from "./mfaSecurity.js";
 
-const SALT_ROUNDS = 12;
-
 export default class AuthService {
   constructor() {
     this.mfa = new MfaSecurityService();
-  }
-
-  _generateUserKey() {
-    return crypto.randomBytes(32).toString("hex");
   }
 
   _sanitizeUser(user) {
@@ -70,9 +62,10 @@ export default class AuthService {
   async _issueVerifiedSession(userId, authMethod, context, metadata) {
     const user = await this._userById(userId);
     const access = await loadUserAccess(user.id);
+    const isCrosslink = context?.source === "crosslink";
     const session = await this.mfa.createSingleDeviceSession(
       user.id,
-      authMethod,
+      isCrosslink ? `crosslink_${authMethod}` : authMethod,
       metadata,
     );
     await authDb
@@ -88,7 +81,9 @@ export default class AuthService {
       token_version: user.token_version || 0,
       roles: access.roleSlugs,
       sid: session.id,
-      amr: authMethod === "crosslink" ? ["crosslink"] : ["mfa", authMethod],
+      amr: isCrosslink
+        ? ["crosslink", "mfa", authMethod]
+        : ["mfa", authMethod],
       mfa_verified_at: Math.floor(session.mfaVerifiedAt.getTime() / 1000),
     });
 
@@ -108,67 +103,6 @@ export default class AuthService {
       response.authToken = token;
     }
     return response;
-  }
-
-  async register({ email, password, first_name, last_name, metadata }) {
-    const normalizedEmail = String(email).trim().toLowerCase();
-    const [existingUser] = await authDb
-      .select()
-      .from(users)
-      .where(eq(users.email, normalizedEmail))
-      .limit(1);
-
-    if (existingUser) {
-      throw new ErrorClass("Unable to register with the supplied details", 409);
-    }
-
-    const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
-
-    const userValues = {
-      user_key: this._generateUserKey(),
-      email: normalizedEmail,
-      password: hashedPassword,
-      first_name,
-      last_name,
-      role: null,
-      date_created: new Date(),
-    };
-
-    const result = await authDb.insert(users).values(userValues);
-    const insertId = result[0].insertId;
-
-    const [newUser] = await authDb
-      .select()
-      .from(users)
-      .where(eq(users.id, insertId))
-      .limit(1);
-
-    return this._beginMandatoryMfa(
-      newUser,
-      { source: "registration" },
-      metadata,
-    );
-  }
-
-  /**
-   * Login with email and password
-   */
-  async login({ email, password, metadata }) {
-    const normalizedEmail = String(email).trim().toLowerCase();
-    const [user] = await authDb
-      .select()
-      .from(users)
-      .where(eq(users.email, normalizedEmail))
-      .limit(1);
-
-    const isPasswordValid = user
-      ? await bcrypt.compare(password, user.password)
-      : false;
-    if (!user || !isPasswordValid) {
-      throw new ErrorClass("Invalid email or password", 401);
-    }
-
-    return this._beginMandatoryMfa(user, { source: "password" }, metadata);
   }
 
   async _findUserByCrosslinkIdentifiers({ billerId, email }) {
@@ -244,11 +178,8 @@ export default class AuthService {
       throw new ErrorClass("User not provisioned. Contact admin", 404);
     }
 
-    // Temporary Crosslink bypass: Redbiller validates the identity and the
-    // existing local-user match gates Console access. No MFA challenge here.
-    return this._issueVerifiedSession(
-      user.id,
-      "crosslink",
+    return this._beginMandatoryMfa(
+      user,
       { source: "crosslink", sessionID, userKey },
       metadata,
     );
@@ -287,50 +218,6 @@ export default class AuthService {
       result.context,
       metadata,
     );
-  }
-
-  /**
-   * Change password (requires current password)
-   */
-  async changePassword({ userKey, currentPassword, newPassword, metadata }) {
-    const [user] = await authDb
-      .select()
-      .from(users)
-      .where(eq(users.user_key, userKey))
-      .limit(1);
-
-    if (!user) {
-      throw new ErrorClass("User not found", 404);
-    }
-
-    const isPasswordValid = await bcrypt.compare(
-      currentPassword,
-      user.password
-    );
-    if (!isPasswordValid) {
-      throw new ErrorClass("Current password is incorrect", 401);
-    }
-
-    const isSamePassword = await bcrypt.compare(newPassword, user.password);
-    if (isSamePassword) {
-      throw new ErrorClass(
-        "New password must be different from current password",
-        400
-      );
-    }
-
-    const hashedPassword = await bcrypt.hash(newPassword, SALT_ROUNDS);
-    const newTokenVersion = (user.token_version || 0) + 1;
-
-    await authDb
-      .update(users)
-      .set({ password: hashedPassword, date_modified: new Date(), token_version: newTokenVersion })
-      .where(eq(users.id, user.id));
-
-    await this.mfa.revokeAllSessions(user.id, metadata, "password_changed");
-    clearUserCache(user.user_key);
-
-    return { message: "Password changed successfully" };
   }
 
   /**

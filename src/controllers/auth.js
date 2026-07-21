@@ -2,76 +2,6 @@ import AuthService from "../services/auth.js";
 import { requestSecurityMetadata } from "../services/mfaSecurity.js";
 import { ErrorClass } from "../utils/errorClass/index.js";
 
-export const register = async (request, reply) => {
-  const authService = new AuthService();
-  if (!request.body || Object.keys(request.body).length === 0) {
-    throw new ErrorClass("Request body is required", 400);
-  }
-  const { email, password, first_name, last_name, device_label } = request.body;
-
-  // Validation
-  const missingFields = [];
-  if (!email) missingFields.push("email");
-  if (!password) missingFields.push("password");
-  if (!first_name) missingFields.push("first_name");
-  if (!last_name) missingFields.push("last_name");
-
-  if (missingFields.length > 0) {
-    throw new ErrorClass(`Missing required fields: ${missingFields.join(", ")}`, 400);
-  }
-
-  if (password.length < 8) {
-    throw new ErrorClass("Password must be at least 8 characters", 400);
-  }
-
-  const result = await authService.register({
-    email,
-    password,
-    first_name,
-    last_name,
-    metadata: requestSecurityMetadata(request, device_label),
-  });
-
-  return reply.code(201).send({
-    code: 201,
-    success: true,
-    message: "User registered successfully",
-    data: result,
-  });
-};
-
-export const login = async (request, reply) => {
-  const authService = new AuthService();
-  if (!request.body || Object.keys(request.body).length === 0) {
-    throw new ErrorClass("Login request body is required", 400);
-  }
-
-  const { email, password, device_label } = request.body;
-
-  const missingFields = [];
-  if (!email) missingFields.push("email");
-  if (!password) missingFields.push("password");
-  if (missingFields.length > 0) {
-    throw new ErrorClass(`Missing required fields: ${missingFields.join(", ")}`, 400);
-  }
-
-  const result = await authService.login({
-    email,
-    password,
-    metadata: requestSecurityMetadata(request, device_label),
-  });
-
-  return reply.code(200).send({
-    code: 200,
-    success: true,
-    message:
-      result.state === "mfa_enrollment_required"
-        ? "MFA enrollment required"
-        : "MFA verification required",
-    data: result,
-  });
-};
-
 export const loginCrosslink = async (request, reply) => {
   const authService = new AuthService();
   if (!request.body || Object.keys(request.body).length === 0) {
@@ -92,12 +22,11 @@ export const loginCrosslink = async (request, reply) => {
   return reply.code(200).send({
     status: true,
     code: 200,
-    message: "Login successful",
-    data: {
-      authToken: result.authToken || result.token,
-      sessionID: result.sessionID ?? null,
-      userKey: result.userKey ?? null,
-    },
+    message:
+      result.state === "mfa_enrollment_required"
+        ? "MFA enrollment required"
+        : "MFA verification required",
+    data: result,
   });
 };
 
@@ -162,39 +91,6 @@ export const completeMfaLogin = async (request, reply) => {
       authToken: result.authToken || result.token,
       token: result.token,
     },
-  });
-};
-
-export const changePassword = async (request, reply) => {
-  const authService = new AuthService();
-  if (!request.body || Object.keys(request.body).length === 0) {
-    throw new ErrorClass("Request body is required", 400);
-  }
-  const { current_password, new_password } = request.body;
-
-  const missingFields = [];
-  if (!current_password) missingFields.push("current_password");
-  if (!new_password) missingFields.push("new_password");
-
-  if (missingFields.length > 0) {
-    throw new ErrorClass(`Missing required fields: ${missingFields.join(", ")}`, 400);
-  }
-
-  if (new_password.length < 8) {
-    throw new ErrorClass("New password must be at least 8 characters", 400);
-  }
-
-  const result = await authService.changePassword({
-    userKey: request.user.user_key,
-    currentPassword: current_password,
-    newPassword: new_password,
-    metadata: requestSecurityMetadata(request),
-  });
-
-  return reply.code(200).send({
-    code: 200,
-    success: true,
-    message: result.message,
   });
 };
 

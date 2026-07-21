@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { and, count, desc, eq, inArray, like, or } from "drizzle-orm";
 import { authDb, authPool } from "../db/index.js";
 import { users } from "../db/schema/users.js";
@@ -12,6 +13,7 @@ import { ROLES } from "../config/roles.js";
 import { clearUserCache } from "../utils/userCache.js";
 
 const SLUG_RE = /^[a-z][a-z0-9_]{1,63}$/;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export async function loadUserAccess(userId) {
   const userRoleRows = await authDb
@@ -147,6 +149,8 @@ export default class RbacService {
       .select({
         id: users.id,
         email: users.email,
+        biller_id: users.biller_id,
+        auth_provider: users.auth_provider,
         user_key: users.user_key,
         first_name: users.first_name,
         last_name: users.last_name,
@@ -182,6 +186,8 @@ export default class RbacService {
     const enriched = rows.map((u) => ({
       id: u.id,
       email: u.email,
+      biller_id: u.biller_id,
+      auth_provider: u.auth_provider,
       user_key: u.user_key,
       first_name: u.first_name,
       last_name: u.last_name,
@@ -191,6 +197,100 @@ export default class RbacService {
     }));
 
     return { count: total, rows: enriched };
+  }
+
+  async createConsoleUser({
+    email,
+    biller_id: billerId,
+    first_name: firstName,
+    last_name: lastName,
+    role_slug: roleSlug,
+    assignedByUserId,
+  }) {
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+    const normalizedBillerId = String(billerId || "").trim() || null;
+    const normalizedFirstName = String(firstName || "").trim();
+    const normalizedLastName = String(lastName || "").trim();
+    const normalizedRoleSlug = String(roleSlug || "").trim().toLowerCase();
+
+    if (!EMAIL_RE.test(normalizedEmail)) {
+      throw new ErrorClass("A valid email is required", 400);
+    }
+    if (!normalizedFirstName || !normalizedLastName) {
+      throw new ErrorClass("first_name and last_name are required", 400);
+    }
+    if (!SLUG_RE.test(normalizedRoleSlug)) {
+      throw new ErrorClass("A valid role_slug is required", 400);
+    }
+
+    const identityConditions = [eq(users.email, normalizedEmail)];
+    if (normalizedBillerId) {
+      identityConditions.push(eq(users.biller_id, normalizedBillerId));
+    }
+    const [existing] = await authDb
+      .select({ id: users.id, email: users.email, biller_id: users.biller_id })
+      .from(users)
+      .where(
+        identityConditions.length === 1
+          ? identityConditions[0]
+          : or(...identityConditions),
+      )
+      .limit(1);
+    if (existing) {
+      throw new ErrorClass(
+        existing.email === normalizedEmail
+          ? "A Console user with this email already exists"
+          : "A Console user with this biller_id already exists",
+        409,
+      );
+    }
+
+    const [role] = await authDb
+      .select({ id: rbacRoles.id, slug: rbacRoles.slug, label: rbacRoles.label })
+      .from(rbacRoles)
+      .where(eq(rbacRoles.slug, normalizedRoleSlug))
+      .limit(1);
+    if (!role) {
+      throw new ErrorClass("Role not found", 404);
+    }
+
+    const created = await authDb.transaction(async (tx) => {
+      const timestamp = new Date();
+      const userKey = crypto.randomBytes(32).toString("hex");
+      const result = await tx.insert(users).values({
+        user_key: userKey,
+        email: normalizedEmail,
+        biller_id: normalizedBillerId,
+        auth_provider: "crosslink",
+        password: null,
+        first_name: normalizedFirstName,
+        last_name: normalizedLastName,
+        role: null,
+        token_version: 0,
+        date_created: timestamp,
+        date_modified: timestamp,
+      });
+      const userId = Number(result[0].insertId);
+      await tx.insert(rbacUserRoles).values({
+        user_id: userId,
+        role_id: role.id,
+        assigned_at: timestamp,
+        assigned_by_user_id: assignedByUserId ?? null,
+      });
+      return {
+        id: userId,
+        user_key: userKey,
+        email: normalizedEmail,
+        biller_id: normalizedBillerId,
+        auth_provider: "crosslink",
+        first_name: normalizedFirstName,
+        last_name: normalizedLastName,
+        roles: [{ slug: role.slug, label: role.label }],
+        date_created: timestamp,
+      };
+    });
+
+    return created;
   }
 
   async createRole({ slug, label, permission_keys: permissionKeys }) {

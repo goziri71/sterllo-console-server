@@ -47,9 +47,9 @@
 2. Open PR to `main`
 3. Wait for CI checks to pass
 4. Merge PR to `main`
-5. Run `npm run migrate:mfa-security` against the auth database before enabling the new login flow
+5. Run `npm run migrate:mfa-security` and `npm run migrate:crosslink-only-users` against the auth database before enabling the new login flow
 6. Push `main` to production remote (or let deployment trigger from `main`)
-7. Verify health endpoint, forced enrollment, MFA login, and old-session revocation
+7. Verify health, administrator provisioning, Crosslink MFA, and old-session revocation
 
 ## 5) Rollback flow
 

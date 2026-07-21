@@ -26,8 +26,7 @@ Roles: `finance`, `operations`, `ops_support`, `compliance`, `growth`
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| POST | `/1.202602.0/auth/login` | None | Verify email/password and begin MFA |
-| POST | `/1.202602.0/auth/login/crosslink` | None | Validate Crosslink and return JWT |
+| POST | `/1.202602.0/auth/login/crosslink` | None | Validate Crosslink and begin MFA |
 | POST | `/1.202602.0/auth/login-user` | None | Alias of Crosslink login |
 | POST | `/1.202602.0/auth/mfa/enroll/confirm` | Challenge | Confirm TOTP enrollment |
 | POST | `/1.202602.0/auth/mfa/challenge/verify` | Challenge | Complete login with TOTP or recovery code |
@@ -37,23 +36,14 @@ Roles: `finance`, `operations`, `ops_support`, `compliance`, `growth`
 | POST | `/1.202602.0/auth/mfa/step-up` | JWT + TOTP | Refresh recent-MFA status |
 | POST | `/1.202602.0/auth/mfa/recovery-codes/regenerate` | JWT + TOTP | Replace recovery codes |
 | GET | `/1.202602.0/auth/profile` | JWT | Get current user profile |
-| PATCH | `/1.202602.0/auth/change-password` | JWT | Change password and revoke all sessions |
 
-There is no public registration route. Console users must be provisioned by an
-administrator in the local auth database before password or Crosslink login.
+Console authentication is Crosslink-only. There are no password login,
+registration, or password-change endpoints. An administrator provisions each
+local Console user through `POST /rbac/users` before that user signs in through
+Redbiller Echo.
 
-### POST `/1.202602.0/auth/login`
-
-```json
-{
-  "email": "user@example.com",
-  "password": "password123",
-  "device_label": "John's MacBook"
-}
-```
-
-Password, registration, and Crosslink authentication do not return a dashboard
-JWT immediately. They return either:
+Crosslink authentication does not return a dashboard JWT immediately. It
+returns either:
 
 - `mfa_enrollment_required`: display `factor.otpauth_uri` as a QR code and
   `factor.secret` as the manual-entry fallback.
@@ -134,17 +124,18 @@ Echo users from accessing the Console.
 }
 ```
 
-**Success (200)**
+**MFA required (200)**
 
 ```json
 {
   "status": true,
   "code": 200,
-  "message": "Login successful",
+  "message": "MFA verification required",
   "data": {
-    "authToken": "LOCAL_JWT",
-    "sessionID": "CROSSLINK_SESSION_ID",
-    "userKey": "CROSSLINK_USER_KEY"
+    "state": "mfa_required",
+    "challenge_token": "<short-lived-random-token>",
+    "expires_in": 300,
+    "methods": ["totp", "recovery_code"]
   }
 }
 ```
@@ -152,10 +143,10 @@ Echo users from accessing the Console.
 Missing `token` → `422`. Used Crosslink (`7010`) → `401`. User not
 provisioned → `404`. Ambiguous/mismatched local identity → `409`/`401`.
 
-Frontend: after Redbiller redirects back, POST the opaque token and store
-`data.authToken` as `Authorization: Bearer …`. Keep `sessionID` / `userKey` for
-Redbiller calls. Crosslink currently bypasses MFA while the callback flow is
-being stabilized.
+Frontend: after Redbiller redirects back, POST the opaque token, complete the
+returned MFA challenge, and then store the `data.authToken` from the MFA
+confirmation response as `Authorization: Bearer …`. The completed response also
+contains the Redbiller `sessionID` and `userKey`.
 
 Users must exist in the auth `Users` table (`email` and optionally `biller_id`).
 
@@ -177,12 +168,18 @@ Sensitive operations can return `403` with
 `data.code: "recent_mfa_required"` after the recent-MFA window. Call
 `POST /auth/mfa/step-up` with `{ "code": "123456" }`, then retry the operation.
 
-### PATCH `/1.202602.0/auth/change-password`
+### POST `/1.202602.0/rbac/users`
+
+Requires `rbac.manage` or `*`, plus recent MFA. Provisions a Crosslink-only
+Console user and assigns the initial role. No password is accepted.
 
 ```json
 {
-  "current_password": "password123",
-  "new_password": "newpassword456"
+  "email": "user@example.com",
+  "biller_id": "optional-redbiller-id",
+  "first_name": "Ada",
+  "last_name": "Lovelace",
+  "role_slug": "operations"
 }
 ```
 
