@@ -88,7 +88,7 @@ export default class AuthService {
       token_version: user.token_version || 0,
       roles: access.roleSlugs,
       sid: session.id,
-      amr: ["mfa", authMethod],
+      amr: authMethod === "crosslink" ? ["crosslink"] : ["mfa", authMethod],
       mfa_verified_at: Math.floor(session.mfaVerifiedAt.getTime() / 1000),
     });
 
@@ -244,10 +244,11 @@ export default class AuthService {
       throw new ErrorClass("User not provisioned. Contact admin", 404);
     }
 
-    // Redbiller proves the Echo identity; local MFA is still required before
-    // issuing a Console JWT. Crosslink session fields survive in the challenge.
-    return this._beginMandatoryMfa(
-      user,
+    // Temporary Crosslink bypass: Redbiller validates the identity and the
+    // existing local-user match gates Console access. No MFA challenge here.
+    return this._issueVerifiedSession(
+      user.id,
+      "crosslink",
       { source: "crosslink", sessionID, userKey },
       metadata,
     );

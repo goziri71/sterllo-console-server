@@ -27,8 +27,8 @@ Roles: `finance`, `operations`, `ops_support`, `compliance`, `growth`
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
 | POST | `/1.202602.0/auth/login` | None | Verify email/password and begin MFA |
-| POST | `/1.202602.0/auth/login/crosslink` | None | Validate Crosslink, require provisioned user, begin MFA |
-| POST | `/1.202602.0/auth/login-user` | None | Alias of Crosslink + MFA login |
+| POST | `/1.202602.0/auth/login/crosslink` | None | Validate Crosslink and return JWT |
+| POST | `/1.202602.0/auth/login-user` | None | Alias of Crosslink login |
 | POST | `/1.202602.0/auth/mfa/enroll/confirm` | Challenge | Confirm TOTP enrollment |
 | POST | `/1.202602.0/auth/mfa/challenge/verify` | Challenge | Complete login with TOTP or recovery code |
 | POST | `/1.202602.0/auth/logout` | JWT | Revoke the current device session |
@@ -134,27 +134,7 @@ Echo users from accessing the Console.
 }
 ```
 
-**First success (200): MFA required**
-
-```json
-{
-  "status": true,
-  "code": 200,
-  "message": "MFA verification required",
-  "data": {
-    "state": "mfa_required",
-    "challenge_token": "<short-lived-token>",
-    "expires_in": 300,
-    "methods": ["totp", "recovery_code"]
-  }
-}
-```
-
-For a user who has never enrolled, `data.state` is
-`mfa_enrollment_required` and includes the TOTP setup fields documented above.
-Complete `/auth/mfa/enroll/confirm` or `/auth/mfa/challenge/verify`.
-
-The final MFA response then contains:
+**Success (200)**
 
 ```json
 {
@@ -162,9 +142,7 @@ The final MFA response then contains:
   "code": 200,
   "message": "Login successful",
   "data": {
-    "state": "authenticated",
     "authToken": "LOCAL_JWT",
-    "token": "LOCAL_JWT",
     "sessionID": "CROSSLINK_SESSION_ID",
     "userKey": "CROSSLINK_USER_KEY"
   }
@@ -174,9 +152,10 @@ The final MFA response then contains:
 Missing `token` → `422`. Used Crosslink (`7010`) → `401`. User not
 provisioned → `404`. Ambiguous/mismatched local identity → `409`/`401`.
 
-Frontend: after Redbiller redirects back, POST the opaque token, show the MFA
-screen selected by `data.state`, then store the final `data.authToken` as
-`Authorization: Bearer …`. Keep `sessionID` / `userKey` for Redbiller calls.
+Frontend: after Redbiller redirects back, POST the opaque token and store
+`data.authToken` as `Authorization: Bearer …`. Keep `sessionID` / `userKey` for
+Redbiller calls. Crosslink currently bypasses MFA while the callback flow is
+being stabilized.
 
 Users must exist in the auth `Users` table (`email` and optionally `biller_id`).
 
