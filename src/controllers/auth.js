@@ -64,15 +64,11 @@ export const login = async (request, reply) => {
   return reply.code(200).send({
     code: 200,
     success: true,
-    status: true,
-    message: "Login successful",
-    data: {
-      authToken: result.token,
-      token: result.token,
-      user: result.user,
-      session: result.session,
-      state: result.state,
-    },
+    message:
+      result.state === "mfa_enrollment_required"
+        ? "MFA enrollment required"
+        : "MFA verification required",
+    data: result,
   });
 };
 
@@ -93,16 +89,14 @@ export const loginCrosslink = async (request, reply) => {
     metadata: requestSecurityMetadata(request, device_label),
   });
 
-  // Exact success contract from the other working Crosslink backend.
   return reply.code(200).send({
     status: true,
     code: 200,
-    message: "Login successful",
-    data: {
-      authToken: result.authToken || result.token,
-      sessionID: result.sessionID ?? null,
-      userKey: result.userKey ?? null,
-    },
+    message:
+      result.state === "mfa_enrollment_required"
+        ? "MFA enrollment required"
+        : "MFA verification required",
+    data: result,
   });
 };
 

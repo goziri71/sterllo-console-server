@@ -88,12 +88,7 @@ export default class AuthService {
       token_version: user.token_version || 0,
       roles: access.roleSlugs,
       sid: session.id,
-      amr:
-        authMethod === "crosslink"
-          ? ["crosslink"]
-          : authMethod === "password"
-            ? ["password"]
-            : ["mfa", authMethod],
+      amr: ["mfa", authMethod],
       mfa_verified_at: Math.floor(session.mfaVerifiedAt.getTime() / 1000),
     });
 
@@ -148,9 +143,8 @@ export default class AuthService {
       .where(eq(users.id, insertId))
       .limit(1);
 
-    return this._issueVerifiedSession(
-      newUser.id,
-      "password",
+    return this._beginMandatoryMfa(
+      newUser,
       { source: "registration" },
       metadata,
     );
@@ -174,12 +168,7 @@ export default class AuthService {
       throw new ErrorClass("Invalid email or password", 401);
     }
 
-    return this._issueVerifiedSession(
-      user.id,
-      "password",
-      { source: "password" },
-      metadata,
-    );
+    return this._beginMandatoryMfa(user, { source: "password" }, metadata);
   }
 
   async _findUserByCrosslinkIdentifiers({ billerId, email }) {
@@ -255,11 +244,10 @@ export default class AuthService {
       throw new ErrorClass("User not provisioned. Contact admin", 404);
     }
 
-    // Crosslink-only auth: validate with Redbiller, then issue console JWT
-    // immediately (same contract as the other working Crosslink backend).
-    return this._issueVerifiedSession(
-      user.id,
-      "crosslink",
+    // Redbiller proves the Echo identity; local MFA is still required before
+    // issuing a Console JWT. Crosslink session fields survive in the challenge.
+    return this._beginMandatoryMfa(
+      user,
       { source: "crosslink", sessionID, userKey },
       metadata,
     );
