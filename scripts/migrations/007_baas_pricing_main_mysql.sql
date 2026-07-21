@@ -1,0 +1,3 @@
+-- Run against the main Sterllo database (DB_NAME), never the auth database.
+-- Natural-key indexes are added by the migration runner after duplicate
+-- preflight. Pricing audit history is stored in AUTH_DB_NAME.

@@ -14,12 +14,26 @@ import {
 } from "../../controllers/merchants.js";
 import { getMerchantCustomers } from "../../controllers/customers.js";
 import { getMerchantWallets, getMerchantWallet } from "../../controllers/wallets.js";
-import { getMerchantFees } from "../../controllers/fees.js";
-import { authenticate, requirePermission } from "../../middleware/auth.js";
+import {
+  getMerchantFees,
+  createMerchantFee,
+  updateMerchantFee,
+  deleteMerchantFee,
+} from "../../controllers/fees.js";
+import {
+  authenticate,
+  requirePermission,
+  requireRecentMfa,
+} from "../../middleware/auth.js";
 import { PERMISSIONS } from "../../config/permissions.js";
 
 export default async function merchantRoutes(fastify) {
   fastify.addHook("preHandler", authenticate);
+  const pricingReadGuard = requirePermission(PERMISSIONS.PRICING_READ);
+  const pricingWriteGuard = [
+    requirePermission(PERMISSIONS.PRICING_MANAGE),
+    requireRecentMfa,
+  ];
 
   fastify.get("/stats", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getMerchantStats);
   fastify.get("/", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getAllMerchants);
@@ -34,7 +48,22 @@ export default async function merchantRoutes(fastify) {
   fastify.get("/:account_key/settlements", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getMerchantSettlements);
   fastify.get("/:account_key/wallets", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getMerchantWallets);
   fastify.get("/:account_key/wallets/:wallet_key", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getMerchantWallet);
-  fastify.get("/:account_key/fees", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getMerchantFees);
+  fastify.get("/:account_key/fees", { preHandler: pricingReadGuard }, getMerchantFees);
+  fastify.post(
+    "/:account_key/fees/:feeType",
+    { preHandler: pricingWriteGuard },
+    createMerchantFee,
+  );
+  fastify.patch(
+    "/:account_key/fees/:feeType/:id",
+    { preHandler: pricingWriteGuard },
+    updateMerchantFee,
+  );
+  fastify.delete(
+    "/:account_key/fees/:feeType/:id",
+    { preHandler: pricingWriteGuard },
+    deleteMerchantFee,
+  );
   fastify.get("/:account_key/kycs", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getMerchantKYCs);
   fastify.post(
     "/:account_key/kyc/approve",

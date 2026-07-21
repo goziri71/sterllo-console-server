@@ -156,6 +156,10 @@ Users must exist in the auth `Users` table (`email` and optionally `biller_id`).
 sessions, including the device label, IP, user agent, expiry, and revocation
 reason. Only one session can remain active.
 
+Crosslink and MFA must both succeed before a new session replaces the previous
+one. Device label, IP, and user agent are tracking metadata only; sessions use
+bearer JWTs and are not cryptographically bound to a browser or physical device.
+
 `POST /auth/mfa/recovery-codes/regenerate` accepts:
 
 ```json
@@ -200,7 +204,7 @@ All routes require JWT + any role.
 | GET | `/1.202602.0/merchants/:account_key/settlements` | All | Get merchant's settlements |
 | GET | `/1.202602.0/merchants/:account_key/wallets` | All | Get merchant's wallets (enriched with NGN accounts + crypto addresses) |
 | GET | `/1.202602.0/merchants/:account_key/wallets/:wallet_key` | All | Get single merchant wallet (enriched) |
-| GET | `/1.202602.0/merchants/:account_key/fees` | All | Get merchant's BaaS fee schedule (custom + defaults) |
+| GET | `/1.202602.0/merchants/:account_key/fees` | `pricing.read` | Get merchant's custom, default, and effective BaaS pricing |
 | GET | `/1.202602.0/merchants/:account_key/kycs` | All | List merchant's own KYC records (not customer KYCs) |
 | POST | `/1.202602.0/merchants/:account_key/kyc/approve` | `kyc.update` | Approve merchant KYC (`is_compliant` → `Y`) |
 | PATCH | `/1.202602.0/merchants/:account_key` | operations, compliance | Update merchant |
@@ -320,7 +324,7 @@ All routes require JWT + any role.
 | GET | `/1.202602.0/customers/:identifier/wallets` | All | Get customer's wallets (NGN/crypto rails + balances when allowed) |
 | GET | `/1.202602.0/customers/:identifier/wallets/:wallet_key` | All | Get single customer wallet (balances when allowed) |
 | GET | `/1.202602.0/customers/:identifier/wallets/:wallet_key/ledger` | All | Per-wallet ledger lines (service text + balances; requires `financial.read`) |
-| GET | `/1.202602.0/customers/:identifier/fees` | All | Get customer's SaaS fee schedule |
+| GET | `/1.202602.0/customers/:identifier/fees` | `pricing.read` | Get the parent merchant's SaaS fee schedule |
 | GET | `/1.202602.0/customers/:identifier/kycs` | All | Get customer's KYCs |
 | PATCH | `/1.202602.0/customers/:identifier` | `customer.update` | Update customer (status, compliance flags, tier, PND/PNC) |
 | PATCH | `/1.202602.0/customers/:identifier/tier` | `customer.update` | Set KYC tier only (`{ "tier": 2 }`) |
@@ -730,11 +734,30 @@ Whitelisted IPs also supports:
 
 ## Fees
 
-All routes require JWT + any role.
+Pricing reads require `pricing.read`. Pricing mutations require
+`pricing.manage` plus recent MFA.
 
 | Method | Endpoint | Roles | Description |
 |--------|----------|-------|-------------|
-| GET | `/1.202602.0/fees/defaults` | All | Get all default (platform-wide) fee schedules |
+| GET | `/1.202602.0/fees/defaults` | `pricing.read` | Get all default fee schedules |
+| GET | `/1.202602.0/fees/audit` | `pricing.read` | List pricing mutation audit events |
+| POST | `/1.202602.0/fees/defaults/:feeType` | `pricing.manage` + MFA | Create default pricing |
+| PATCH | `/1.202602.0/fees/defaults/:feeType/:id` | `pricing.manage` + MFA | Update default pricing values |
+| DELETE | `/1.202602.0/fees/defaults/:feeType/:id` | `pricing.manage` + MFA | Delete an unused default row |
+| POST | `/1.202602.0/merchants/:account_key/fees/:feeType` | `pricing.manage` + MFA | Create a merchant override |
+| PATCH | `/1.202602.0/merchants/:account_key/fees/:feeType/:id` | `pricing.manage` + MFA | Update or disable an override |
+| DELETE | `/1.202602.0/merchants/:account_key/fees/:feeType/:id` | `pricing.manage` + MFA | Delete a merchant override |
+
+Allowed `feeType` values are `deposit`, `payout`, `swap`, `transfer`,
+`withdrawal`, `overdraft_processing`, and `wallet_maintenance`.
+
+Pricing rows remain in the main Sterllo database. Audit events are stored in the
+separate auth database and link the Console actor through `actor_user_id`,
+`actor_user_key`, and `actor_session_id`, plus the merchant through
+`merchant_user_key` and `account_key`.
+
+Deposit and payout rows match by `method + currency_code`; every other fee type
+matches by `currency_code`. Matching fields cannot be changed by PATCH.
 
 ### Response structure for fee endpoints
 
@@ -757,7 +780,7 @@ Fee responses are grouped by type:
 
 ### Merchant fees (`GET /1.202602.0/merchants/:account_key/fees`)
 
-Returns both custom (merchant-specific) BaaS fees and platform defaults:
+Returns custom rows, platform defaults, and the effective schedule:
 
 ```json
 {
@@ -780,10 +803,37 @@ Returns both custom (merchant-specific) BaaS fees and platform defaults:
       "withdrawal": [...],
       "overdraft_processing": [...],
       "wallet_maintenance": [...]
+    },
+    "effective": {
+      "deposit": [
+        {
+          "id": 10,
+          "method": "card",
+          "currency_code": "NGN",
+          "source": "custom",
+          "default_id": 1,
+          "custom_id": 10
+        }
+      ],
+      "payout": [...],
+      "swap": [...],
+      "transfer": [...],
+      "withdrawal": [...],
+      "overdraft_processing": [...],
+      "wallet_maintenance": [...]
     }
   }
 }
 ```
+
+An enabled custom row replaces the whole matching default row. If the custom
+row is absent or has `is_enabled: "N"`, the matching default row is returned in
+`effective` with `source: "default"`.
+
+Create requests must include every field for that fee type. PATCH requests may
+change value, percentage, cap, VAT, payer, and `is_enabled` fields but cannot
+change the matching method/currency. Identifiers, merchant keys, actor IDs, and
+audit metadata are generated or derived by the backend.
 
 ### Customer fees (`GET /1.202602.0/customers/:identifier/fees`)
 

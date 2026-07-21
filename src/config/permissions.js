@@ -8,6 +8,8 @@ export const PERMISSIONS = {
   RBAC_MANAGE: "rbac.manage",
   /** Balances, transaction amounts, settlement totals, finance/growth volume metrics, dashboard money fields. */
   FINANCIAL_READ: "financial.read",
+  PRICING_READ: "pricing.read",
+  PRICING_MANAGE: "pricing.manage",
   CONSOLE_READ: "console.read",
   CUSTOMER_UPDATE: "customer.update",
   MERCHANT_UPDATE: "merchant.update",
