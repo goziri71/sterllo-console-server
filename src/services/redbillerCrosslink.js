@@ -68,21 +68,25 @@ export async function validateCrosslinkToken(token) {
 /** Extract local-user identifiers from a successful Redbiller crosslink payload. */
 export function extractCrosslinkIdentifiers(data) {
   const root = (data && data.data) || {};
-  const profile = root.profile || {};
+  const account = root.account || {};
+  const profile = root.profile || account.profile || {};
+  const session = root.session || account.session || {};
 
   const billerId =
     profile.redbiller_id || root.redbiller_id || root.billerId || null;
   const email =
     profile.email ||
     profile.email_address ||
+    profile.bio?.mailer?.email_address ||
+    profile.contacts?.email_address ||
     root.email ||
     root.email_address ||
     null;
 
   return {
     billerId: billerId ? String(billerId).trim() : null,
-    email: email ? String(email).trim() : null,
-    sessionID: root.sessionID ?? root.session_id ?? null,
-    userKey: root.userKey ?? root.user_key ?? null,
+    email: email ? String(email).trim().toLowerCase() : null,
+    sessionID: root.sessionID ?? root.session_id ?? session.id ?? null,
+    userKey: root.userKey ?? root.user_key ?? profile.key ?? null,
   };
 }
