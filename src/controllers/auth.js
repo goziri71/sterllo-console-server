@@ -92,11 +92,12 @@ export const loginCrosslink = async (request, reply) => {
   return reply.code(200).send({
     status: true,
     code: 200,
-    message:
-      result.state === "mfa_enrollment_required"
-        ? "MFA enrollment required"
-        : "MFA verification required",
-    data: result,
+    message: "Login successful",
+    data: {
+      authToken: result.authToken || result.token,
+      sessionID: result.sessionID ?? null,
+      userKey: result.userKey ?? null,
+    },
   });
 };
 
