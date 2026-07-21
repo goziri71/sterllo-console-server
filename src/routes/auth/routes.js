@@ -1,5 +1,4 @@
 import {
-  register,
   login,
   loginCrosslink,
   confirmMfaEnrollment,
@@ -16,15 +15,6 @@ import { authenticate } from "../../middleware/auth.js";
 
 export default async function authRoutes(fastify) {
   // Public routes
-  fastify.post(
-    "/register",
-    {
-      config: {
-        rateLimit: { max: 20, timeWindow: "15 minutes" },
-      },
-    },
-    register,
-  );
   fastify.post(
     "/login",
     {
