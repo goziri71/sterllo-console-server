@@ -42,10 +42,7 @@ export const authenticate = async (request, reply) => {
   }
 
   const methods = Array.isArray(decoded.amr) ? decoded.amr : [];
-  if (
-    !decoded.sid ||
-    (!methods.includes("mfa") && !methods.includes("crosslink"))
-  ) {
+  if (!decoded.sid || !methods.includes("mfa")) {
     throw new ErrorClass("Authenticated session required", 401);
   }
 

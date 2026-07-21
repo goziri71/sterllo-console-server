@@ -21,14 +21,15 @@ The backend returns **`roles`**, **`permissions`**, and a single display **`role
 
 | Endpoint | Response shape |
 |----------|------------------|
-| **POST** `{API_PREFIX}/auth/login` | `{ code, success, data: { user, token } }` — **`user` includes `roles`, `permissions`, `role`** |
-| **POST** `{API_PREFIX}/auth/register` | same as login |
+| **POST** `{API_PREFIX}/auth/mfa/enroll/confirm` | Completed Crosslink enrollment returns `data.user`, `data.token`, and recovery codes |
+| **POST** `{API_PREFIX}/auth/mfa/challenge/verify` | Completed Crosslink MFA returns `data.user` and `data.token` |
 | **GET** `{API_PREFIX}/auth/profile` | `{ code, success, data: { …user, roles, permissions, role } }` |
 
-**Critical for the frontend:** read arrays from **`data.user`** (login/register) or **`data`** (profile), not from the top-level JSON. Example:
+**Critical for the frontend:** read arrays from **`data.user`** after MFA or
+**`data`** from the profile endpoint, not from the top-level JSON. Example:
 
 ```ts
-// Login
+// Completed MFA
 const user = response.data.user;
 const roles = user.roles ?? [];
 const permissions = user.permissions ?? [];

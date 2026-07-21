@@ -1,5 +1,6 @@
 import {
   listUsers,
+  createUser,
   listPermissions,
   listRoles,
   createRole,
@@ -20,6 +21,7 @@ export default async function rbacRoutes(fastify) {
   };
 
   fastify.get("/users", readGuard, listUsers);
+  fastify.post("/users", writeGuard, createUser);
   fastify.get("/permissions", readGuard, listPermissions);
   fastify.get("/roles", readGuard, listRoles);
   fastify.post("/roles", writeGuard, createRole);

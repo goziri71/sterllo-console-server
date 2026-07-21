@@ -24,6 +24,24 @@ export const listUsers = async (request, reply) => {
   });
 };
 
+export const createUser = async (request, reply) => {
+  const body = request.body || {};
+  const created = await rbacService.createConsoleUser({
+    email: body.email,
+    biller_id: body.biller_id,
+    first_name: body.first_name,
+    last_name: body.last_name,
+    role_slug: body.role_slug,
+    assignedByUserId: request.user.id,
+  });
+  return reply.code(201).send({
+    code: 201,
+    state: true,
+    message: "Console user provisioned successfully",
+    data: created,
+  });
+};
+
 export const listPermissions = async (request, reply) => {
   const rows = await rbacService.listPermissions();
   return ok(reply, rows);

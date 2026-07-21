@@ -1,5 +1,4 @@
 import {
-  login,
   loginCrosslink,
   confirmMfaEnrollment,
   completeMfaLogin,
@@ -8,22 +7,12 @@ import {
   listSessions,
   regenerateRecoveryCodes,
   verifyMfaStepUp,
-  changePassword,
   getProfile,
 } from "../../controllers/auth.js";
 import { authenticate } from "../../middleware/auth.js";
 
 export default async function authRoutes(fastify) {
   // Public routes
-  fastify.post(
-    "/login",
-    {
-      config: {
-        rateLimit: { max: 30, timeWindow: "15 minutes" },
-      },
-    },
-    login,
-  );
   fastify.post(
     "/login/crosslink",
     {
@@ -104,15 +93,5 @@ export default async function authRoutes(fastify) {
       },
     },
     verifyMfaStepUp,
-  );
-  fastify.patch(
-    "/change-password",
-    {
-      preHandler: authenticate,
-      config: {
-        rateLimit: { max: 40, timeWindow: "15 minutes" },
-      },
-    },
-    changePassword,
   );
 }

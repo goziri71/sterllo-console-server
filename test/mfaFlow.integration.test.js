@@ -46,11 +46,28 @@ test(
       const auth = new authModule.default();
       const security = new securityModule.default();
 
-      const enrollment = await auth.register({
+      const timestamp = new Date();
+      const insertResult = await authDb.insert(users).values({
+        user_key: crypto.randomBytes(32).toString("hex"),
         email,
-        password: "Test-password-123!",
+        biller_id: `mfa-test-${Date.now()}`,
+        auth_provider: "crosslink",
+        password: null,
         first_name: "MFA",
         last_name: "Integration",
+        token_version: 0,
+        date_created: timestamp,
+        date_modified: timestamp,
+      });
+      userId = Number(insertResult[0].insertId);
+      const [user] = await authDb
+        .select()
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+
+      const enrollment = await security.beginAuthentication(user, {
+        context: { source: "crosslink", sessionID: "crosslink-session-1" },
         metadata,
       });
       assert.equal(enrollment.state, "mfa_enrollment_required");
@@ -61,13 +78,12 @@ test(
         code,
         metadata,
       });
-      userId = first.user.id;
+      assert.equal(first.user.id, userId);
       assert.ok(first.token);
       assert.equal(first.recovery_codes.length > 0, true);
 
-      const loginChallenge = await auth.login({
-        email,
-        password: "Test-password-123!",
+      const loginChallenge = await security.beginAuthentication(user, {
+        context: { source: "crosslink", sessionID: "crosslink-session-2" },
         metadata: { ...metadata, deviceLabel: "Replacement Device" },
       });
       const second = await auth.completeMfaLogin({
@@ -82,9 +98,8 @@ test(
       );
       assert.ok(await security.getActiveSession(second.session.id, userId));
 
-      const replayChallenge = await auth.login({
-        email,
-        password: "Test-password-123!",
+      const replayChallenge = await security.beginAuthentication(user, {
+        context: { source: "crosslink", sessionID: "crosslink-session-3" },
         metadata,
       });
       await assert.rejects(

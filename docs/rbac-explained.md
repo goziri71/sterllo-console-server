@@ -10,7 +10,7 @@ This is the mental model for **roles**, **slugs**, **permissions**, and **users*
 |--------|------------|---------|
 | **Permission** | A single capability string stored in the database. | `console.read`, `financial.read`, `rbac.manage`, `*` |
 | **Role** | A named **group** of permissions. Think “job template”. | `management`, `finance`, `operations` |
-| **User** | A person who logs in (`Users` table: email, password, `user_key`, …). | `goziri71@gmail.com` |
+| **User** | A locally provisioned person who authenticates through Crosslink (`Users` table: email, `biller_id`, `user_key`, …). | `goziri71@gmail.com` |
 | **User ↔ role link** | Which template(s) apply to **this** user. A user can have **more than one** role. | Rows in `rbac_user_roles` |
 
 At runtime the API loads **all roles** for that user, unions their permissions, and puts the result on `request.user` as a **Set** (`permissionKeys`).

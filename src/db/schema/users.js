@@ -10,7 +10,9 @@ export const users = mysqlTable("Users", {
 
   biller_id: varchar("biller_id", { length: 255 }).unique(),
 
-  password: varchar("password", { length: 255 }).notNull(),
+  auth_provider: varchar("auth_provider", { length: 30 }).notNull().default("crosslink"),
+
+  password: varchar("password", { length: 255 }),
 
   first_name: varchar("first_name", { length: 150 }),
 
