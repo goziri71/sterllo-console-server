@@ -586,6 +586,7 @@ All routes require JWT + any role. All are read-only.
 | `page` | Page number (default: 1) |
 | `limit` | Items per page (default: 20) |
 | `account_key` | Filter by merchant account key |
+| `user_key` | Filter by merchant owner `user_key`. When listing by merchant (no `identifier`), the API resolves the merchant from `account_key` and/or `user_key` and matches ledger rows on **either** key. Sending only `account_key` is enough — `user_key` is loaded from `Merchants`. |
 | `identifier` | Customer `identifier` — scopes results to that customer’s wallets (all wallets if `wallet_key` omitted). Validates customer exists; optional `account_key` must match the customer’s merchant; optional `wallet_key` must belong to the customer. Works on **all** transaction list endpoints and **statement**. |
 | `wallet_key` | Filter by wallet key (matches source/target and swap legs where applicable) |
 | `status` | Filter by status |
@@ -593,6 +594,8 @@ All routes require JWT + any role. All are read-only.
 | `search` | Search by reference, wallet key, and transaction-specific identifiers |
 | `from_date` | Start date (ISO format) |
 | `to_date` | End date (ISO format) |
+
+Merchant-scoped lists (`account_key` / `user_key`, no `identifier`): the API loads the merchant and matches ledger rows on **`account_key` OR `user_key`** (both resolved from `Merchants`). NGN/crypto deposits (wallet-only tables) are scoped via merchant + customer wallets under that account.
 
 `GET /1.202602.0/transactions/statement` requires the **`financial.read`** permission (same as other sensitive financial aggregates).
 

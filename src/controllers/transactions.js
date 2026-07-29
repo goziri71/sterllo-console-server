@@ -13,6 +13,7 @@ function maybeRedactTxPage(data, user) {
 function extractFilters(query) {
   return {
     account_key: query.account_key,
+    user_key: query.user_key,
     identifier: query.identifier,
     wallet_key: query.wallet_key,
     status: query.status,

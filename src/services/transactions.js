@@ -4,6 +4,7 @@ import { deposits, withdrawals, transfers, swaps } from "../db/schema/transactio
 import { ngnDeposits, ngnPayouts } from "../db/schema/fiat.js";
 import { cryptoDeposits, cryptoPayouts } from "../db/schema/crypto.js";
 import { customers, customerWallets } from "../db/schema/customers.js";
+import { merchants, merchantLedgers } from "../db/schema/merchants.js";
 import { ErrorClass } from "../utils/errorClass/index.js";
 import { isMissingMysqlTableError } from "../utils/mysqlErrors.js";
 
@@ -135,6 +136,94 @@ async function resolveCustomerWalletScope(filters) {
   }
 
   return { walletKeys: [...keySet], empty: false, identifier };
+}
+
+/**
+ * Merchant transaction scope: resolve both account_key and user_key, plus wallets.
+ * Applied when listing by merchant (no customer identifier).
+ */
+async function resolveMerchantOwnerScope(filters) {
+  if (filters?.identifier) return null;
+
+  const accountKey = filters?.account_key
+    ? String(filters.account_key).trim()
+    : "";
+  const userKey = filters?.user_key ? String(filters.user_key).trim() : "";
+  if (!accountKey && !userKey) return null;
+
+  const match =
+    accountKey && userKey
+      ? and(eq(merchants.account_key, accountKey), eq(merchants.user_key, userKey))
+      : accountKey
+        ? eq(merchants.account_key, accountKey)
+        : eq(merchants.user_key, userKey);
+
+  const [merchant] = await db.select().from(merchants).where(match).limit(1);
+  if (!merchant) {
+    throw new ErrorClass("Merchant not found", 404);
+  }
+  if (accountKey && merchant.account_key !== accountKey) {
+    throw new ErrorClass("user_key does not match this merchant account_key", 400);
+  }
+  if (userKey && merchant.user_key && merchant.user_key !== userKey) {
+    throw new ErrorClass("user_key does not match this merchant account_key", 400);
+  }
+
+  const resolvedAccountKey = merchant.account_key || accountKey || null;
+  const resolvedUserKey = merchant.user_key || userKey || null;
+
+  const [merchantWalletRows, customerRows] = await Promise.all([
+    resolvedAccountKey
+      ? db
+          .select({ wallet_key: merchantLedgers.wallet_key })
+          .from(merchantLedgers)
+          .where(eq(merchantLedgers.account_key, resolvedAccountKey))
+      : Promise.resolve([]),
+    resolvedAccountKey
+      ? db
+          .select({ identifier: customers.identifier })
+          .from(customers)
+          .where(eq(customers.account_key, resolvedAccountKey))
+      : Promise.resolve([]),
+  ]);
+
+  const customerIdentifiers = customerRows.map((r) => r.identifier).filter(Boolean);
+  const customerWalletRows =
+    customerIdentifiers.length > 0
+      ? await db
+          .select({ wallet_key: customerWallets.wallet_key })
+          .from(customerWallets)
+          .where(inArray(customerWallets.identifier, customerIdentifiers))
+      : [];
+
+  const walletKeys = [
+    ...new Set(
+      [...merchantWalletRows, ...customerWalletRows]
+        .map((r) => r.wallet_key)
+        .filter(Boolean),
+    ),
+  ];
+
+  return {
+    account_key: resolvedAccountKey,
+    user_key: resolvedUserKey,
+    walletKeys,
+  };
+}
+
+function appendMerchantOwnerFilter(conditions, accountKeyCol, userKeyCol, merchantScope) {
+  if (!merchantScope) return;
+  const parts = [];
+  // Match either key: some ledger rows are keyed by account_key, some by user_key only.
+  // When both are present on a row, either match still scopes to this merchant.
+  if (merchantScope.account_key && accountKeyCol) {
+    parts.push(eq(accountKeyCol, merchantScope.account_key));
+  }
+  if (merchantScope.user_key && userKeyCol) {
+    parts.push(eq(userKeyCol, merchantScope.user_key));
+  }
+  if (parts.length === 0) return;
+  conditions.push(parts.length === 1 ? parts[0] : or(...parts));
 }
 
 function emptyTxPage() {
@@ -516,9 +605,14 @@ export default class TransactionService {
   async getDeposits({ limit, offset, filters }) {
     const scope = await resolveCustomerWalletScope(filters);
     if (scope.empty) return emptyTxPage();
+    const merchantScope = await resolveMerchantOwnerScope(filters);
 
     const conditions = [];
-    if (filters.account_key) conditions.push(eq(deposits.account_key, filters.account_key));
+    if (scope.identifier) {
+      if (filters.account_key) conditions.push(eq(deposits.account_key, filters.account_key));
+    } else {
+      appendMerchantOwnerFilter(conditions, deposits.account_key, deposits.user_key, merchantScope);
+    }
     appendWalletKeyFilter(conditions, deposits.source_wallet_key, deposits.target_wallet_key, filters);
     const touch = walletKeysTouchCondition(
       [deposits.source_wallet_key, deposits.target_wallet_key],
@@ -542,9 +636,19 @@ export default class TransactionService {
   async getWithdrawals({ limit, offset, filters }) {
     const scope = await resolveCustomerWalletScope(filters);
     if (scope.empty) return emptyTxPage();
+    const merchantScope = await resolveMerchantOwnerScope(filters);
 
     const conditions = [];
-    if (filters.account_key) conditions.push(eq(withdrawals.account_key, filters.account_key));
+    if (scope.identifier) {
+      if (filters.account_key) conditions.push(eq(withdrawals.account_key, filters.account_key));
+    } else {
+      appendMerchantOwnerFilter(
+        conditions,
+        withdrawals.account_key,
+        withdrawals.user_key,
+        merchantScope,
+      );
+    }
     appendWalletKeyFilter(conditions, withdrawals.source_wallet_key, withdrawals.target_wallet_key, filters);
     const touch = walletKeysTouchCondition(
       [withdrawals.source_wallet_key, withdrawals.target_wallet_key],
@@ -568,9 +672,14 @@ export default class TransactionService {
   async getTransfers({ limit, offset, filters }) {
     const scope = await resolveCustomerWalletScope(filters);
     if (scope.empty) return emptyTxPage();
+    const merchantScope = await resolveMerchantOwnerScope(filters);
 
     const conditions = [];
-    if (filters.account_key) conditions.push(eq(transfers.account_key, filters.account_key));
+    if (scope.identifier) {
+      if (filters.account_key) conditions.push(eq(transfers.account_key, filters.account_key));
+    } else {
+      appendMerchantOwnerFilter(conditions, transfers.account_key, transfers.user_key, merchantScope);
+    }
     appendWalletKeyFilter(conditions, transfers.source_wallet_key, transfers.target_wallet_key, filters);
     const touch = walletKeysTouchCondition(
       [transfers.source_wallet_key, transfers.target_wallet_key],
@@ -596,9 +705,14 @@ export default class TransactionService {
   async getSwaps({ limit, offset, filters }) {
     const scope = await resolveCustomerWalletScope(filters);
     if (scope.empty) return emptyTxPage();
+    const merchantScope = await resolveMerchantOwnerScope(filters);
 
     const conditions = [];
-    if (filters.account_key) conditions.push(eq(swaps.account_key, filters.account_key));
+    if (scope.identifier) {
+      if (filters.account_key) conditions.push(eq(swaps.account_key, filters.account_key));
+    } else {
+      appendMerchantOwnerFilter(conditions, swaps.account_key, swaps.user_key, merchantScope);
+    }
     appendSwapWalletKeyFilter(conditions, filters);
     const touch = walletKeysTouchCondition(
       [
@@ -638,10 +752,17 @@ export default class TransactionService {
 
     const scope = await resolveCustomerWalletScope(filters);
     if (scope.empty) return emptyTxPage();
+    const merchantScope = await resolveMerchantOwnerScope(filters);
+    if (merchantScope && !filters.wallet_key && merchantScope.walletKeys.length === 0) {
+      return emptyTxPage();
+    }
 
     const conditions = [];
     appendWalletKeyFilter(conditions, ngnDeposits.wallet_key, null, filters);
-    const touch = walletKeysTouchCondition([ngnDeposits.wallet_key], scope.walletKeys);
+    const touch = walletKeysTouchCondition(
+      [ngnDeposits.wallet_key],
+      scope.walletKeys || merchantScope?.walletKeys,
+    );
     if (touch) conditions.push(touch);
     appendTransactionStatusFilter(conditions, ngnDeposits.credit_status, filters);
     if (filters.search) appendNgnDepositSearch(conditions, filters.search);
@@ -657,9 +778,19 @@ export default class TransactionService {
 
     const scope = await resolveCustomerWalletScope(filters);
     if (scope.empty) return emptyTxPage();
+    const merchantScope = await resolveMerchantOwnerScope(filters);
 
     const conditions = [];
-    if (filters.account_key) conditions.push(eq(ngnPayouts.account_key, filters.account_key));
+    if (scope.identifier) {
+      if (filters.account_key) conditions.push(eq(ngnPayouts.account_key, filters.account_key));
+    } else {
+      appendMerchantOwnerFilter(
+        conditions,
+        ngnPayouts.account_key,
+        ngnPayouts.user_key,
+        merchantScope,
+      );
+    }
     if (filters.wallet_key) conditions.push(eq(ngnPayouts.source_wallet_key, filters.wallet_key));
     appendPayoutCustomerScope(conditions, ngnPayouts.source_wallet_key, ngnPayouts.source_identifier, scope);
     appendTransactionStatusFilter(conditions, ngnPayouts.payout_status, filters);
@@ -672,10 +803,17 @@ export default class TransactionService {
   async getCryptoDeposits({ limit, offset, filters }) {
     const scope = await resolveCustomerWalletScope(filters);
     if (scope.empty) return emptyTxPage();
+    const merchantScope = await resolveMerchantOwnerScope(filters);
+    if (merchantScope && !filters.wallet_key && merchantScope.walletKeys.length === 0) {
+      return emptyTxPage();
+    }
 
     const conditions = [];
     appendWalletKeyFilter(conditions, cryptoDeposits.wallet_key, null, filters);
-    const touch = walletKeysTouchCondition([cryptoDeposits.wallet_key], scope.walletKeys);
+    const touch = walletKeysTouchCondition(
+      [cryptoDeposits.wallet_key],
+      scope.walletKeys || merchantScope?.walletKeys,
+    );
     if (touch) conditions.push(touch);
     appendTransactionStatusFilter(conditions, cryptoDeposits.credit_status, filters);
     if (filters.search) {
@@ -700,9 +838,19 @@ export default class TransactionService {
   async getCryptoPayouts({ limit, offset, filters }) {
     const scope = await resolveCustomerWalletScope(filters);
     if (scope.empty) return emptyTxPage();
+    const merchantScope = await resolveMerchantOwnerScope(filters);
 
     const conditions = [];
-    if (filters.account_key) conditions.push(eq(cryptoPayouts.account_key, filters.account_key));
+    if (scope.identifier) {
+      if (filters.account_key) conditions.push(eq(cryptoPayouts.account_key, filters.account_key));
+    } else {
+      appendMerchantOwnerFilter(
+        conditions,
+        cryptoPayouts.account_key,
+        cryptoPayouts.user_key,
+        merchantScope,
+      );
+    }
     if (filters.wallet_key) conditions.push(eq(cryptoPayouts.source_wallet_key, filters.wallet_key));
     appendPayoutCustomerScope(conditions, cryptoPayouts.source_wallet_key, cryptoPayouts.source_identifier, scope);
     appendTransactionStatusFilter(conditions, cryptoPayouts.payout_status, filters);
@@ -737,9 +885,11 @@ export default class TransactionService {
     if (scope.empty) {
       return { count: 0, rows: [] };
     }
+    const merchantScope = await resolveMerchantOwnerScope(filters);
 
     const customerWalletKeysArr = scope.walletKeys;
     const customerWalletKeySet = customerWalletKeysArr ? new Set(customerWalletKeysArr) : null;
+    const merchantWalletKeysArr = !scope.identifier ? merchantScope?.walletKeys : null;
     const applyDate = (table, conditions) => {
       if (fromDate && toDate) {
         conditions.push(between(table.date_created, fromDate, toDate));
@@ -762,7 +912,11 @@ export default class TransactionService {
     ] = await Promise.all([
       (() => {
         const conditions = [];
-        if (filters.account_key) conditions.push(eq(deposits.account_key, filters.account_key));
+        if (scope.identifier) {
+          if (filters.account_key) conditions.push(eq(deposits.account_key, filters.account_key));
+        } else {
+          appendMerchantOwnerFilter(conditions, deposits.account_key, deposits.user_key, merchantScope);
+        }
         if (filters.wallet_key) {
           conditions.push(or(eq(deposits.source_wallet_key, filters.wallet_key), eq(deposits.target_wallet_key, filters.wallet_key)));
         }
@@ -791,7 +945,16 @@ export default class TransactionService {
       })(),
       (() => {
         const conditions = [];
-        if (filters.account_key) conditions.push(eq(withdrawals.account_key, filters.account_key));
+        if (scope.identifier) {
+          if (filters.account_key) conditions.push(eq(withdrawals.account_key, filters.account_key));
+        } else {
+          appendMerchantOwnerFilter(
+            conditions,
+            withdrawals.account_key,
+            withdrawals.user_key,
+            merchantScope,
+          );
+        }
         if (filters.wallet_key) {
           conditions.push(or(eq(withdrawals.source_wallet_key, filters.wallet_key), eq(withdrawals.target_wallet_key, filters.wallet_key)));
         }
@@ -820,7 +983,11 @@ export default class TransactionService {
       })(),
       (() => {
         const conditions = [];
-        if (filters.account_key) conditions.push(eq(transfers.account_key, filters.account_key));
+        if (scope.identifier) {
+          if (filters.account_key) conditions.push(eq(transfers.account_key, filters.account_key));
+        } else {
+          appendMerchantOwnerFilter(conditions, transfers.account_key, transfers.user_key, merchantScope);
+        }
         if (filters.wallet_key) {
           conditions.push(or(eq(transfers.source_wallet_key, filters.wallet_key), eq(transfers.target_wallet_key, filters.wallet_key)));
         }
@@ -849,7 +1016,11 @@ export default class TransactionService {
       })(),
       (() => {
         const conditions = [];
-        if (filters.account_key) conditions.push(eq(swaps.account_key, filters.account_key));
+        if (scope.identifier) {
+          if (filters.account_key) conditions.push(eq(swaps.account_key, filters.account_key));
+        } else {
+          appendMerchantOwnerFilter(conditions, swaps.account_key, swaps.user_key, merchantScope);
+        }
         if (filters.wallet_key) {
           conditions.push(
             or(
@@ -890,8 +1061,11 @@ export default class TransactionService {
       (() => {
         const conditions = [];
         if (filters.wallet_key) conditions.push(eq(ngnDeposits.wallet_key, filters.wallet_key));
-        if (customerWalletKeysArr) {
-          conditions.push(inArray(ngnDeposits.wallet_key, customerWalletKeysArr));
+        const walletScope = customerWalletKeysArr || merchantWalletKeysArr;
+        if (walletScope?.length) {
+          conditions.push(inArray(ngnDeposits.wallet_key, walletScope));
+        } else if (merchantScope && !filters.wallet_key) {
+          conditions.push(sql`1 = 0`);
         }
         applyDate(ngnDeposits, conditions);
         const where = conditions.length > 0 ? and(...conditions) : undefined;
@@ -917,7 +1091,16 @@ export default class TransactionService {
       })(),
       (() => {
         const conditions = [];
-        if (filters.account_key) conditions.push(eq(ngnPayouts.account_key, filters.account_key));
+        if (scope.identifier) {
+          if (filters.account_key) conditions.push(eq(ngnPayouts.account_key, filters.account_key));
+        } else {
+          appendMerchantOwnerFilter(
+            conditions,
+            ngnPayouts.account_key,
+            ngnPayouts.user_key,
+            merchantScope,
+          );
+        }
         if (filters.wallet_key) conditions.push(eq(ngnPayouts.source_wallet_key, filters.wallet_key));
         appendPayoutCustomerScope(conditions, ngnPayouts.source_wallet_key, ngnPayouts.source_identifier, scope);
         applyDate(ngnPayouts, conditions);
@@ -945,7 +1128,12 @@ export default class TransactionService {
       (() => {
         const conditions = [];
         if (filters.wallet_key) conditions.push(eq(cryptoDeposits.wallet_key, filters.wallet_key));
-        if (customerWalletKeysArr) conditions.push(inArray(cryptoDeposits.wallet_key, customerWalletKeysArr));
+        const walletScope = customerWalletKeysArr || merchantWalletKeysArr;
+        if (walletScope?.length) {
+          conditions.push(inArray(cryptoDeposits.wallet_key, walletScope));
+        } else if (merchantScope && !filters.wallet_key) {
+          conditions.push(sql`1 = 0`);
+        }
         applyDate(cryptoDeposits, conditions);
         const where = conditions.length > 0 ? and(...conditions) : undefined;
         return db.select({
@@ -970,7 +1158,16 @@ export default class TransactionService {
       })(),
       (() => {
         const conditions = [];
-        if (filters.account_key) conditions.push(eq(cryptoPayouts.account_key, filters.account_key));
+        if (scope.identifier) {
+          if (filters.account_key) conditions.push(eq(cryptoPayouts.account_key, filters.account_key));
+        } else {
+          appendMerchantOwnerFilter(
+            conditions,
+            cryptoPayouts.account_key,
+            cryptoPayouts.user_key,
+            merchantScope,
+          );
+        }
         if (filters.wallet_key) conditions.push(eq(cryptoPayouts.source_wallet_key, filters.wallet_key));
         appendPayoutCustomerScope(conditions, cryptoPayouts.source_wallet_key, cryptoPayouts.source_identifier, scope);
         applyDate(cryptoPayouts, conditions);
@@ -1000,7 +1197,15 @@ export default class TransactionService {
     const allRows = [...depRows, ...wdrRows, ...trfRows, ...swpRows, ...ngnDepRows, ...ngnPayRows, ...cDepRows, ...cPayRows];
 
     const filtered = allRows.filter((row) => {
-      if (
+      if (merchantScope && !scope.identifier) {
+        if (
+          row.account_key != null &&
+          merchantScope.account_key &&
+          row.account_key !== merchantScope.account_key
+        ) {
+          return false;
+        }
+      } else if (
         filters.account_key &&
         row.account_key != null &&
         row.account_key !== filters.account_key
@@ -1008,6 +1213,14 @@ export default class TransactionService {
         return false;
       }
       if (filters.identifier && customerWalletKeySet && !rowTouchesWalletKeys(row, customerWalletKeySet)) {
+        return false;
+      }
+      if (
+        !scope.identifier &&
+        merchantWalletKeysArr?.length &&
+        row.account_key == null &&
+        !rowTouchesWalletKeys(row, new Set(merchantWalletKeysArr))
+      ) {
         return false;
       }
       if (filters.wallet_key && !rowTouchesSingleWallet(row, filters.wallet_key)) return false;
@@ -1354,6 +1567,7 @@ export default class TransactionService {
         by_type: {},
       };
     }
+    const merchantScope = await resolveMerchantOwnerScope(filters);
 
     const pendingFilters = { ...filters, pending: true };
     const types = filters.transaction_type
@@ -1363,7 +1577,12 @@ export default class TransactionService {
     const counts = await Promise.all(
       types.map(async (typeKey) => {
         if (!TX_REVIEW_TYPES.has(typeKey)) return [typeKey, 0];
-        const total = await this.countPendingByType(typeKey, pendingFilters, scope);
+        const total = await this.countPendingByType(
+          typeKey,
+          pendingFilters,
+          scope,
+          merchantScope,
+        );
         return [typeKey, total];
       }),
     );
@@ -1376,6 +1595,7 @@ export default class TransactionService {
   async getPendingReview({ limit, offset, filters }) {
     const scope = await resolveCustomerWalletScope(filters);
     if (scope.empty) return emptyTxPage();
+    const merchantScope = await resolveMerchantOwnerScope(filters);
 
     const types = filters.transaction_type
       ? [String(filters.transaction_type).trim()]
@@ -1386,7 +1606,9 @@ export default class TransactionService {
     const batches = await Promise.all(
       types
         .filter((typeKey) => TX_REVIEW_TYPES.has(typeKey))
-        .map((typeKey) => this.fetchPendingByType(typeKey, pendingFilters, scope, perSource)),
+        .map((typeKey) =>
+          this.fetchPendingByType(typeKey, pendingFilters, scope, perSource, merchantScope),
+        ),
     );
 
     const merged = batches.flat().sort((a, b) => new Date(b.date_created) - new Date(a.date_created));
@@ -1396,14 +1618,19 @@ export default class TransactionService {
     };
   }
 
-  buildPendingConditionsForType(typeKey, filters, scope) {
+  buildPendingConditionsForType(typeKey, filters, scope, merchantScope = null) {
     const cfg = TX_REVIEW_CONFIG[typeKey];
     if (!cfg) return null;
 
     const conditions = [sql`UPPER(${cfg.statusColumn}) = 'PENDING'`];
+    const customerScoped = Boolean(scope?.identifier);
 
     if (typeKey === "deposits") {
-      if (filters.account_key) conditions.push(eq(deposits.account_key, filters.account_key));
+      if (customerScoped) {
+        if (filters.account_key) conditions.push(eq(deposits.account_key, filters.account_key));
+      } else {
+        appendMerchantOwnerFilter(conditions, deposits.account_key, deposits.user_key, merchantScope);
+      }
       appendWalletKeyFilter(conditions, deposits.source_wallet_key, deposits.target_wallet_key, filters);
       const touch = walletKeysTouchCondition(
         [deposits.source_wallet_key, deposits.target_wallet_key],
@@ -1418,7 +1645,16 @@ export default class TransactionService {
       }
       appendDateRange(conditions, deposits, filters);
     } else if (typeKey === "withdrawals") {
-      if (filters.account_key) conditions.push(eq(withdrawals.account_key, filters.account_key));
+      if (customerScoped) {
+        if (filters.account_key) conditions.push(eq(withdrawals.account_key, filters.account_key));
+      } else {
+        appendMerchantOwnerFilter(
+          conditions,
+          withdrawals.account_key,
+          withdrawals.user_key,
+          merchantScope,
+        );
+      }
       appendWalletKeyFilter(conditions, withdrawals.source_wallet_key, withdrawals.target_wallet_key, filters);
       const touch = walletKeysTouchCondition(
         [withdrawals.source_wallet_key, withdrawals.target_wallet_key],
@@ -1430,7 +1666,11 @@ export default class TransactionService {
       }
       appendDateRange(conditions, withdrawals, filters);
     } else if (typeKey === "transfers") {
-      if (filters.account_key) conditions.push(eq(transfers.account_key, filters.account_key));
+      if (customerScoped) {
+        if (filters.account_key) conditions.push(eq(transfers.account_key, filters.account_key));
+      } else {
+        appendMerchantOwnerFilter(conditions, transfers.account_key, transfers.user_key, merchantScope);
+      }
       appendWalletKeyFilter(conditions, transfers.source_wallet_key, transfers.target_wallet_key, filters);
       const touch = walletKeysTouchCondition(
         [transfers.source_wallet_key, transfers.target_wallet_key],
@@ -1446,19 +1686,34 @@ export default class TransactionService {
       appendDateRange(conditions, transfers, filters);
     } else if (typeKey === "ngn-deposits") {
       appendWalletKeyFilter(conditions, ngnDeposits.wallet_key, null, filters);
-      const touch = walletKeysTouchCondition([ngnDeposits.wallet_key], scope.walletKeys);
+      const touch = walletKeysTouchCondition(
+        [ngnDeposits.wallet_key],
+        scope.walletKeys || merchantScope?.walletKeys,
+      );
       if (touch) conditions.push(touch);
       if (filters.search) appendNgnDepositSearch(conditions, filters.search);
       appendDateRange(conditions, ngnDeposits, filters);
     } else if (typeKey === "ngn-payouts") {
-      if (filters.account_key) conditions.push(eq(ngnPayouts.account_key, filters.account_key));
+      if (customerScoped) {
+        if (filters.account_key) conditions.push(eq(ngnPayouts.account_key, filters.account_key));
+      } else {
+        appendMerchantOwnerFilter(
+          conditions,
+          ngnPayouts.account_key,
+          ngnPayouts.user_key,
+          merchantScope,
+        );
+      }
       if (filters.wallet_key) conditions.push(eq(ngnPayouts.source_wallet_key, filters.wallet_key));
       appendPayoutCustomerScope(conditions, ngnPayouts.source_wallet_key, ngnPayouts.source_identifier, scope);
       if (filters.search) appendNgnPayoutSearch(conditions, filters.search);
       appendDateRange(conditions, ngnPayouts, filters);
     } else if (typeKey === "crypto-deposits") {
       appendWalletKeyFilter(conditions, cryptoDeposits.wallet_key, null, filters);
-      const touch = walletKeysTouchCondition([cryptoDeposits.wallet_key], scope.walletKeys);
+      const touch = walletKeysTouchCondition(
+        [cryptoDeposits.wallet_key],
+        scope.walletKeys || merchantScope?.walletKeys,
+      );
       if (touch) conditions.push(touch);
       if (filters.search) {
         const pattern = searchLike(filters.search);
@@ -1472,7 +1727,16 @@ export default class TransactionService {
       }
       appendDateRange(conditions, cryptoDeposits, filters);
     } else if (typeKey === "crypto-payouts") {
-      if (filters.account_key) conditions.push(eq(cryptoPayouts.account_key, filters.account_key));
+      if (customerScoped) {
+        if (filters.account_key) conditions.push(eq(cryptoPayouts.account_key, filters.account_key));
+      } else {
+        appendMerchantOwnerFilter(
+          conditions,
+          cryptoPayouts.account_key,
+          cryptoPayouts.user_key,
+          merchantScope,
+        );
+      }
       if (filters.wallet_key) conditions.push(eq(cryptoPayouts.source_wallet_key, filters.wallet_key));
       appendPayoutCustomerScope(conditions, cryptoPayouts.source_wallet_key, cryptoPayouts.source_identifier, scope);
       if (filters.search) {
@@ -1491,8 +1755,8 @@ export default class TransactionService {
     return { cfg, where: whereFromConditions(conditions) };
   }
 
-  async countPendingByType(typeKey, filters, scope) {
-    const built = this.buildPendingConditionsForType(typeKey, filters, scope);
+  async countPendingByType(typeKey, filters, scope, merchantScope = null) {
+    const built = this.buildPendingConditionsForType(typeKey, filters, scope, merchantScope);
     if (!built) return 0;
     try {
       const [{ total }] = await db
@@ -1506,8 +1770,8 @@ export default class TransactionService {
     }
   }
 
-  async fetchPendingByType(typeKey, filters, scope, limit) {
-    const built = this.buildPendingConditionsForType(typeKey, filters, scope);
+  async fetchPendingByType(typeKey, filters, scope, limit, merchantScope = null) {
+    const built = this.buildPendingConditionsForType(typeKey, filters, scope, merchantScope);
     if (!built) return [];
     const { cfg, where } = built;
 
