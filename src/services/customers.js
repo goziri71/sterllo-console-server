@@ -21,6 +21,38 @@ function buildOrderBy(sortBy, order) {
   return order === "asc" ? asc(column) : desc(column);
 }
 
+/** Match `name` against first/middle/surname, full name, or business_name (partial, case-insensitive). */
+function customerNameMatchCondition(name) {
+  const term = String(name || "").trim();
+  if (!term) return null;
+
+  const pattern = `%${term}%`;
+  const parts = [
+    sql`LOWER(${customers.first_name}) LIKE LOWER(${pattern})`,
+    sql`LOWER(${customers.middle_name}) LIKE LOWER(${pattern})`,
+    sql`LOWER(${customers.surname}) LIKE LOWER(${pattern})`,
+    sql`LOWER(${customers.business_name}) LIKE LOWER(${pattern})`,
+    sql`LOWER(CONCAT_WS(' ', ${customers.first_name}, ${customers.surname})) LIKE LOWER(${pattern})`,
+    sql`LOWER(CONCAT_WS(' ', ${customers.first_name}, ${customers.middle_name}, ${customers.surname})) LIKE LOWER(${pattern})`,
+  ];
+
+  const tokens = term.split(/\s+/).filter(Boolean);
+  if (tokens.length > 1) {
+    const tokenConds = tokens.map((token) => {
+      const p = `%${token}%`;
+      return or(
+        sql`LOWER(${customers.first_name}) LIKE LOWER(${p})`,
+        sql`LOWER(${customers.middle_name}) LIKE LOWER(${p})`,
+        sql`LOWER(${customers.surname}) LIKE LOWER(${p})`,
+        sql`LOWER(${customers.business_name}) LIKE LOWER(${p})`,
+      );
+    });
+    parts.push(and(...tokenConds));
+  }
+
+  return or(...parts);
+}
+
 const CUSTOMER_PATCH_FIELDS = [
   "is_pnd",
   "is_pnc",
@@ -138,6 +170,8 @@ export default class CustomerService {
     if (filters.status) conditions.push(eq(customers.status, filters.status));
     if (filters.account_key) conditions.push(eq(customers.account_key, filters.account_key));
     if (filters.environment) conditions.push(eq(customers.environment, filters.environment));
+    const nameMatch = customerNameMatchCondition(filters.name);
+    if (nameMatch) conditions.push(nameMatch);
     const where = conditions.length > 0 ? and(...conditions) : undefined;
 
     const orderClause = buildOrderBy(sortBy, order);
@@ -181,7 +215,7 @@ export default class CustomerService {
     }
   }
 
-  async getByMerchant(accountKey, { limit, offset, sortBy, order }) {
+  async getByMerchant(accountKey, { limit, offset, sortBy, order, filters = {} }) {
     const [merchant] = await db
       .select()
       .from(merchants)
@@ -192,7 +226,12 @@ export default class CustomerService {
       throw new ErrorClass("Merchant not found", 404);
     }
 
-    const where = eq(customers.account_key, accountKey);
+    const conditions = [eq(customers.account_key, accountKey)];
+    if (filters.status) conditions.push(eq(customers.status, filters.status));
+    if (filters.environment) conditions.push(eq(customers.environment, filters.environment));
+    const nameMatch = customerNameMatchCondition(filters.name);
+    if (nameMatch) conditions.push(nameMatch);
+    const where = and(...conditions);
     const orderClause = buildOrderBy(sortBy, order);
 
     const [rows, [{ total }]] = await Promise.all([

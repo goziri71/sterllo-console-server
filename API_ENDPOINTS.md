@@ -209,6 +209,20 @@ All routes require JWT + any role.
 | POST | `/1.202602.0/merchants/:account_key/kyc/approve` | `kyc.update` | Approve merchant KYC (`is_compliant` → `Y`) |
 | PATCH | `/1.202602.0/merchants/:account_key` | operations, compliance | Update merchant |
 
+### GET `/1.202602.0/merchants/:account_key/customers`
+
+Returns customers under this merchant (`Customers.account_key = :account_key`).
+
+| Param | Description |
+|-------|-------------|
+| `page` | Page number (default: 1) |
+| `limit` | Items per page (default: 20) |
+| `name` | Search by customer name (partial match across `first_name`, `middle_name`, `surname`, full name, and `business_name`) |
+| `status` | Filter by status |
+| `environment` | Filter by environment |
+| `sort_by` | Sort column: `name`, `surname`, `date_created`, `status`, `country`, `type` (default: `date_created`) |
+| `order` | Sort direction: `asc` or `desc` (default: `desc`) |
+
 ### GET `/1.202602.0/merchants/:account_key/customers/:identifier/transactions`
 
 Returns the same unified transaction payload as `GET /1.202602.0/transactions/statement` with `identifier` and `account_key` set from the path. Confirms `Customers.identifier` belongs to `Customers.account_key = :account_key` before returning data.
@@ -497,6 +511,7 @@ No body. Sets **`is_pnd`** and **`is_pnc`** to **`N`**.
 | `status` | Filter by status |
 | `account_key` | Filter by merchant account key |
 | `environment` | Filter by environment |
+| `name` | Search by customer name (partial match across first/middle/surname, full name, and `business_name`) |
 | `sort_by` | Sort column: `name`, `surname`, `date_created`, `status`, `country`, `type` (default: `date_created`) |
 | `order` | Sort direction: `asc` or `desc` (default: `desc`) |
 

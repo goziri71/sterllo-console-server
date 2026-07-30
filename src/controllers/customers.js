@@ -11,6 +11,7 @@ export const getAllCustomers = async (request, reply) => {
     status: request.query.status,
     account_key: request.query.account_key,
     environment: request.query.environment,
+    name: request.query.name,
   };
   const sortBy = request.query.sort_by;
   const order = request.query.order;
@@ -165,9 +166,20 @@ export const getMerchantCustomers = async (request, reply) => {
   const { page, limit, offset } = parsePagination(request.query);
   const sortBy = request.query.sort_by;
   const order = request.query.order;
+  const filters = {
+    name: request.query.name,
+    status: request.query.status,
+    environment: request.query.environment,
+  };
   const [merchant, data] = await Promise.all([
     merchantService.getByAccountKey(request.params.account_key),
-    customerService.getByMerchant(request.params.account_key, { limit, offset, sortBy, order }),
+    customerService.getByMerchant(request.params.account_key, {
+      limit,
+      offset,
+      sortBy,
+      order,
+      filters,
+    }),
   ]);
 
   return reply.code(200).send({
