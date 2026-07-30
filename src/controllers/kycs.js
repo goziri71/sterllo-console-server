@@ -76,3 +76,20 @@ export const getCustomerKYCs = async (request, reply) => {
     ...paginatedResponse({ count, rows }, page, limit),
   });
 };
+
+export const approveBusinessCustomerKYC = async (request, reply) => {
+  const data = await kycService.approveBusinessCustomer(
+    request.params.identifier,
+    request.body ?? {},
+  );
+
+  return reply.code(200).send({
+    code: 200,
+    success: true,
+    message:
+      data.is_business_compliant === "Y"
+        ? "Business customer KYC approved successfully"
+        : "Business customer KYC status updated successfully",
+    data,
+  });
+};

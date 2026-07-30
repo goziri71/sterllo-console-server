@@ -116,11 +116,20 @@ async function enrichWithWalletsAndKyc(rows) {
     kycMap.set(k.identifier, k.kyc_status);
   }
 
-  return rows.map((row) => ({
-    ...row,
-    currencies: currencyMap.get(row.identifier) ?? [],
-    kyc_status: kycMap.get(row.identifier) ?? "none",
-  }));
+  return rows.map((row) => {
+    const isBusiness = String(row.type || "").trim().toUpperCase() === "BUSINESS";
+    let kyc_status = kycMap.get(row.identifier) ?? "none";
+    if (isBusiness) {
+      kyc_status = row.is_business_compliant === "Y" ? "verified" : "pending";
+    }
+
+    return {
+      ...row,
+      business_name: row.business_name ?? null,
+      currencies: currencyMap.get(row.identifier) ?? [],
+      kyc_status,
+    };
+  });
 }
 
 export default class CustomerService {

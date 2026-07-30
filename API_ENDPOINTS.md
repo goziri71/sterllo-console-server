@@ -326,6 +326,7 @@ All routes require JWT + any role.
 | GET | `/1.202602.0/customers/:identifier/wallets/:wallet_key/ledger` | All | Per-wallet ledger lines (service text + balances; requires `financial.read`) |
 | GET | `/1.202602.0/customers/:identifier/fees` | `pricing.read` | Get the parent merchant's SaaS fee schedule |
 | GET | `/1.202602.0/customers/:identifier/kycs` | All | Get customer's KYCs |
+| POST | `/1.202602.0/customers/:identifier/kyc/approve` | `kyc.update` | Approve / set business-customer KYC status (`is_business_compliant`; BUSINESS only — no BVN row required) |
 | PATCH | `/1.202602.0/customers/:identifier` | `customer.update` | Update customer (status, compliance flags, tier, PND/PNC) |
 | PATCH | `/1.202602.0/customers/:identifier/tier` | `customer.update` | Set KYC tier only (`{ "tier": 2 }`) |
 | PATCH | `/1.202602.0/customers/:identifier/restrictions` | `customer.update` | Set PND/PNC only (posting restrictions) |
@@ -337,7 +338,8 @@ All routes require JWT + any role.
 | Goal | Endpoint(s) |
 |------|----------------|
 | View KYC for one customer | `GET /1.202602.0/customers/:identifier/kycs` (paginated list); optional summary on `GET /1.202602.0/customers/:identifier` (`kyc_status`) |
-| Review / approve KYC record | `GET /1.202602.0/kycs/:reference`, `PATCH /1.202602.0/kycs/:reference` (`kyc.update`) |
+| Review / approve personal KYC record | `GET /1.202602.0/kycs/:reference`, `PATCH /1.202602.0/kycs/:reference` (`kyc.update`) |
+| Approve / set **business** customer KYC | `POST /1.202602.0/customers/:identifier/kyc/approve` (`kyc.update`) — sets `Customers.is_business_compliant` (no BVN submission) |
 | Read tier labels | `GET /1.202602.0/config/customer-tiers` |
 | Upgrade / set tier | `PATCH /1.202602.0/customers/:identifier/tier` or same fields on `PATCH /1.202602.0/customers/:identifier` |
 | Freeze (restrict debits/credits) | `POST /1.202602.0/customers/:identifier/freeze` or `PATCH .../restrictions` or `PATCH /1.202602.0/customers/:identifier` with `is_pnd` / `is_pnc` |
@@ -352,12 +354,15 @@ Each customer in the list now includes:
   "identifier": "a6227257-9307-4544-bb84-3af0d020d508",
   "first_name": "JERAHMEEL",
   "surname": "ANIBOR",
+  "type": "PERSONAL",
+  "business_name": null,
   "status": "PENDING",
   "country_name": "NIGERIA",
   "country_code": "NGA",
   "is_pnd": "N",
   "is_pnc": "N",
   "is_personal_compliant": "N",
+  "is_business_compliant": "N",
   "wallet_count": 2,
   "currencies": ["NGN", "USD"],
   "kyc_status": "verified",
@@ -369,7 +374,32 @@ Each customer in the list now includes:
 |----------------|------|-------------|
 | `wallet_count` | number | Total wallets for this customer |
 | `currencies` | string[] | Distinct currency codes across wallets |
-| `kyc_status` | string | `"verified"`, `"pending"`, or `"none"` — derived from KYCs table |
+| `business_name` | string \| null | Business legal/trade name when `type` is `BUSINESS` |
+| `kyc_status` | string | `"verified"`, `"pending"`, or `"none"` — from `KYCs` for personal; from `is_business_compliant` for business |
+
+### POST `/1.202602.0/customers/:identifier/kyc/approve`
+
+Requires **`kyc.update`**. Only for customers with `type = BUSINESS` (they cannot submit BVN). Updates `Customers.is_business_compliant`.
+
+Empty body (or omit field) approves:
+
+```json
+{}
+```
+
+Or set explicitly:
+
+```json
+{ "is_business_compliant": "Y" }
+```
+
+Set to non-compliant:
+
+```json
+{ "is_business_compliant": "N" }
+```
+
+Response `data` includes `business_name`, `is_business_compliant`, and derived `kyc_status`.
 
 ### GET `/1.202602.0/customers/stats`
 

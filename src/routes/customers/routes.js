@@ -13,7 +13,11 @@ import {
 } from "../../controllers/customers.js";
 import { getEnrichedCustomerWallets, getCustomerWalletDetail, getCustomerWalletLedger } from "../../controllers/wallets.js";
 import { getCustomerFees } from "../../controllers/fees.js";
-import { getCustomerKYCs, getSubAccountKycEnableStatus } from "../../controllers/kycs.js";
+import {
+  getCustomerKYCs,
+  approveBusinessCustomerKYC,
+  getSubAccountKycEnableStatus,
+} from "../../controllers/kycs.js";
 import { authenticate, requirePermission } from "../../middleware/auth.js";
 import { PERMISSIONS } from "../../config/permissions.js";
 
@@ -45,6 +49,11 @@ export default async function customerRoutes(fastify) {
     f.get("/:identifier/wallets/:wallet_key", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getCustomerWalletDetail);
     f.get("/:identifier/fees", { preHandler: requirePermission(PERMISSIONS.PRICING_READ) }, getCustomerFees);
     f.get("/:identifier/kycs", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getCustomerKYCs);
+    f.post(
+      "/:identifier/kyc/approve",
+      { preHandler: requirePermission(PERMISSIONS.KYC_UPDATE) },
+      approveBusinessCustomerKYC,
+    );
 
     f.patch("/:identifier", { preHandler: requirePermission(PERMISSIONS.CUSTOMER_UPDATE) }, updateCustomer);
   });

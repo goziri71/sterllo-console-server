@@ -61,6 +61,10 @@ function merchantSummaryForKycList(merchant, { totalKyc, compliantKyc, pendingKy
   };
 }
 
+function isBusinessCustomer(customer) {
+  return String(customer?.type || "").trim().toUpperCase() === "BUSINESS";
+}
+
 function customerSummaryForKycList(customer, { totalKyc, compliantKyc, pendingKyc }) {
   const displayName =
     [customer.first_name, customer.middle_name, customer.surname].filter(Boolean).join(" ").trim() ||
@@ -68,18 +72,23 @@ function customerSummaryForKycList(customer, { totalKyc, compliantKyc, pendingKy
     null;
 
   let kyc_status = "none";
-  if (totalKyc > 0) {
+  if (isBusinessCustomer(customer)) {
+    kyc_status = customer.is_business_compliant === "Y" ? "verified" : "pending";
+  } else if (totalKyc > 0) {
     kyc_status = pendingKyc === 0 ? "verified" : "pending";
   }
 
   return {
     identifier: customer.identifier,
     display_name: displayName,
+    business_name: customer.business_name || null,
     type: customer.type,
     status: customer.status,
     tier: customer.tier,
     environment: customer.environment,
     account_key: customer.account_key,
+    is_business_compliant: customer.is_business_compliant ?? null,
+    is_personal_compliant: customer.is_personal_compliant ?? null,
     kyc_status,
     kyc_record_count: totalKyc,
     kyc_compliant_record_count: compliantKyc,
@@ -149,6 +158,66 @@ export default class KYCService {
       }),
       count: totalKyc,
       rows: rows.map(enrichKycRowForApi),
+    };
+  }
+
+  /**
+   * Set business-customer KYC compliance on Customers (no BVN / KYCs row required).
+   * Defaults to approving (`is_business_compliant = Y`); body may set Y or N.
+   */
+  async approveBusinessCustomer(identifier, { is_business_compliant } = {}) {
+    const [customer] = await db
+      .select()
+      .from(customers)
+      .where(eq(customers.identifier, identifier))
+      .limit(1);
+
+    if (!customer) {
+      throw new ErrorClass("Customer not found", 404);
+    }
+    if (!isBusinessCustomer(customer)) {
+      throw new ErrorClass("Only BUSINESS customers can use this KYC status endpoint", 400);
+    }
+
+    let status = "Y";
+    if (is_business_compliant !== undefined) {
+      const raw = String(is_business_compliant).trim().toUpperCase();
+      if (raw === "Y" || raw === "1" || raw === "TRUE") status = "Y";
+      else if (raw === "N" || raw === "0" || raw === "FALSE") status = "N";
+      else throw new ErrorClass("is_business_compliant must be Y or N", 400);
+    }
+
+    if (customer.is_business_compliant === status) {
+      throw new ErrorClass(
+        status === "Y"
+          ? "Business customer KYC is already approved"
+          : "Business customer KYC is already marked non-compliant",
+        400,
+      );
+    }
+
+    const now = new Date();
+    await db
+      .update(customers)
+      .set({ is_business_compliant: status, date_modified: now })
+      .where(eq(customers.identifier, identifier));
+
+    const [updated] = await db
+      .select()
+      .from(customers)
+      .where(eq(customers.identifier, identifier))
+      .limit(1);
+
+    return {
+      identifier: updated.identifier,
+      type: updated.type,
+      business_name: updated.business_name || null,
+      business_registration_number: updated.business_registration_number || null,
+      is_business_compliant: updated.is_business_compliant,
+      kyc_status: updated.is_business_compliant === "Y" ? "verified" : "pending",
+      tier: updated.tier,
+      account_key: updated.account_key,
+      date_modified: updated.date_modified,
     };
   }
 
