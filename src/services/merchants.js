@@ -297,6 +297,67 @@ function buildPlainIsvsLinkBody(plainDataObject) {
   };
 }
 
+function buildPlainIsvsTsqBody(plainDataObject) {
+  return {
+    reference: beamerHeaderValue(plainDataObject.reference),
+  };
+}
+
+/** Colleague makeEncryptedApiCall: Credentials + IV; body `{ payload }` with `{ reference }`. */
+function buildIsvsCryptoJsWireTsq(productKeys, plainHeadersObject, plainDataObject) {
+  const encryptionKey = resolveIsvsEncryptionKeyFromProductKeys(productKeys);
+  const iv = generateIsvsIv();
+  const credentialsObject = buildIsvsEncryptedCredentialsObjectTsq(productKeys, plainHeadersObject);
+  const payload = buildPlainIsvsTsqBody(plainDataObject);
+  const encryptedPayload = encryptIsvsJson(payload, encryptionKey, iv);
+
+  return {
+    axiosHeaders: {
+      Credentials: buildIsvsCredentialsHeader(credentialsObject, encryptionKey, iv),
+      "Content-Type": "application/json",
+    },
+    isvsBody: { payload: encryptedPayload },
+    _isvsPlain: {
+      headers: plainHeadersObject,
+      data: plainDataObject,
+      wireFormat: "cryptojs",
+      iv,
+      encryptionKey,
+      encryptMaterialKind: process.env.BEAMER_ISVS_ENCRYPT_KEY || "target",
+    },
+  };
+}
+
+/**
+ * Non-cryptojs formats: product keys + Request-Id only (ISVS TSQ schema).
+ * Body: `{ reference }`.
+ */
+function buildIsvsPlainHeaderWireTsq(productKeys, plainHeadersObject, plainDataObject) {
+  const axiosHeaders = {
+    "Target-Product-Key": productKeys.targetProductKey,
+    "Source-Product-Key": productKeys.sourceProductKey,
+    "Request-Id": beamerHeaderValue(plainHeadersObject["Request-Id"]),
+    "Content-Type": "application/json",
+  };
+
+  return {
+    axiosHeaders,
+    isvsBody: buildPlainIsvsTsqBody(plainDataObject),
+    _isvsPlain: {
+      headers: plainHeadersObject,
+      data: plainDataObject,
+      wireFormat: beamerIsvsWireFormat(),
+      encryptMaterialKind: process.env.BEAMER_ISVS_ENCRYPT_KEY || "target",
+    },
+  };
+}
+
+function buildIsvsOutboundTsq(productKeys, plainHeadersObject, plainDataObject) {
+  // Same product-key transport as account-link (cryptojs Credentials + encrypted payload).
+  // Credentials carries Source-Product-Key, Target-Product-Key, Request-Id only (no User-Key).
+  return buildIsvsCryptoJsWireTsq(productKeys, plainHeadersObject, plainDataObject);
+}
+
 /** Node crypto: plain Link.json; encrypted Credentials = client.key. */
 function buildIsvsCredentialsWireLink(productKeys, plainHeadersObject, plainDataObject) {
   const encryptMaterial = resolveIsvsEncryptMaterial(productKeys);
@@ -808,6 +869,8 @@ const ISVS_BEAMER_LINK_URL =
   "https://api.isvs.sterllo.com/1.202510.0/Integrations/Beamer/Account/Link";
 const ISVS_BEAMER_UPDATE_URL =
   "https://api.isvs.sterllo.com/1.202510.0/Integrations/Beamer/Account/Update";
+const ISVS_BEAMER_NGN_TSQ_URL =
+  "https://api.isvs.sterllo.com/1.202510.0/Payouts/Beamer/NG/TSQ";
 
 /** Plain header object (encrypted as one blob before ISVS). Excludes product keys. */
 function buildPlainBeamerLinkHeaders(requestHeaders) {
@@ -827,10 +890,18 @@ function buildPlainBeamerLinkHeaders(requestHeaders) {
   return inner;
 }
 
-function buildPlainBeamerUpdateHeaders(requestHeaders) {
+function buildPlainBeamerTsqHeaders(requestHeaders) {
   const h = asPlainObject(requestHeaders) || {};
   return {
     "Request-Id": pickFirstNonEmpty(h["Request-Id"], crypto.randomUUID()),
+  };
+}
+
+function buildIsvsEncryptedCredentialsObjectTsq(productKeys, plainHeadersObject) {
+  return {
+    "Source-Product-Key": productKeys.sourceProductKey,
+    "Target-Product-Key": productKeys.targetProductKey,
+    "Request-Id": beamerHeaderValue(plainHeadersObject["Request-Id"]),
   };
 }
 
@@ -878,6 +949,22 @@ function extractBeamerUpdateRequest(payload) {
   }
   if (!asPlainObject(data.client)) {
     throw new ErrorClass("request.data.client is required (ISVS Update contract)", 400);
+  }
+
+  return { headers, data };
+}
+
+/** Same frontend envelope as link: `{ headers, data }`; data requires `reference`. */
+function extractBeamerTsqRequest(payload) {
+  const body = asPlainObject(payload) || {};
+  const headers = asPlainObject(body.headers) || asPlainObject(body.header) || {};
+  const data = asPlainObject(body.data);
+
+  if (!data) {
+    throw new ErrorClass("request.data is required (ISVS NGN TSQ contract)", 400);
+  }
+  if (!beamerHeaderValue(data.reference)) {
+    throw new ErrorClass("request.data.reference is required (ISVS NGN TSQ contract)", 400);
   }
 
   return { headers, data };
@@ -1517,6 +1604,61 @@ export default class MerchantService {
 
       if (result.body?.code === 5000) {
         logBeamerIsvsOutbound("ISVS decryption failed (update)", audit, {
+          isvsCode: result.body.code,
+          isvsMessage: result.body.message,
+          hint:
+            audit.allSelfDecryptOk
+              ? "Console round-trip decrypt succeeded — ISVS likely expects a different wire format or key material."
+              : "Console round-trip decrypt failed — fix local encryption before retrying ISVS.",
+        });
+      }
+
+      return result;
+    } catch (error) {
+      if (error instanceof ErrorClass) throw error;
+      return isvsResultFromAxiosError(error, productKeys, axiosHeaders, outbound._isvsPlain);
+    }
+  }
+
+  /**
+   * Proxy ISVS Beamer NGN payout TSQ (resolve/query pending NGN payout by reference).
+   * Product keys use the same cryptojs Credentials transport as account-link.
+   * Frontend envelope: `{ headers: { Request-Id? }, data: { reference } }`.
+   */
+  async tsqBeamerNgnPayout(accountKey, payload) {
+    const [merchant] = await db
+      .select()
+      .from(merchants)
+      .where(eq(merchants.account_key, accountKey))
+      .limit(1);
+
+    if (!merchant) {
+      throw new ErrorClass("Merchant not found", 404);
+    }
+
+    const productKeyMaterial = getBeamerProductKeyMaterial();
+    const productKeys = resolveBeamerProductKeysFromMaterial(productKeyMaterial);
+    const { headers, data } = extractBeamerTsqRequest(payload);
+    const plainHeaders = buildPlainBeamerTsqHeaders(headers);
+    const outbound = buildIsvsOutboundTsq(productKeys, plainHeaders, data);
+    const audit = auditIsvsOutboundEncryption(productKeys, outbound);
+    audit.isvsUrl = ISVS_BEAMER_NGN_TSQ_URL;
+
+    if (process.env.BEAMER_ISVS_DEBUG === "true") {
+      logBeamerIsvsOutbound("outbound (ngn-tsq)", audit);
+    }
+
+    const { axiosHeaders, isvsBody } = stripIsvsOutboundDebug(outbound);
+
+    try {
+      const response = await axios.post(ISVS_BEAMER_NGN_TSQ_URL, isvsBody, {
+        headers: axiosHeaders,
+        validateStatus: () => true,
+      });
+      const result = isvsAxiosResult(response, productKeys, axiosHeaders, outbound._isvsPlain);
+
+      if (result.body?.code === 5000) {
+        logBeamerIsvsOutbound("ISVS decryption failed (ngn-tsq)", audit, {
           isvsCode: result.body.code,
           isvsMessage: result.body.message,
           hint:

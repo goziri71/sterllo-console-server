@@ -137,6 +137,15 @@ export const updateMerchantBeamerAccount = async (request, reply) => {
   return reply.code(httpStatus).send(body);
 };
 
+export const tsqMerchantBeamerNgnPayout = async (request, reply) => {
+  const { httpStatus, body } = await merchantService.tsqBeamerNgnPayout(
+    request.params.account_key,
+    request.body ?? {},
+  );
+
+  return reply.code(httpStatus).send(body);
+};
+
 /**
  * All transactions for a customer under this merchant (unified statement).
  * Same payload as GET /api/v1/transactions/statement?identifier=&account_key=.

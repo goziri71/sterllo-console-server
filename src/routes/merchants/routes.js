@@ -10,6 +10,7 @@ import {
   getMerchantSettlements,
   linkMerchantBeamerAccount,
   updateMerchantBeamerAccount,
+  tsqMerchantBeamerNgnPayout,
   getMerchantCustomerTransactions,
 } from "../../controllers/merchants.js";
 import { getMerchantCustomers } from "../../controllers/customers.js";
@@ -82,5 +83,10 @@ export default async function merchantRoutes(fastify) {
     "/:account_key/integrations/beamer/account-update",
     { preHandler: requirePermission(PERMISSIONS.MERCHANT_UPDATE) },
     updateMerchantBeamerAccount,
+  );
+  fastify.post(
+    "/:account_key/integrations/beamer/ngn-tsq",
+    { preHandler: requirePermission(PERMISSIONS.MERCHANT_UPDATE) },
+    tsqMerchantBeamerNgnPayout,
   );
 }

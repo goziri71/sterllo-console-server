@@ -207,6 +207,9 @@ All routes require JWT + any role.
 | GET | `/1.202602.0/merchants/:account_key/fees` | `pricing.read` | Get merchant's custom, default, and effective BaaS pricing |
 | GET | `/1.202602.0/merchants/:account_key/kycs` | All | List merchant's own KYC records (not customer KYCs) |
 | POST | `/1.202602.0/merchants/:account_key/kyc/approve` | `kyc.update` | Approve merchant KYC (`is_compliant` → `Y`) |
+| POST | `/1.202602.0/merchants/:account_key/integrations/beamer/account-link` | `merchant.update` | Proxy Beamer/ISVS account link (product keys from env) |
+| POST | `/1.202602.0/merchants/:account_key/integrations/beamer/account-update` | `merchant.update` | Proxy Beamer/ISVS account update |
+| POST | `/1.202602.0/merchants/:account_key/integrations/beamer/ngn-tsq` | `merchant.update` | Proxy Beamer/ISVS NGN payout TSQ (`{ reference }`) to resolve pending NGN payouts |
 | PATCH | `/1.202602.0/merchants/:account_key` | operations, compliance | Update merchant |
 
 ### GET `/1.202602.0/merchants/:account_key/customers`
