@@ -339,6 +339,8 @@ function appendNgnPayoutSearch(conditions, term) {
     sql`(
       ${ngnPayouts.source_wallet_key} LIKE ${pattern}
       OR ${ngnPayouts.live_reference} LIKE ${pattern}
+      OR ${ngnPayouts.vendor_reference} LIKE ${pattern}
+      OR ${ngnPayouts.isvs_reference} LIKE ${pattern}
       OR ${ngnPayouts.recipient_account_number} LIKE ${pattern}
       OR ${ngnPayouts.recipient_account_name} LIKE ${pattern}
       OR ${ngnPayouts.recipient_institution_name} LIKE ${pattern}
@@ -510,6 +512,7 @@ const STMT_EXT_KEYS = [
 
 function stmtExtSelectNulls() {
   return {
+    vendor_reference: sql`NULL`.as("vendor_reference"),
     stmt_ext_sender_name: sql`NULL`,
     stmt_ext_sender_bank: sql`NULL`,
     stmt_ext_sender_account: sql`NULL`,
@@ -861,6 +864,8 @@ export default class TransactionService {
         sql`(
           ${cryptoPayouts.source_wallet_key} LIKE ${pattern}
           OR ${cryptoPayouts.live_reference} LIKE ${pattern}
+          OR ${cryptoPayouts.vendor_reference} LIKE ${pattern}
+          OR ${cryptoPayouts.isvs_reference} LIKE ${pattern}
           OR ${cryptoPayouts.hash} LIKE ${pattern}
           OR ${cryptoPayouts.source_address} LIKE ${pattern}
           OR ${cryptoPayouts.recipient_address} LIKE ${pattern}
@@ -1081,6 +1086,7 @@ export default class TransactionService {
           amount: ngnDeposits.amount,
           status: ngnDeposits.credit_status,
           date_created: ngnDeposits.date_created,
+          vendor_reference: sql`NULL`.as("vendor_reference"),
           stmt_ext_sender_name: ngnDeposits.sender_account_name,
           stmt_ext_sender_bank: ngnDeposits.sender_bank_name,
           stmt_ext_sender_account: ngnDeposits.sender_account_number,
@@ -1117,6 +1123,7 @@ export default class TransactionService {
           amount: ngnPayouts.amount,
           status: ngnPayouts.payout_status,
           date_created: ngnPayouts.date_created,
+          vendor_reference: ngnPayouts.vendor_reference,
           stmt_ext_sender_name: ngnPayouts.source_account_name,
           stmt_ext_sender_bank: sql`NULL`,
           stmt_ext_sender_account: ngnPayouts.source_account_number,
@@ -1148,6 +1155,7 @@ export default class TransactionService {
           amount: cryptoDeposits.amount,
           status: cryptoDeposits.credit_status,
           date_created: cryptoDeposits.date_created,
+          vendor_reference: sql`NULL`.as("vendor_reference"),
           stmt_ext_sender_name: sql`NULL`,
           stmt_ext_sender_bank: sql`NULL`,
           stmt_ext_sender_account: cryptoDeposits.sender_address,
@@ -1184,6 +1192,7 @@ export default class TransactionService {
           amount: cryptoPayouts.amount,
           status: cryptoPayouts.payout_status,
           date_created: cryptoPayouts.date_created,
+          vendor_reference: cryptoPayouts.vendor_reference,
           stmt_ext_sender_name: sql`NULL`,
           stmt_ext_sender_bank: sql`NULL`,
           stmt_ext_sender_account: cryptoPayouts.source_address,
@@ -1231,6 +1240,7 @@ export default class TransactionService {
       if (searchTerm) {
         const haystack = [
           row.reference,
+          row.vendor_reference,
           row.wallet_key,
           row.transaction_type,
           row.stmt_ext_sender_name,
@@ -1745,6 +1755,7 @@ export default class TransactionService {
           sql`(
             ${cryptoPayouts.source_wallet_key} LIKE ${pattern}
             OR ${cryptoPayouts.live_reference} LIKE ${pattern}
+            OR ${cryptoPayouts.vendor_reference} LIKE ${pattern}
             OR ${cryptoPayouts.hash} LIKE ${pattern}
           )`,
         );

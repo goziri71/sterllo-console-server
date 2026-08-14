@@ -658,9 +658,10 @@ Returns a unified, paginated timeline with normalized fields:
   "message": "Transaction statement fetched successfully",
   "records": [
     {
-      "transaction_type": "transfer",
+      "transaction_type": "ngn_payout",
       "account_key": "OKwqt8DzVvoQXNbhh6HUyQbrYS6ar3",
-      "reference": "TRF_abc123",
+      "reference": "PAY_abc123",
+      "vendor_reference": "VENDOR_REF_123",
       "wallet_key": "ce3750bf78a9a46703803908a395a9",
       "currency_code": "NGN",
       "amount": "5000.00",
@@ -678,6 +679,8 @@ Returns a unified, paginated timeline with normalized fields:
   }
 }
 ```
+
+`vendor_reference` is populated for **NGN and crypto payouts** (from `NGNPayouts` / `CryptocurrencyPayouts`); other transaction types return `null`. The dedicated list endpoints `GET /transactions/ngn-payouts` and `GET /transactions/crypto-payouts` already return the full row including `vendor_reference`. Search on those lists / statement also matches `vendor_reference`.
 
 ---
 
