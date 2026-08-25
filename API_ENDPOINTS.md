@@ -626,6 +626,33 @@ All routes require JWT + any role. All are read-only.
 | GET | `/1.202602.0/transactions/crypto-deposits` | List crypto deposits |
 | GET | `/1.202602.0/transactions/crypto-payouts` | List crypto payouts |
 | GET | `/1.202602.0/transactions/statement` | Unified statement feed across all transaction types |
+| POST | `/1.202602.0/transactions/deposits/webhook-replay` | Replay merchant deposit webhook (`notify: true` via Sterllo Verify Deposit) |
+
+### POST `/1.202602.0/transactions/deposits/webhook-replay`
+
+Requires **`merchant.update`**. Proxies to `POST https://api.sterllo.com/1.0/Customers/Wallets/Deposits/Verify` with `notify: true`.
+
+```json
+{
+  "reference": "ad03fad5-5ccb-45a4-8be9-48185a193338",
+  "currency_code": "NGN",
+  "session_id": "<Crosslink sessionID>",
+  "user_key": "optional-if-on-deposit",
+  "account_key": "optional-if-on-deposit"
+}
+```
+
+Or pass a pre-built Sterllo `Credentials` header value instead of the keys:
+
+```json
+{
+  "reference": "...",
+  "currency_code": "NGN",
+  "Credentials": "<encoded>"
+}
+```
+
+Response body is Sterllo’s JSON unchanged (HTTP status from Sterllo).
 
 ### Query params (all transaction endpoints)
 

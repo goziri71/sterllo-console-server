@@ -12,6 +12,7 @@ import {
   getPendingTransactionReviewSummary,
   approvePendingTransaction,
   cancelPendingTransaction,
+  replayDepositWebhook,
 } from "../../controllers/transactions.js";
 import { authenticate, requirePermission } from "../../middleware/auth.js";
 import { PERMISSIONS } from "../../config/permissions.js";
@@ -38,6 +39,11 @@ export default async function transactionRoutes(fastify) {
     "/review/:transaction_type/:reference/cancel",
     { preHandler: requirePermission(PERMISSIONS.DISPUTE_UPDATE) },
     cancelPendingTransaction,
+  );
+  fastify.post(
+    "/deposits/webhook-replay",
+    { preHandler: requirePermission(PERMISSIONS.MERCHANT_UPDATE) },
+    replayDepositWebhook,
   );
 
   fastify.get("/deposits", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getDeposits);

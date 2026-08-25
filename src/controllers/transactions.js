@@ -1,4 +1,5 @@
 import TransactionService from "../services/transactions.js";
+import { replayDepositWebhook as replayDepositWebhookService } from "../services/sterlloDepositWebhook.js";
 import { parsePagination, paginatedResponse } from "../utils/pagination/index.js";
 import { userCanReadFinancial, redactFinancialDeep } from "../utils/financialAccess.js";
 import { ErrorClass } from "../utils/errorClass/index.js";
@@ -187,4 +188,9 @@ export const cancelPendingTransaction = async (request, reply) => {
     message: "Transaction cancelled successfully",
     data: result,
   });
+};
+
+export const replayDepositWebhook = async (request, reply) => {
+  const { httpStatus, body } = await replayDepositWebhookService(request.body ?? {});
+  return reply.code(httpStatus).send(body);
 };
