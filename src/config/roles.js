@@ -1,5 +1,5 @@
 /**
- * Role definitions and permissions for the console dashboard.
+ * Role definitions and permisions for the console dashboard.
  * Each department has specific read/update access.
  */
 
