@@ -1006,7 +1006,7 @@ Paginated. Each wallet includes:
 | `limit` | No | Items per page (default: 20) |
 | `search` | No | Search by `wallet_key`, `wallet_id`, `owner_key` (account key / customer identifier), or owner name (partial match) |
 | `currency_code` | No | Filter wallets by currency code |
-| `status` | No | `all`, `active`, `inactive` (derived status) |
+| `status` | No | `all`, `active`, `inactive`. Status is **existence-based** (listed wallets are `active`); it is **not** derived from balance. `inactive` returns an empty list. |
 
 #### Response
 

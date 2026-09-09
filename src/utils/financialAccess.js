@@ -41,6 +41,6 @@ export function redactWalletBalanceFields(row) {
   next.balance_last_updated = null;
   next.balance_source = null;
   if ("last_activity_at" in next) next.last_activity_at = null;
-  if (next.status === "active" || next.status === "inactive") next.status = null;
+  // Keep status — it is existence-based, not derived from balance.
   return next;
 }
