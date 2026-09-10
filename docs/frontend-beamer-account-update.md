@@ -27,7 +27,7 @@ Each merchant object may include:
 
 Or `"udara360": null` when no credential row exists. Secrets (`client_secret`, tokens) are **not** returned.
 
-Use `udara360.client_id`, `udara360.account_number`, and merchant `user_key` / `account_key` as needed when building Beamer link/update payloads.
+Use `udara360.client_id` and merchant `user_key` / `account_key` as needed when building Beamer payloads. For **account update**, do **not** send `account_number` — the backend loads it from `udara360`.
 
 ## Endpoints
 
@@ -55,7 +55,7 @@ Use the same API version prefix as the rest of the console (e.g. `/1.202602.0`).
 - Server sets `Target-Product-Key` / `Source-Product-Key` from env (decrypted). `User-Key`, `Accout-Key`, `Request-Id` sent plaintext per Link.json.
 - `data` body fields (`account_number`, `client.id`, `client.key`) are AES-encrypted with the decrypted target product key before ISVS. No `Credentials` header.
 
-### Update
+### Update (`UdaraLinkModal`)
 
 - **Method:** `POST`
 - **URL:** `/1.202602.0/merchants/:account_key/integrations/beamer/account-update`
@@ -66,9 +66,9 @@ Use the same API version prefix as the rest of the console (e.g. `/1.202602.0`).
 
 - `account_key` (string): Merchant account key in this console backend
 
-## Request Body
+## Request Body (Update)
 
-Send JSON with this shape:
+**Do not send `account_number`.** Backend fills it from the merchant’s Udara360 row.
 
 ```json
 {
@@ -77,7 +77,6 @@ Send JSON with this shape:
   },
   "data": {
     "id": "string",
-    "account_number": "string",
     "client": {
       "id": "string",
       "key": "string"
@@ -88,11 +87,13 @@ Send JSON with this shape:
 
 ### Important
 
-- **Preferred body:** `{ "headers": { "Request-Id": "uuid" }, "data": { "id", "account_number", "client": { "id", "key" } } }`
-- **Also accepted:** `{}` or flat JSON if `Request-Id` is sent as an **HTTP header** (or omitted — server generates one).
-- `data.id`, `account_number`, and `client.id` can default from the merchant’s **`udara360`** row when present.
+- **Preferred body:** `{ "headers": { "Request-Id": "uuid" }, "data": { "id", "client": { "id", "key" } } }`
+- **`account_number`:** omit from the request. If sent, it is **ignored**; server always uses `udara360.account_number`.
+- `data.id` can default from `udara360.identifier` when omitted.
+- `data.client.id` can default from `udara360.client_id` when omitted.
 - **`client.key` must still be sent** in the body (not exposed on public merchant responses).
 - `Target-Product-Key` and `Source-Product-Key` are injected by the backend from env (not sent by the UI).
+- Update fails with `400` if the merchant has no Udara360 `account_number` on file.
 
 ## Success / ISVS response
 
@@ -123,16 +124,15 @@ Example ISVS error (still HTTP 200 from upstream):
 ## Error Cases
 
 - `400` when required fields are missing:
-  - `headers.Request-Id`
-  - `data.id`
-  - `data.account_number`
-  - `data.client.id`
-  - `data.client.key`
+  - `data.client` / `data.client.key`
+  - `data.id` (if not defaultable from udara360)
+  - `data.client.id` (if not defaultable from udara360)
+  - no Udara360 `account_number` on file for the merchant
 - `404` when merchant `account_key` does not exist
 - `502` when upstream Beamer service fails unexpectedly
 - Upstream `4xx/5xx` may be surfaced with upstream message
 
-## Frontend Example (fetch)
+## Frontend Example (fetch) — Update / UdaraLinkModal
 
 ```ts
 await fetch(`/1.202602.0/merchants/${accountKey}/integrations/beamer/account-update`, {
@@ -146,12 +146,12 @@ await fetch(`/1.202602.0/merchants/${accountKey}/integrations/beamer/account-upd
       "Request-Id": crypto.randomUUID(),
     },
     data: {
-      id: beamerIntegrationId,
-      account_number: accountNumber,
+      id: beamerIntegrationId, // or omit to use udara360.identifier
       client: {
-        id: clientId,
-        key: clientKey,
+        id: clientId, // or omit to use udara360.client_id
+        key: clientKey, // required
       },
+      // do NOT send account_number
     },
   }),
 });

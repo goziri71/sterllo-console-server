@@ -897,6 +897,14 @@ function buildPlainBeamerTsqHeaders(requestHeaders) {
   };
 }
 
+/** Update contract: Request-Id only (product keys injected in Credentials / headers). */
+function buildPlainBeamerUpdateHeaders(requestHeaders) {
+  const h = asPlainObject(requestHeaders) || {};
+  return {
+    "Request-Id": pickFirstNonEmpty(h["Request-Id"], crypto.randomUUID()),
+  };
+}
+
 function buildIsvsEncryptedCredentialsObjectTsq(productKeys, plainHeadersObject) {
   return {
     "Source-Product-Key": productKeys.sourceProductKey,
@@ -952,6 +960,46 @@ function extractBeamerUpdateRequest(payload) {
   }
 
   return { headers, data };
+}
+
+/**
+ * Account update: FE must not send account_number.
+ * Server fills it from Udara360APICredentials for the merchant.
+ */
+async function resolveBeamerUpdateData(accountKey, data) {
+  const client = asPlainObject(data.client) || {};
+  const udara = await fetchLatestUdaraOne(accountKey);
+
+  if (!udara?.account_number) {
+    throw new ErrorClass(
+      "No Udara360 account_number on file for this merchant; cannot update Beamer account",
+      400,
+    );
+  }
+
+  const resolvedId = pickFirstNonEmpty(data.id, udara.identifier, udara.id);
+  if (!resolvedId) {
+    throw new ErrorClass("request.data.id is required (or udara360.identifier must exist)", 400);
+  }
+
+  const resolvedClientId = pickFirstNonEmpty(client.id, udara.client_id);
+  if (!resolvedClientId) {
+    throw new ErrorClass("request.data.client.id is required (or udara360.client_id must exist)", 400);
+  }
+
+  const resolvedClientKey = beamerHeaderValue(client.key);
+  if (!resolvedClientKey) {
+    throw new ErrorClass("request.data.client.key is required", 400);
+  }
+
+  return {
+    id: resolvedId,
+    account_number: beamerHeaderValue(udara.account_number),
+    client: {
+      id: resolvedClientId,
+      key: resolvedClientKey,
+    },
+  };
 }
 
 /** Same frontend envelope as link: `{ headers, data }`; data requires `reference`. */
@@ -1584,8 +1632,10 @@ export default class MerchantService {
     const productKeyMaterial = getBeamerProductKeyMaterial();
     const productKeys = resolveBeamerProductKeysFromMaterial(productKeyMaterial);
     const { headers, data } = extractBeamerUpdateRequest(payload);
+    // Ignore any FE account_number — always resolve from Udara360 on file.
+    const resolvedData = await resolveBeamerUpdateData(accountKey, data);
     const plainHeaders = buildPlainBeamerUpdateHeaders(headers);
-    const outbound = buildIsvsOutbound(productKeys, plainHeaders, data, { link: false });
+    const outbound = buildIsvsOutbound(productKeys, plainHeaders, resolvedData, { link: false });
     const audit = auditIsvsOutboundEncryption(productKeys, outbound);
     audit.isvsUrl = ISVS_BEAMER_UPDATE_URL;
 
