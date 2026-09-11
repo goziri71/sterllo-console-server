@@ -1,5 +1,6 @@
 import {
   listCommandCenterEvents,
+  ingestCommandCenterActivity,
   getCommandCenterPulse,
   getCommandCenterPresence,
   streamCommandCenter,
@@ -14,6 +15,15 @@ export default async function opsRoutes(fastify) {
       preHandler: [authenticate, requirePermission(PERMISSIONS.CONSOLE_READ)],
     },
     listCommandCenterEvents,
+  );
+
+  // Frontend posts clicks / navigation / filters here (batch supported).
+  fastify.post(
+    "/command-center/activity",
+    {
+      preHandler: [authenticate, requirePermission(PERMISSIONS.CONSOLE_READ)],
+    },
+    ingestCommandCenterActivity,
   );
 
   fastify.get(

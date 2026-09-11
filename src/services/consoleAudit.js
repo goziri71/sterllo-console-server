@@ -1,10 +1,11 @@
-import { and, desc, eq, gte, gt, isNull, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gte, gt, isNull, like, lt, sql } from "drizzle-orm";
 import { authDb } from "../db/index.js";
 import { consoleAuditEvents } from "../db/schema/consoleAudit.js";
 import { authSessions } from "../db/schema/authSecurity.js";
 import { users } from "../db/schema/users.js";
 import { loadUserAccess } from "./rbac.js";
 import { pickPrimaryRoleSlug } from "../config/roles.js";
+import { ErrorClass } from "../utils/errorClass/index.js";
 
 /** Canonical event types for the live command center. */
 export const CONSOLE_AUDIT_EVENT = Object.freeze({
@@ -18,7 +19,39 @@ export const CONSOLE_AUDIT_EVENT = Object.freeze({
   RBAC_USER_ROLE_ASSIGN: "rbac.user_role_assigned",
   RBAC_USER_ROLE_REVOKE: "rbac.user_role_revoked",
   RBAC_USER_CREATE: "rbac.user_created",
+  API_REQUEST: "api.request",
+  // Frontend UI activity (ingest)
+  UI_PAGE_VIEW: "ui.page_view",
+  UI_NAVIGATION: "ui.navigation",
+  UI_CLICK: "ui.click",
+  UI_FILTER: "ui.filter",
+  UI_SEARCH: "ui.search",
+  UI_TAB_CHANGE: "ui.tab_change",
+  UI_MODAL_OPEN: "ui.modal_open",
+  UI_MODAL_CLOSE: "ui.modal_close",
+  UI_FORM_SUBMIT: "ui.form_submit",
+  UI_COPY: "ui.copy",
+  UI_EXPORT: "ui.export",
+  UI_SELECTION: "ui.selection",
 });
+
+/** Allowed UI event types from the browser ingest endpoint. */
+export const UI_AUDIT_EVENT_TYPES = new Set([
+  CONSOLE_AUDIT_EVENT.UI_PAGE_VIEW,
+  CONSOLE_AUDIT_EVENT.UI_NAVIGATION,
+  CONSOLE_AUDIT_EVENT.UI_CLICK,
+  CONSOLE_AUDIT_EVENT.UI_FILTER,
+  CONSOLE_AUDIT_EVENT.UI_SEARCH,
+  CONSOLE_AUDIT_EVENT.UI_TAB_CHANGE,
+  CONSOLE_AUDIT_EVENT.UI_MODAL_OPEN,
+  CONSOLE_AUDIT_EVENT.UI_MODAL_CLOSE,
+  CONSOLE_AUDIT_EVENT.UI_FORM_SUBMIT,
+  CONSOLE_AUDIT_EVENT.UI_COPY,
+  CONSOLE_AUDIT_EVENT.UI_EXPORT,
+  CONSOLE_AUDIT_EVENT.UI_SELECTION,
+]);
+
+const MAX_UI_BATCH = 40;
 
 const subscribers = new Set();
 
@@ -142,11 +175,79 @@ export async function recordConsoleAudit(request, input = {}) {
   }
 }
 
+/**
+ * Ingest browser UI activity (clicks, navigation, filters, etc.).
+ * Accepts one event or `{ events: [...] }` (max 40). Rejects mouse-move spam types.
+ */
+export async function ingestUiActivity(request, payload = {}) {
+  const body = payload && typeof payload === "object" ? payload : {};
+  let items = [];
+  if (Array.isArray(body.events)) {
+    items = body.events;
+  } else if (body.event_type) {
+    items = [body];
+  } else {
+    throw new ErrorClass("Provide event_type or events[]", 400);
+  }
+
+  if (items.length === 0) {
+    throw new ErrorClass("events cannot be empty", 400);
+  }
+  if (items.length > MAX_UI_BATCH) {
+    throw new ErrorClass(`Max ${MAX_UI_BATCH} events per request`, 400);
+  }
+
+  const recorded = [];
+  for (const raw of items) {
+    if (!raw || typeof raw !== "object") continue;
+    const eventType = trimStr(raw.event_type, 64);
+    if (!eventType || !UI_AUDIT_EVENT_TYPES.has(eventType)) {
+      throw new ErrorClass(
+        `Invalid UI event_type "${eventType || ""}". Allowed: ${[...UI_AUDIT_EVENT_TYPES].join(", ")}`,
+        400,
+      );
+    }
+
+    const path = trimStr(raw.path || raw.route || raw.page, 255);
+    const label = trimStr(raw.label || raw.name || raw.text, 255);
+    const summary =
+      trimStr(raw.summary, 512) ||
+      [eventType, label, path].filter(Boolean).join(" — ");
+
+    const metadata = {
+      ...(raw.metadata && typeof raw.metadata === "object" ? raw.metadata : {}),
+      path: path || undefined,
+      label: label || undefined,
+      href: trimStr(raw.href, 512) || undefined,
+      element: trimStr(raw.element || raw.element_id || raw.target, 255) || undefined,
+      component: trimStr(raw.component, 128) || undefined,
+      client_ts: raw.client_ts || raw.timestamp || undefined,
+    };
+
+    const shaped = await recordConsoleAudit(request, {
+      event_type: eventType,
+      outcome: trimStr(raw.outcome, 20) || "success",
+      target_type: trimStr(raw.target_type, 64) || "ui",
+      target_key: trimStr(raw.target_key, 255) || path,
+      account_key: trimStr(raw.account_key, 128),
+      reference: trimStr(raw.reference, 255),
+      summary,
+      metadata,
+    });
+    if (shaped) recorded.push(shaped);
+  }
+
+  return { accepted: recorded.length, events: recorded };
+}
+
 export default class ConsoleAuditService {
   async listEvents({ limit = 50, offset = 0, filters = {} } = {}) {
     const conditions = [];
     if (filters.event_type) {
       conditions.push(eq(consoleAuditEvents.event_type, String(filters.event_type).trim()));
+    }
+    if (filters.event_prefix) {
+      conditions.push(like(consoleAuditEvents.event_type, `${String(filters.event_prefix).trim()}%`));
     }
     if (filters.outcome) {
       conditions.push(eq(consoleAuditEvents.outcome, String(filters.outcome).trim()));

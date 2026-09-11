@@ -1,6 +1,8 @@
 import ConsoleAuditService, {
   CONSOLE_AUDIT_EVENT,
+  UI_AUDIT_EVENT_TYPES,
   recordConsoleAudit,
+  ingestUiActivity,
   subscribeConsoleAudit,
 } from "../services/consoleAudit.js";
 import { parsePagination, paginatedResponse } from "../utils/pagination/index.js";
@@ -16,6 +18,7 @@ export const listCommandCenterEvents = async (request, reply) => {
     offset,
     filters: {
       event_type: request.query.event_type,
+      event_prefix: request.query.event_prefix,
       outcome: request.query.outcome,
       actor_user_id: request.query.actor_user_id,
       account_key: request.query.account_key,
@@ -30,6 +33,20 @@ export const listCommandCenterEvents = async (request, reply) => {
     success: true,
     message: "Command center events fetched successfully",
     ...paginatedResponse(data, page, limit),
+  });
+};
+
+export const ingestCommandCenterActivity = async (request, reply) => {
+  const result = await ingestUiActivity(request, request.body ?? {});
+  return reply.code(202).send({
+    code: 202,
+    success: true,
+    message: "Activity recorded",
+    data: {
+      accepted: result.accepted,
+      allowed_event_types: [...UI_AUDIT_EVENT_TYPES],
+      events: result.events,
+    },
   });
 };
 

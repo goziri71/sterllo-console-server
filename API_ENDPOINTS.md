@@ -28,7 +28,8 @@ Requires JWT + **`console.read`**. Full FE guide: `docs/frontend-command-center.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/1.202602.0/ops/command-center/events` | Paginated audit history |
+| GET | `/1.202602.0/ops/command-center/events` | Paginated audit history (`event_prefix=ui.` supported) |
+| POST | `/1.202602.0/ops/command-center/activity` | Ingest UI clicks / navigation / filters (batch) |
 | GET | `/1.202602.0/ops/command-center/pulse` | Action counts in a time window |
 | GET | `/1.202602.0/ops/command-center/presence` | Active teammate sessions |
 | GET | `/1.202602.0/ops/command-center/stream` | **SSE** live audit feed (`?access_token=` for EventSource) |
