@@ -3,6 +3,7 @@ import { replayDepositWebhook as replayDepositWebhookService } from "../services
 import { parsePagination, paginatedResponse } from "../utils/pagination/index.js";
 import { userCanReadFinancial, redactFinancialDeep } from "../utils/financialAccess.js";
 import { ErrorClass } from "../utils/errorClass/index.js";
+import { CONSOLE_AUDIT_EVENT, recordConsoleAudit } from "./ops.js";
 
 const txService = new TransactionService();
 
@@ -168,6 +169,16 @@ export const approvePendingTransaction = async (request, reply) => {
     request.params.reference,
   );
 
+  await recordConsoleAudit(request, {
+    event_type: CONSOLE_AUDIT_EVENT.TX_APPROVE,
+    outcome: "success",
+    target_type: "transaction",
+    target_key: request.params.transaction_type,
+    reference: request.params.reference,
+    summary: `Approved ${request.params.transaction_type} ${request.params.reference}`,
+    metadata: { status: result?.status },
+  });
+
   return reply.code(200).send({
     code: 200,
     success: true,
@@ -182,6 +193,16 @@ export const cancelPendingTransaction = async (request, reply) => {
     request.params.reference,
   );
 
+  await recordConsoleAudit(request, {
+    event_type: CONSOLE_AUDIT_EVENT.TX_CANCEL,
+    outcome: "success",
+    target_type: "transaction",
+    target_key: request.params.transaction_type,
+    reference: request.params.reference,
+    summary: `Cancelled ${request.params.transaction_type} ${request.params.reference}`,
+    metadata: { status: result?.status },
+  });
+
   return reply.code(200).send({
     code: 200,
     success: true,
@@ -191,6 +212,17 @@ export const cancelPendingTransaction = async (request, reply) => {
 };
 
 export const replayDepositWebhook = async (request, reply) => {
-  const { httpStatus, body } = await replayDepositWebhookService(request.body ?? {});
+  const bodyIn = request.body ?? {};
+  const { httpStatus, body } = await replayDepositWebhookService(bodyIn);
+  const ok = httpStatus >= 200 && httpStatus < 300 && body?.state !== false;
+  await recordConsoleAudit(request, {
+    event_type: CONSOLE_AUDIT_EVENT.WEBHOOK_REPLAY,
+    outcome: ok ? "success" : "failure",
+    target_type: "deposit",
+    reference: bodyIn.reference,
+    account_key: bodyIn.account_key || bodyIn.accountKey || null,
+    summary: `Webhook replay for deposit ${bodyIn.reference || "unknown"}`,
+    metadata: { httpStatus, sterllo_message: body?.message },
+  });
   return reply.code(httpStatus).send(body);
 };

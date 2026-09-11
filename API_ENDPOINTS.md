@@ -22,6 +22,19 @@ Roles: `finance`, `operations`, `ops_support`, `compliance`, `growth`
 
 ---
 
+## Ops / Live Command Center
+
+Requires JWT + **`console.read`**. Full FE guide: `docs/frontend-command-center.md`.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/1.202602.0/ops/command-center/events` | Paginated audit history |
+| GET | `/1.202602.0/ops/command-center/pulse` | Action counts in a time window |
+| GET | `/1.202602.0/ops/command-center/presence` | Active teammate sessions |
+| GET | `/1.202602.0/ops/command-center/stream` | **SSE** live audit feed (`?access_token=` for EventSource) |
+
+---
+
 ## Auth
 
 | Method | Endpoint | Auth | Description |

@@ -5,6 +5,7 @@ import KYCService from "../services/kycs.js";
 import { parsePagination, paginatedResponse } from "../utils/pagination/index.js";
 import { userCanReadFinancial } from "../utils/financialAccess.js";
 import { ErrorClass } from "../utils/errorClass/index.js";
+import { CONSOLE_AUDIT_EVENT, recordConsoleAudit } from "./ops.js";
 
 const merchantService = new MerchantService();
 const customerService = new CustomerService();
@@ -124,7 +125,16 @@ export const linkMerchantBeamerAccount = async (request, reply) => {
     request.params.account_key,
     request.body ?? {},
   );
-
+  const ok = httpStatus >= 200 && httpStatus < 300 && body?.state !== false;
+  await recordConsoleAudit(request, {
+    event_type: CONSOLE_AUDIT_EVENT.BEAMER_LINK,
+    outcome: ok ? "success" : "failure",
+    account_key: request.params.account_key,
+    target_type: "merchant",
+    target_key: request.params.account_key,
+    summary: `Beamer account link for ${request.params.account_key}`,
+    metadata: { httpStatus, isvs_code: body?.code, isvs_message: body?.message },
+  });
   return reply.code(httpStatus).send(body);
 };
 
@@ -133,16 +143,37 @@ export const updateMerchantBeamerAccount = async (request, reply) => {
     request.params.account_key,
     request.body ?? {},
   );
-
+  const ok = httpStatus >= 200 && httpStatus < 300 && body?.state !== false;
+  await recordConsoleAudit(request, {
+    event_type: CONSOLE_AUDIT_EVENT.BEAMER_UPDATE,
+    outcome: ok ? "success" : "failure",
+    account_key: request.params.account_key,
+    target_type: "merchant",
+    target_key: request.params.account_key,
+    summary: `Beamer account update for ${request.params.account_key}`,
+    metadata: { httpStatus, isvs_code: body?.code, isvs_message: body?.message },
+  });
   return reply.code(httpStatus).send(body);
 };
 
 export const tsqMerchantBeamerNgnPayout = async (request, reply) => {
+  const bodyIn = request.body ?? {};
+  const reference = bodyIn?.data?.reference || bodyIn?.reference || null;
   const { httpStatus, body } = await merchantService.tsqBeamerNgnPayout(
     request.params.account_key,
-    request.body ?? {},
+    bodyIn,
   );
-
+  const ok = httpStatus >= 200 && httpStatus < 300 && body?.state !== false;
+  await recordConsoleAudit(request, {
+    event_type: CONSOLE_AUDIT_EVENT.BEAMER_NGN_TSQ,
+    outcome: ok ? "success" : "failure",
+    account_key: request.params.account_key,
+    target_type: "ngn_payout",
+    target_key: request.params.account_key,
+    reference,
+    summary: `Beamer NGN TSQ resolve for ${reference || "unknown"}`,
+    metadata: { httpStatus, isvs_code: body?.code, isvs_message: body?.message },
+  });
   return reply.code(httpStatus).send(body);
 };
 

@@ -34,3 +34,4 @@ export {
 export { pricingFeeAuditEvents } from "./pricingAudit.js";
 export { depositMethods } from "./depositMethods.js";
 export { udara360APICredentials } from "./vendor.js";
+export { consoleAuditEvents } from "./consoleAudit.js";

@@ -23,7 +23,30 @@ export const authenticate = async (request, reply) => {
   }
 
   const token = authHeader.split(" ")[1];
+  await attachAuthenticatedUser(request, token);
+};
 
+/**
+ * Same as authenticate, but also accepts `?access_token=` for SSE / EventSource clients
+ * that cannot set Authorization headers.
+ */
+export const authenticateBearerOrQuery = async (request, reply) => {
+  const authHeader = request.headers.authorization;
+  let token = null;
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    token = authHeader.split(" ")[1];
+  } else if (request.query?.access_token) {
+    token = String(request.query.access_token).trim();
+  }
+
+  if (!token) {
+    throw new ErrorClass("Access denied. No token provided", 401);
+  }
+
+  await attachAuthenticatedUser(request, token);
+};
+
+async function attachAuthenticatedUser(request, token) {
   let decoded;
   try {
     decoded = verifyToken(token);
@@ -91,7 +114,7 @@ export const authenticate = async (request, reply) => {
   ) {
     await mfaSecurity.touchSession(session.id);
   }
-};
+}
 
 export const requireRecentMfa = async (request) => {
   if (!request.authSession) {

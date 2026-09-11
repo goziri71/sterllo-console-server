@@ -1,5 +1,6 @@
 import RbacService from "../services/rbac.js";
 import { parsePagination, paginatedResponse } from "../utils/pagination/index.js";
+import { CONSOLE_AUDIT_EVENT, recordConsoleAudit } from "./ops.js";
 
 const rbacService = new RbacService();
 
@@ -34,6 +35,14 @@ export const createUser = async (request, reply) => {
     role_slug: body.role_slug,
     assignedByUserId: request.user.id,
   });
+  await recordConsoleAudit(request, {
+    event_type: CONSOLE_AUDIT_EVENT.RBAC_USER_CREATE,
+    outcome: "success",
+    target_type: "user",
+    target_key: created?.user_key || body.email,
+    summary: `Provisioned console user ${body.email} as ${body.role_slug}`,
+    metadata: { role_slug: body.role_slug },
+  });
   return reply.code(201).send({
     code: 201,
     state: true,
@@ -66,6 +75,14 @@ export const updateRolePermissions = async (request, reply) => {
   const roleId = request.params.roleId;
   const body = request.body || {};
   const updated = await rbacService.setRolePermissions(roleId, body.permission_keys);
+  await recordConsoleAudit(request, {
+    event_type: CONSOLE_AUDIT_EVENT.RBAC_ROLE_PERMISSIONS,
+    outcome: "success",
+    target_type: "role",
+    target_key: updated?.slug || String(roleId),
+    summary: `Updated permissions for role ${updated?.slug || roleId}`,
+    metadata: { role_id: roleId, permission_keys: body.permission_keys },
+  });
   return ok(reply, updated);
 };
 
@@ -77,6 +94,14 @@ export const assignUserRole = async (request, reply) => {
     roleSlug: body.role_slug,
     assignedByUserId: request.user.id,
   });
+  await recordConsoleAudit(request, {
+    event_type: CONSOLE_AUDIT_EVENT.RBAC_USER_ROLE_ASSIGN,
+    outcome: "success",
+    target_type: "user",
+    target_key: targetUserKey,
+    summary: `Assigned role ${body.role_slug} to user ${targetUserKey}`,
+    metadata: { role_slug: body.role_slug },
+  });
   return ok(reply, access);
 };
 
@@ -85,6 +110,14 @@ export const revokeUserRole = async (request, reply) => {
   const access = await rbacService.revokeUserRole({
     targetUserKey: userKey,
     roleSlug,
+  });
+  await recordConsoleAudit(request, {
+    event_type: CONSOLE_AUDIT_EVENT.RBAC_USER_ROLE_REVOKE,
+    outcome: "success",
+    target_type: "user",
+    target_key: userKey,
+    summary: `Revoked role ${roleSlug} from user ${userKey}`,
+    metadata: { role_slug: roleSlug },
   });
   return ok(reply, access);
 };
