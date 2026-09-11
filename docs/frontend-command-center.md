@@ -93,3 +93,17 @@ Heartbeat comments are sent every ~15s so proxies keep the connection.
 2. Open SSE stream and prepend new `audit` events  
 3. Filter chips by `event_type` / actor / outcome  
 4. Show presence strip from `/presence`
+
+## Important hosting notes
+
+- Backend APIs live under **`https://api.console.sterllo.com`** — not `www`.
+- The page route **`https://www.console.sterllo.com/command-center/`** is a **frontend** SPA route. It must be added/deployed in the console web app (and the host must SPA-fallback unknown paths to `index.html`). A www `404` means the FE page is missing — not that the API is down.
+- SSE is cross-origin (`www` → `api`). Use:
+
+```js
+const es = new EventSource(
+  `https://api.console.sterllo.com/1.202602.0/ops/command-center/stream?access_token=${encodeURIComponent(jwt)}`
+);
+```
+
+- Before events work in production: run `npm run migrate:console-audit` against the **auth** DB.

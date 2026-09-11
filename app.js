@@ -81,7 +81,11 @@ app.register(cors, {
   methods: ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"],
   credentials: true,
 });
-app.register(helmet);
+// SPA is on www.console.*; API is on api.console.* — CORP must allow cross-origin
+// or EventSource / some browsers block the live command-center stream.
+app.register(helmet, {
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+});
 app.register(rateLimit, {
   // Permanent baseline limiter:
   // - Uses preHandler so CORS preflight OPTIONS is not throttled

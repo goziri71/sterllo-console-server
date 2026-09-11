@@ -63,13 +63,18 @@ export const getCommandCenterPresence = async (request, reply) => {
  */
 export const streamCommandCenter = async (request, reply) => {
   const lastEventId = Number(request.headers["last-event-id"] || request.query.last_event_id || 0);
+  const origin = request.headers.origin || "*";
 
   reply.hijack();
+  // Must set CORS here — hijack bypasses @fastify/cors response headers.
   reply.raw.writeHead(200, {
-    "Content-Type": "text/event-stream",
+    "Content-Type": "text/event-stream; charset=utf-8",
     "Cache-Control": "no-cache, no-transform",
     Connection: "keep-alive",
     "X-Accel-Buffering": "no",
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Credentials": "true",
+    Vary: "Origin",
   });
   reply.raw.write(": connected\n\n");
 
