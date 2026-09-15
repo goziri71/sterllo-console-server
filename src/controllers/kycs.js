@@ -6,13 +6,13 @@ import { parsePagination, paginatedResponse } from "../utils/pagination/index.js
 const kycService = new KYCService();
 
 export const getAllKYCs = async (request, reply) => {
-  const { page, limit, offset } = parsePagination(request.query);
+  const { page, limit, offset, fetchLimit } = parsePagination(request.query);
   const filters = {
     is_compliant: request.query.is_compliant,
     account_key: request.query.account_key,
     identification_type: request.query.identification_type,
   };
-  const data = await kycService.getAll({ limit, offset, filters });
+  const data = await kycService.getAll({ limit: fetchLimit, offset, filters });
 
   return reply.code(200).send({
     success: true,
@@ -65,15 +65,15 @@ export const getSubAccountKycEnableStatus = async (request, reply) => {
 };
 
 export const getCustomerKYCs = async (request, reply) => {
-  const { page, limit, offset } = parsePagination(request.query);
-  const { customer, count, rows } = await kycService.getByCustomer(request.params.identifier, { limit, offset });
+  const { page, limit, offset, fetchLimit } = parsePagination(request.query);
+  const { customer, rows } = await kycService.getByCustomer(request.params.identifier, { limit: fetchLimit, offset });
 
   return reply.code(200).send({
     code: 200,
     success: true,
     message: "Customer KYC records fetched successfully",
     customer,
-    ...paginatedResponse({ count, rows }, page, limit),
+    ...paginatedResponse({ rows }, page, limit),
   });
 };
 

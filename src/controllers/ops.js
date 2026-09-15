@@ -12,9 +12,9 @@ const auditService = new ConsoleAuditService();
 export { CONSOLE_AUDIT_EVENT, recordConsoleAudit };
 
 export const listCommandCenterEvents = async (request, reply) => {
-  const { page, limit, offset } = parsePagination(request.query);
+  const { page, limit, offset, fetchLimit } = parsePagination(request.query);
   const data = await auditService.listEvents({
-    limit,
+    limit: fetchLimit,
     offset,
     filters: {
       event_type: request.query.event_type,

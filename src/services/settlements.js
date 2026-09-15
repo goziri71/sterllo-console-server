@@ -134,34 +134,25 @@ export default class SettlementService {
 
   async getBatches({ limit, offset, filters }) {
     const where = buildWhere(filters);
-    const [countResult, dataResult] = await Promise.all([
-      db.execute(sql`
-        SELECT COUNT(*) AS total
-        ${fromClause}
-        WHERE ${where}
-      `),
-      db.execute(sql`
-        SELECT
-          COALESCE(t.source_reference, t.target_reference, CAST(t.id AS CHAR)) AS batch_id,
-          ${settlementTypeExpr} AS settlement_type,
-          t.account_key,
-          t.source_wallet_key,
-          t.target_wallet_key,
-          t.currency_code,
-          ${amountExpr} AS gross_amount,
-          ${feeExpr} AS fees_deducted,
-          ${netExpr} AS net_payable,
-          t.status AS status,
-          t.date_created
-        ${fromClause}
-        WHERE ${where}
-        ORDER BY t.date_created DESC
-        LIMIT ${limit} OFFSET ${offset}
-      `),
-    ]);
+    const [dataResult] = await db.execute(sql`
+      SELECT
+        COALESCE(t.source_reference, t.target_reference, CAST(t.id AS CHAR)) AS batch_id,
+        ${settlementTypeExpr} AS settlement_type,
+        t.account_key,
+        t.source_wallet_key,
+        t.target_wallet_key,
+        t.currency_code,
+        ${amountExpr} AS gross_amount,
+        ${feeExpr} AS fees_deducted,
+        ${netExpr} AS net_payable,
+        t.status AS status,
+        t.date_created
+      ${fromClause}
+      WHERE ${where}
+      ORDER BY t.date_created DESC
+      LIMIT ${limit} OFFSET ${offset}
+    `);
 
-    const countRows = countResult[0];
-    const total = Number(countRows?.[0]?.total ?? 0);
     const dataRows = dataResult[0] || [];
 
     const rows = dataRows.map((row) => ({
@@ -172,7 +163,7 @@ export default class SettlementService {
       net_payable: Number(row.net_payable || 0),
     }));
 
-    return { count: total, rows };
+    return { rows };
   }
 
   async getBatch(batchId) {

@@ -270,22 +270,15 @@ export default class ConsoleAuditService {
 
     const where = conditions.length ? and(...conditions) : undefined;
 
-    const [rows, countRows] = await Promise.all([
-      authDb
-        .select()
-        .from(consoleAuditEvents)
-        .where(where)
-        .orderBy(desc(consoleAuditEvents.id))
-        .limit(limit)
-        .offset(offset),
-      authDb
-        .select({ total: sql`COUNT(*)` })
-        .from(consoleAuditEvents)
-        .where(where),
-    ]);
+    const rows = await authDb
+      .select()
+      .from(consoleAuditEvents)
+      .where(where)
+      .orderBy(desc(consoleAuditEvents.id))
+      .limit(limit)
+      .offset(offset);
 
     return {
-      count: Number(countRows?.[0]?.total || 0),
       rows: rows.map(shapeEvent),
     };
   }

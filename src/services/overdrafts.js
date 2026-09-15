@@ -1,4 +1,4 @@
-import { eq, and, desc, count } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { overdraftRequests } from "../db/schema/overdrafts.js";
 import { ErrorClass } from "../utils/errorClass/index.js";
@@ -10,11 +10,8 @@ export default class OverdraftService {
     if (filters.account_key) conditions.push(eq(overdraftRequests.account_key, filters.account_key));
     const where = conditions.length > 0 ? and(...conditions) : undefined;
 
-    const [rows, [{ total }]] = await Promise.all([
-      db.select().from(overdraftRequests).where(where).limit(limit).offset(offset).orderBy(desc(overdraftRequests.date_created)),
-      db.select({ total: count() }).from(overdraftRequests).where(where),
-    ]);
-    return { count: Number(total), rows };
+    const rows = await db.select().from(overdraftRequests).where(where).limit(limit).offset(offset).orderBy(desc(overdraftRequests.date_created));
+    return { rows };
   }
 
   async getByReference(reference) {

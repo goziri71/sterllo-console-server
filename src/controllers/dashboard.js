@@ -34,9 +34,9 @@ export const getDashboardSummary = async (request, reply) => {
 
 export const getDashboardActivities = async (request, reply) => {
   const role = pickDashboardRole(request.user.roleSlugs);
-  const { page, limit, offset } = parsePagination(request.query);
+  const { page, limit, offset, fetchLimit } = parsePagination(request.query);
   const revealFinancial = userCanReadFinancial(request.user);
-  const data = await dashboardService.getActivities({ role, limit, offset, revealFinancial });
+  const data = await dashboardService.getActivities({ role, limit: fetchLimit, offset, revealFinancial });
 
   return reply.code(200).send({ success: true, ...paginatedResponse(data, page, limit) });
 };

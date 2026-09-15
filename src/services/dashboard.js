@@ -556,7 +556,6 @@ export default class DashboardService {
 
     activities.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
-    const total = activities.length;
     let paged = activities.slice(offset, offset + limit);
 
     if (!revealFinancial) {
@@ -574,6 +573,6 @@ export default class DashboardService {
       }));
     }
 
-    return { count: total, rows: paged };
+    return { rows: paged };
   }
 }

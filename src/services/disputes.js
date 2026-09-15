@@ -103,13 +103,10 @@ export default class DisputeService {
     const where = conditions.length > 0 ? and(...conditions) : undefined;
     const orderBy = normalizeSort(filters.sort_by, filters.order);
 
-    const [rows, [{ total }]] = await Promise.all([
-      db.select().from(transactionDisputes).where(where).limit(limit).offset(offset).orderBy(orderBy),
-      db.select({ total: count() }).from(transactionDisputes).where(where),
-    ]);
+    const rows = await db.select().from(transactionDisputes).where(where).limit(limit).offset(offset).orderBy(orderBy);
 
     const enrichedRows = await this.enrichRows(rows);
-    return { count: Number(total), rows: enrichedRows };
+    return { rows: enrichedRows };
   }
 
   async getSummary(filters = {}) {

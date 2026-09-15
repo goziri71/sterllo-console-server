@@ -9,12 +9,14 @@ import { ErrorClass } from "../utils/errorClass/index.js";
 import { isMissingMysqlTableError } from "../utils/mysqlErrors.js";
 
 async function paginated(table, { where, limit, offset }) {
-  const [rows, countRows] = await Promise.all([
-    db.select().from(table).where(where).limit(limit).offset(offset).orderBy(desc(table.date_created)),
-    db.select({ total: count() }).from(table).where(where),
-  ]);
-  const rawTotal = countRows[0]?.total ?? 0;
-  return { count: Number(rawTotal), rows };
+  const rows = await db
+    .select()
+    .from(table)
+    .where(where)
+    .limit(limit)
+    .offset(offset)
+    .orderBy(desc(table.date_created));
+  return { rows };
 }
 
 /** Same as paginated, but returns an empty page when the physical table is absent (env without fiat/crypto ledger tables). */
@@ -22,7 +24,7 @@ async function paginatedOrEmpty(table, opts) {
   try {
     return await paginated(table, opts);
   } catch (e) {
-    if (isMissingMysqlTableError(e)) return { count: 0, rows: [] };
+    if (isMissingMysqlTableError(e)) return { rows: [] };
     throw e;
   }
 }
@@ -227,7 +229,7 @@ function appendMerchantOwnerFilter(conditions, accountKeyCol, userKeyCol, mercha
 }
 
 function emptyTxPage() {
-  return { count: 0, rows: [] };
+  return { rows: [] };
 }
 
 function walletKeysTouchCondition(columns, walletKeys) {
@@ -888,7 +890,7 @@ export default class TransactionService {
 
     const scope = await resolveCustomerWalletScope(filters);
     if (scope.empty) {
-      return { count: 0, rows: [] };
+      return { rows: [] };
     }
     const merchantScope = await resolveMerchantOwnerScope(filters);
 
@@ -1282,8 +1284,8 @@ export default class TransactionService {
 
     enriched.sort((a, b) => new Date(b.date_created) - new Date(a.date_created));
 
+    // `limit` is fetchLimit (page size + 1); no total count.
     return {
-      count: enriched.length,
       rows: enriched.slice(offset, offset + limit),
     };
   }
@@ -1563,8 +1565,8 @@ export default class TransactionService {
 
     out.sort((a, b) => new Date(b.date_created) - new Date(a.date_created));
 
+    // `limit` is fetchLimit (page size + 1); no total count.
     return {
-      count: out.length,
       rows: out.slice(offset, offset + limit),
     };
   }
@@ -1622,8 +1624,8 @@ export default class TransactionService {
     );
 
     const merged = batches.flat().sort((a, b) => new Date(b.date_created) - new Date(a.date_created));
+    // `limit` is fetchLimit (page size + 1); no total count.
     return {
-      count: merged.length,
       rows: merged.slice(offset, offset + limit),
     };
   }

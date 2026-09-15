@@ -13,14 +13,14 @@ const transactionService = new TransactionService();
 const kycService = new KYCService();
 
 export const getAllMerchants = async (request, reply) => {
-  const { page, limit, offset } = parsePagination(request.query);
+  const { page, limit, offset, fetchLimit } = parsePagination(request.query);
   const filters = {
     name: request.query.name,
     trade_name: request.query.trade_name,
   };
   const sortBy = request.query.sort_by;
   const order = request.query.order;
-  const data = await merchantService.getAll({ limit, offset, filters, sortBy, order });
+  const data = await merchantService.getAll({ limit: fetchLimit, offset, filters, sortBy, order });
 
   return reply.code(200).send({
     code: 200,
@@ -73,15 +73,15 @@ export const patchMerchantTier = async (request, reply) => {
 };
 
 export const getMerchantKYCs = async (request, reply) => {
-  const { page, limit, offset } = parsePagination(request.query);
-  const data = await kycService.getByMerchant(request.params.account_key, { limit, offset });
+  const { page, limit, offset, fetchLimit } = parsePagination(request.query);
+  const data = await kycService.getByMerchant(request.params.account_key, { limit: fetchLimit, offset });
 
   return reply.code(200).send({
     code: 200,
     success: true,
     message: "Merchant KYC records fetched successfully",
     merchant: data.merchant,
-    ...paginatedResponse({ count: data.count, rows: data.rows }, page, limit),
+    ...paginatedResponse(data, page, limit),
   });
 };
 
@@ -97,8 +97,8 @@ export const approveMerchantKYC = async (request, reply) => {
 };
 
 export const getMerchantLedgers = async (request, reply) => {
-  const { page, limit, offset } = parsePagination(request.query);
-  const data = await merchantService.getLedgers(request.params.account_key, { limit, offset });
+  const { page, limit, offset, fetchLimit } = parsePagination(request.query);
+  const data = await merchantService.getLedgers(request.params.account_key, { limit: fetchLimit, offset });
 
   return reply.code(200).send({
     code: 200,
@@ -109,8 +109,8 @@ export const getMerchantLedgers = async (request, reply) => {
 };
 
 export const getMerchantSettlements = async (request, reply) => {
-  const { page, limit, offset } = parsePagination(request.query);
-  const data = await merchantService.getSettlements(request.params.account_key, { limit, offset });
+  const { page, limit, offset, fetchLimit } = parsePagination(request.query);
+  const data = await merchantService.getSettlements(request.params.account_key, { limit: fetchLimit, offset });
 
   return reply.code(200).send({
     code: 200,
@@ -188,9 +188,9 @@ export const getMerchantCustomerTransactions = async (request, reply) => {
   const { account_key, identifier } = request.params;
   await customerService.ensureCustomerBelongsToMerchant(identifier, account_key);
 
-  const { page, limit, offset } = parsePagination(request.query);
+  const { page, limit, offset, fetchLimit } = parsePagination(request.query);
   const data = await transactionService.getStatement({
-    limit,
+    limit: fetchLimit,
     offset,
     filters: {
       account_key,

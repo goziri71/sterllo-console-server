@@ -176,14 +176,11 @@ export default class CustomerService {
 
     const orderClause = buildOrderBy(sortBy, order);
 
-    const [rows, [{ total }]] = await Promise.all([
-      db.select().from(customers).where(where).limit(limit).offset(offset).orderBy(orderClause),
-      db.select({ total: count() }).from(customers).where(where),
-    ]);
+    const rows = await db.select().from(customers).where(where).limit(limit).offset(offset).orderBy(orderClause);
 
     const enriched = await enrichWithWalletsAndKyc(rows);
 
-    return { count: Number(total), rows: enriched };
+    return { rows: enriched };
   }
 
   async getByIdentifier(identifier) {
@@ -234,14 +231,10 @@ export default class CustomerService {
     const where = and(...conditions);
     const orderClause = buildOrderBy(sortBy, order);
 
-    const [rows, [{ total }]] = await Promise.all([
-      db.select().from(customers).where(where).limit(limit).offset(offset).orderBy(orderClause),
-      db.select({ total: count() }).from(customers).where(where),
-    ]);
+    const rows = await db.select().from(customers).where(where).limit(limit).offset(offset).orderBy(orderClause);
 
     const enriched = await enrichWithWalletsAndKyc(rows);
-
-    return { count: Number(total), rows: enriched };
+    return { rows: enriched };
   }
 
   async getStats() {
@@ -514,18 +507,15 @@ export default class CustomerService {
     }
     const where = and(...conditions);
 
-    const [rows, [{ total }]] = await Promise.all([
-      db
-        .select()
-        .from(customers)
-        .where(where)
-        .orderBy(desc(customers.date_created))
-        .limit(limit)
-        .offset(offset),
-      db.select({ total: count() }).from(customers).where(where),
-    ]);
+    const rows = await db
+      .select()
+      .from(customers)
+      .where(where)
+      .orderBy(desc(customers.date_created))
+      .limit(limit)
+      .offset(offset);
 
-    return { count: Number(total), rows };
+    return { rows };
   }
 
   async getWallets(identifier, { limit, offset }) {
@@ -540,11 +530,8 @@ export default class CustomerService {
     }
 
     const where = eq(customerWallets.identifier, identifier);
-    const [rows, [{ total }]] = await Promise.all([
-      db.select().from(customerWallets).where(where).limit(limit).offset(offset).orderBy(desc(customerWallets.date_created)),
-      db.select({ total: count() }).from(customerWallets).where(where),
-    ]);
-    return { count: Number(total), rows };
+    const rows = await db.select().from(customerWallets).where(where).limit(limit).offset(offset).orderBy(desc(customerWallets.date_created));
+    return { rows };
   }
 
   async getCustomerViewMetrics(identifier) {

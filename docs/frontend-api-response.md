@@ -26,7 +26,7 @@ All JSON responses that follow the console standard use the **same top-level sha
 - **`state`:** `true`
 - **`message`:** Typically `"Successful."` (exact text may vary slightly per endpoint).
 - **`data`:** Endpoint-specific payload (e.g. a single entity, or an **array** for list endpoints).
-- **`pagination`:** (List endpoints only) Metadata object (`total`, `page`, `limit`, `total_pages`, `has_next`, `has_prev`) — **sibling** of `data`, not nested under it.
+- **`pagination`:** (List endpoints only) Next-only metadata (`page`, `limit`, `has_next`, `has_prev`) — **sibling** of `data`/`records`, not nested under it. Exact `total` / `total_pages` are **not** returned (avoids expensive `COUNT(*)` on large tables). Use `has_next` to enable a Next control; `has_prev` when `page > 1`.
 - **HTTP:** Usually `200` for successful operations handled by this API.
 
 **Suggested client logic:** treat as success when `state === true` (and optionally `code === 2000`).
@@ -56,10 +56,8 @@ Failures use the **same envelope**, with `state: false` and a **thousand-range**
 
 ```ts
 type PaginationMeta = {
-  total: number;
   page: number;
   limit: number;
-  total_pages: number;
   has_next: boolean;
   has_prev: boolean;
 };

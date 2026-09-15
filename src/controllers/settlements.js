@@ -27,9 +27,9 @@ export const getSettlementSummary = async (request, reply) => {
 };
 
 export const getSettlementBatches = async (request, reply) => {
-  const { page, limit, offset } = parsePagination(request.query);
+  const { page, limit, offset, fetchLimit } = parsePagination(request.query);
   const raw = await settlementService.getBatches({
-    limit,
+    limit: fetchLimit,
     offset,
     filters: extractFilters(request.query),
   });

@@ -301,14 +301,13 @@ export default class ComplianceService {
     });
 
     alerts.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-    const total = alerts.length;
     const rows = alerts.slice(offset, offset + limit);
 
-    return { count: total, rows };
+    return { rows };
   }
 
   async getActivity({ limit, offset }) {
-    const { rows, count: total } = await this.getAlerts({
+    const { rows } = await this.getAlerts({
       limit: Math.min(limit + offset, 100),
       offset: 0,
       filters: { status: "all" },
@@ -324,7 +323,6 @@ export default class ComplianceService {
     }));
 
     return {
-      count: total,
       rows: activities.slice(offset, offset + limit),
     };
   }
@@ -371,8 +369,7 @@ export default class ComplianceService {
     };
 
     const reports = [currentMonth, ...monthlyRows];
-    const total = reports.length;
     const rows = reports.slice(offset, offset + limit);
-    return { count: total, rows };
+    return { rows };
   }
 }

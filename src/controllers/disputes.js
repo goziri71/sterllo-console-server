@@ -20,7 +20,7 @@ export const getDisputesSummary = async (request, reply) => {
 };
 
 export const getAllDisputes = async (request, reply) => {
-  const { page, limit, offset } = parsePagination(request.query);
+  const { page, limit, offset, fetchLimit } = parsePagination(request.query);
   const filters = {
     status: request.query.status,
     account_key: request.query.account_key,
@@ -33,7 +33,7 @@ export const getAllDisputes = async (request, reply) => {
     sort_by: request.query.sort_by,
     order: request.query.order,
   };
-  const data = await disputeService.getAll({ limit, offset, filters });
+  const data = await disputeService.getAll({ limit: fetchLimit, offset, filters });
 
   return reply.code(200).send({ success: true, ...paginatedResponse(data, page, limit) });
 };

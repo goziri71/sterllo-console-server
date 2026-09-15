@@ -13,9 +13,9 @@ const ok = (reply, data) =>
   });
 
 export const listUsers = async (request, reply) => {
-  const { page, limit, offset } = parsePagination(request.query);
+  const { page, limit, offset, fetchLimit } = parsePagination(request.query);
   const data = await rbacService.listUsers({
-    limit,
+    limit: fetchLimit,
     offset,
     search: request.query.search,
     role_slug: request.query.role_slug,

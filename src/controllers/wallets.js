@@ -8,12 +8,12 @@ const walletService = new WalletService();
 const transactionService = new TransactionService();
 
 export const getWalletPage = async (request, reply) => {
-  const { page, limit, offset } = parsePagination(request.query);
+  const { page, limit, offset, fetchLimit } = parsePagination(request.query);
   const revealFinancial = userCanReadFinancial(request.user);
   const data = await walletService.getWalletPage({
     ownerType: request.query.owner_type,
     ownerKey: request.query.owner_key,
-    limit,
+    limit: fetchLimit,
     offset,
     search: request.query.search,
     currencyCode: request.query.currency_code,
@@ -25,16 +25,16 @@ export const getWalletPage = async (request, reply) => {
     success: true,
     data: {
       summary: data.summary,
-      ...paginatedResponse({ count: data.count, rows: data.rows }, page, limit),
+      ...paginatedResponse(data, page, limit),
     },
   });
 };
 
 export const getMerchantWallets = async (request, reply) => {
-  const { page, limit, offset } = parsePagination(request.query);
+  const { page, limit, offset, fetchLimit } = parsePagination(request.query);
   const revealFinancial = userCanReadFinancial(request.user);
   const data = await walletService.getMerchantWallets(request.params.account_key, {
-    limit,
+    limit: fetchLimit,
     offset,
     revealFinancial,
   });
@@ -64,10 +64,10 @@ export const getMerchantWallet = async (request, reply) => {
 };
 
 export const getEnrichedCustomerWallets = async (request, reply) => {
-  const { page, limit, offset } = parsePagination(request.query);
+  const { page, limit, offset, fetchLimit } = parsePagination(request.query);
   const revealFinancial = userCanReadFinancial(request.user);
   const data = await walletService.getEnrichedCustomerWallets(request.params.identifier, {
-    limit,
+    limit: fetchLimit,
     offset,
     search: request.query.search,
     revealFinancial,
@@ -101,10 +101,10 @@ export const getCustomerWalletLedger = async (request, reply) => {
   if (!userCanReadFinancial(request.user)) {
     throw new ErrorClass("Wallet ledger requires financial.read permission", 403);
   }
-  const { page, limit, offset } = parsePagination(request.query);
+  const { page, limit, offset, fetchLimit } = parsePagination(request.query);
   await walletService.ensureCustomerWalletOwnership(request.params.identifier, request.params.wallet_key);
   const data = await transactionService.getWalletLedger({
-    limit,
+    limit: fetchLimit,
     offset,
     filters: {
       wallet_key: request.params.wallet_key,

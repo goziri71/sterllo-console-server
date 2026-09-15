@@ -131,24 +131,19 @@ export default class KYCService {
           compliantKyc: 0,
           pendingKyc: 0,
         }),
-        count: 0,
         rows: [],
       };
     }
 
-    const [listBundle, [{ total: compliantTotal }], [{ total: pendingTotal }]] = await Promise.all([
-      Promise.all([
-        db.select().from(kycs).where(where).limit(limit).offset(offset).orderBy(desc(kycs.date_created)),
-        db.select({ total: count() }).from(kycs).where(where),
-      ]),
+    const [rows, [{ total: compliantTotal }], [{ total: pendingTotal }]] = await Promise.all([
+      db.select().from(kycs).where(where).limit(limit).offset(offset).orderBy(desc(kycs.date_created)),
       db.select({ total: count() }).from(kycs).where(and(where, eq(kycs.is_compliant, "Y"))),
       db.select({ total: count() }).from(kycs).where(and(where, ne(kycs.is_compliant, "Y"))),
     ]);
-    const [rows, [{ total }]] = listBundle;
 
-    const totalKyc = Number(total);
     const compliantKyc = Number(compliantTotal);
     const pendingKyc = Number(pendingTotal);
+    const totalKyc = compliantKyc + pendingKyc;
 
     return {
       merchant: merchantSummaryForKycList(merchant, {
@@ -156,7 +151,6 @@ export default class KYCService {
         compliantKyc,
         pendingKyc,
       }),
-      count: totalKyc,
       rows: rows.map(enrichKycRowForApi),
     };
   }
@@ -287,11 +281,8 @@ export default class KYCService {
     if (filters.identification_type) conditions.push(eq(kycs.identification_type, filters.identification_type));
     const where = conditions.length > 0 ? and(...conditions) : undefined;
 
-    const [rows, [{ total }]] = await Promise.all([
-      db.select().from(kycs).where(where).limit(limit).offset(offset).orderBy(desc(kycs.date_created)),
-      db.select({ total: count() }).from(kycs).where(where),
-    ]);
-    return { count: Number(total), rows };
+    const rows = await db.select().from(kycs).where(where).limit(limit).offset(offset).orderBy(desc(kycs.date_created));
+    return { rows };
   }
 
   async getByReference(reference) {
@@ -329,19 +320,15 @@ export default class KYCService {
     }
 
     const where = eq(kycs.identifier, identifier);
-    const [listBundle, [{ total: compliantTotal }], [{ total: pendingTotal }]] = await Promise.all([
-      Promise.all([
-        db.select().from(kycs).where(where).limit(limit).offset(offset).orderBy(desc(kycs.date_created)),
-        db.select({ total: count() }).from(kycs).where(where),
-      ]),
+    const [rows, [{ total: compliantTotal }], [{ total: pendingTotal }]] = await Promise.all([
+      db.select().from(kycs).where(where).limit(limit).offset(offset).orderBy(desc(kycs.date_created)),
       db.select({ total: count() }).from(kycs).where(and(where, eq(kycs.is_compliant, "Y"))),
       db.select({ total: count() }).from(kycs).where(and(where, ne(kycs.is_compliant, "Y"))),
     ]);
-    const [rows, [{ total }]] = listBundle;
 
-    const totalKyc = Number(total);
     const compliantKyc = Number(compliantTotal);
     const pendingKyc = Number(pendingTotal);
+    const totalKyc = compliantKyc + pendingKyc;
 
     const customerSummary = customerSummaryForKycList(customer, {
       totalKyc,
@@ -351,7 +338,6 @@ export default class KYCService {
 
     return {
       customer: customerSummary,
-      count: totalKyc,
       rows: rows.map(enrichKycRowForApi),
     };
   }

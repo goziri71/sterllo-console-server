@@ -6,7 +6,7 @@ const customerService = new CustomerService();
 const merchantService = new MerchantService();
 
 export const getAllCustomers = async (request, reply) => {
-  const { page, limit, offset } = parsePagination(request.query);
+  const { page, limit, offset, fetchLimit } = parsePagination(request.query);
   const filters = {
     status: request.query.status,
     account_key: request.query.account_key,
@@ -15,7 +15,7 @@ export const getAllCustomers = async (request, reply) => {
   };
   const sortBy = request.query.sort_by;
   const order = request.query.order;
-  const data = await customerService.getAll({ limit, offset, filters, sortBy, order });
+  const data = await customerService.getAll({ limit: fetchLimit, offset, filters, sortBy, order });
 
   return reply.code(200).send({
     code: 200,
@@ -120,7 +120,7 @@ export const updateCustomerByHeaders = async (request, reply) => {
 };
 
 export const getCustomerByHeaders = async (request, reply) => {
-  const { page, limit, offset } = parsePagination(request.query);
+  const { page, limit, offset, fetchLimit } = parsePagination(request.query);
   const userKey = request.headers["x-user-key"];
   const accountKey = request.headers["x-account-key"];
   const reference = request.query.reference;
@@ -128,7 +128,7 @@ export const getCustomerByHeaders = async (request, reply) => {
     userKey,
     accountKey,
     reference,
-    limit,
+    limit: fetchLimit,
     offset,
   });
   const { records, pagination } = paginatedResponse(data, page, limit);
@@ -142,8 +142,8 @@ export const getCustomerByHeaders = async (request, reply) => {
 };
 
 export const getCustomerWallets = async (request, reply) => {
-  const { page, limit, offset } = parsePagination(request.query);
-  const data = await customerService.getWallets(request.params.identifier, { limit, offset });
+  const { page, limit, offset, fetchLimit } = parsePagination(request.query);
+  const data = await customerService.getWallets(request.params.identifier, { limit: fetchLimit, offset });
 
   return reply.code(200).send({
     code: 200,
@@ -163,7 +163,7 @@ export const getCustomerStats = async (request, reply) => {
 };
 
 export const getMerchantCustomers = async (request, reply) => {
-  const { page, limit, offset } = parsePagination(request.query);
+  const { page, limit, offset, fetchLimit } = parsePagination(request.query);
   const sortBy = request.query.sort_by;
   const order = request.query.order;
   const filters = {
@@ -174,7 +174,7 @@ export const getMerchantCustomers = async (request, reply) => {
   const [merchant, data] = await Promise.all([
     merchantService.getByAccountKey(request.params.account_key),
     customerService.getByMerchant(request.params.account_key, {
-      limit,
+      limit: fetchLimit,
       offset,
       sortBy,
       order,

@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { and, count, desc, eq, inArray, like, or } from "drizzle-orm";
+import { and, desc, eq, inArray, like, or } from "drizzle-orm";
 import { authDb, authPool } from "../db/index.js";
 import { users } from "../db/schema/users.js";
 import {
@@ -122,7 +122,7 @@ export default class RbacService {
         .where(eq(rbacRoles.slug, slug))
         .limit(1);
       if (!roleRow) {
-        return { count: 0, rows: [] };
+        return { rows: [] };
       }
       const memberRows = await authDb
         .select({ userId: rbacUserRoles.user_id })
@@ -130,7 +130,7 @@ export default class RbacService {
         .where(eq(rbacUserRoles.role_id, roleRow.id));
       idFilter = [...new Set(memberRows.map((r) => r.userId))];
       if (idFilter.length === 0) {
-        return { count: 0, rows: [] };
+        return { rows: [] };
       }
     }
 
@@ -140,10 +140,6 @@ export default class RbacService {
         : idFilter
           ? inArray(users.id, idFilter)
           : searchWhere;
-
-    const countQuery = authDb.select({ total: count() }).from(users);
-    const [countRow] = await (where ? countQuery.where(where) : countQuery);
-    const total = Number(countRow?.total ?? 0);
 
     const listBase = authDb
       .select({
@@ -163,7 +159,7 @@ export default class RbacService {
 
     const userIds = rows.map((r) => r.id);
     if (userIds.length === 0) {
-      return { count: total, rows: [] };
+      return { rows: [] };
     }
 
     const roleLinks = await authDb
@@ -196,7 +192,7 @@ export default class RbacService {
       roles: rolesByUser.get(u.id) ?? [],
     }));
 
-    return { count: total, rows: enriched };
+    return { rows: enriched };
   }
 
   async createConsoleUser({

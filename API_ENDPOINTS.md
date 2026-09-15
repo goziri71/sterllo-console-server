@@ -627,6 +627,8 @@ All routes require JWT + any role.
 
 ## Transactions
 
+List endpoints use **next-only pagination**: `pagination` includes `page`, `limit`, `has_next`, and `has_prev` — not exact `total` / `total_pages` (avoids expensive `COUNT(*)` on large tables).
+
 All routes require JWT + any role. All are read-only.
 
 | Method | Endpoint | Description |
@@ -711,10 +713,8 @@ Returns a unified, paginated timeline with normalized fields:
     }
   ],
   "pagination": {
-    "total": 150,
     "page": 1,
     "limit": 20,
-    "total_pages": 8,
     "has_next": true,
     "has_prev": false
   }
@@ -1053,10 +1053,8 @@ Paginated. Each wallet includes:
       }
     ],
     "pagination": {
-      "total": 127,
       "page": 1,
       "limit": 20,
-      "total_pages": 7,
       "has_next": true,
       "has_prev": false
     }
@@ -1235,10 +1233,8 @@ Returns recent activities filtered by role relevance. The activity types returne
     }
   ],
   "pagination": {
-    "total": 150,
     "page": 1,
     "limit": 20,
-    "total_pages": 8,
     "has_next": true,
     "has_prev": false
   }

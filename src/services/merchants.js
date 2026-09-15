@@ -1422,10 +1422,7 @@ export default class MerchantService {
 
     const orderClause = buildOrderBy(sortBy, order);
 
-    const [merchantRows, [{ total }]] = await Promise.all([
-      db.select().from(merchants).where(where).limit(limit).offset(offset).orderBy(orderClause),
-      db.select({ total: count() }).from(merchants).where(where),
-    ]);
+    const merchantRows = await db.select().from(merchants).where(where).limit(limit).offset(offset).orderBy(orderClause);
 
     const udaraMap = await fetchLatestUdaraMap(merchantRows.map((r) => r.account_key));
     const rows = merchantRows.map((r) => ({
@@ -1434,7 +1431,7 @@ export default class MerchantService {
     }));
     const enriched = await enrichWithCounts(rows);
 
-    return { count: Number(total), rows: enriched };
+    return { rows: enriched };
   }
 
   async getByAccountKey(accountKey) {
@@ -1542,11 +1539,8 @@ export default class MerchantService {
     }
 
     const where = eq(merchantLedgers.account_key, accountKey);
-    const [rows, [{ total }]] = await Promise.all([
-      db.select().from(merchantLedgers).where(where).limit(limit).offset(offset).orderBy(desc(merchantLedgers.date_created)),
-      db.select({ total: count() }).from(merchantLedgers).where(where),
-    ]);
-    return { count: Number(total), rows };
+    const rows = await db.select().from(merchantLedgers).where(where).limit(limit).offset(offset).orderBy(desc(merchantLedgers.date_created));
+    return { rows };
   }
 
   async getSettlements(accountKey, { limit, offset }) {
@@ -1561,11 +1555,8 @@ export default class MerchantService {
     }
 
     const where = eq(settlementLedgers.account_key, accountKey);
-    const [rows, [{ total }]] = await Promise.all([
-      db.select().from(settlementLedgers).where(where).limit(limit).offset(offset).orderBy(desc(settlementLedgers.date_created)),
-      db.select({ total: count() }).from(settlementLedgers).where(where),
-    ]);
-    return { count: Number(total), rows };
+    const rows = await db.select().from(settlementLedgers).where(where).limit(limit).offset(offset).orderBy(desc(settlementLedgers.date_created));
+    return { rows };
   }
 
   async linkBeamerAccount(accountKey, payload) {

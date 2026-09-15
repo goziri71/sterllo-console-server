@@ -1,4 +1,4 @@
-import { eq, and, or, desc, count, sql, like } from "drizzle-orm";
+import { eq, and, or, desc, sql, like } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { merchants, merchantLedgers } from "../db/schema/merchants.js";
 import { customers, customerWallets } from "../db/schema/customers.js";
@@ -304,7 +304,6 @@ export default class WalletService {
     }
 
     let baseRows = [];
-    let totalCount = 0;
 
     if (normalizedOwnerType === "merchant") {
       const [merchantRows] = await db.execute(
@@ -314,20 +313,6 @@ export default class WalletService {
       if (!merchant) throw new ErrorClass("Merchant not found", 404);
 
       const ownerName = merchant.trade_name || merchant.name || normalizedOwnerKey;
-
-      const [countRows] = await db.execute(sql`
-        SELECT COUNT(*) AS total
-        FROM MerchantLedgers
-        WHERE account_key = ${normalizedOwnerKey}
-          AND (
-            ${searchTerm} IS NULL
-            OR wallet_key LIKE CONCAT('%', ${searchTerm}, '%')
-            OR wallet_id LIKE CONCAT('%', ${searchTerm}, '%')
-            OR account_key LIKE CONCAT('%', ${searchTerm}, '%')
-          )
-          AND (${currencyFilter} IS NULL OR currency_code = ${currencyFilter})
-      `);
-      totalCount = Number(countRows?.[0]?.total || 0);
 
       const [rows] = await db.execute(sql`
         SELECT wallet_key, wallet_id, environment, currency_code, date_created
@@ -369,20 +354,6 @@ export default class WalletService {
       const ownerName =
         `${customer.first_name || ""} ${customer.surname || ""}`.trim() || customer.identifier;
 
-      const [countRows] = await db.execute(sql`
-        SELECT COUNT(*) AS total
-        FROM CustomerWallets
-        WHERE identifier = ${normalizedOwnerKey}
-          AND (
-            ${searchTerm} IS NULL
-            OR wallet_key LIKE CONCAT('%', ${searchTerm}, '%')
-            OR wallet_id LIKE CONCAT('%', ${searchTerm}, '%')
-            OR identifier LIKE CONCAT('%', ${searchTerm}, '%')
-          )
-          AND (${currencyFilter} IS NULL OR currency_code = ${currencyFilter})
-      `);
-      totalCount = Number(countRows?.[0]?.total || 0);
-
       const [rows] = await db.execute(sql`
         SELECT wallet_key, wallet_id, environment, currency_code, date_created
         FROM CustomerWallets
@@ -411,40 +382,6 @@ export default class WalletService {
         date_created: r.date_created,
       }));
     } else {
-      const [countRows] = await db.execute(sql`
-        SELECT COUNT(*) AS total
-        FROM (
-          SELECT
-            ml.wallet_key,
-            ml.wallet_id,
-            ml.account_key AS owner_key,
-            ml.environment,
-            ml.currency_code,
-            COALESCE(m.trade_name, m.name, ml.account_key) AS owner_name
-          FROM MerchantLedgers ml
-          LEFT JOIN Merchants m ON m.account_key = ml.account_key
-          UNION ALL
-          SELECT
-            cw.wallet_key,
-            cw.wallet_id,
-            cw.identifier AS owner_key,
-            cw.environment,
-            cw.currency_code,
-            TRIM(CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.surname, ''))) AS owner_name
-          FROM CustomerWallets cw
-          LEFT JOIN Customers c ON c.identifier = cw.identifier
-        ) w
-        WHERE (
-          ${searchTerm} IS NULL
-          OR w.wallet_key LIKE CONCAT('%', ${searchTerm}, '%')
-          OR w.wallet_id LIKE CONCAT('%', ${searchTerm}, '%')
-          OR w.owner_key LIKE CONCAT('%', ${searchTerm}, '%')
-          OR w.owner_name LIKE CONCAT('%', ${searchTerm}, '%')
-        )
-          AND (${currencyFilter} IS NULL OR w.currency_code = ${currencyFilter})
-      `);
-      totalCount = Number(countRows?.[0]?.total || 0);
-
       const [rows] = await db.execute(sql`
         SELECT *
         FROM (
@@ -515,7 +452,6 @@ export default class WalletService {
           pending_transactions: revealFinancial ? 0 : null,
           ...(revealFinancial ? {} : { financial_fields_redacted: true }),
         },
-        count: 0,
         rows: [],
       };
     }
@@ -530,13 +466,12 @@ export default class WalletService {
       );
       return {
         summary: {
-          total_wallets: totalCount,
+          total_wallets: null,
           total_value: null,
-          active_wallets: totalCount,
+          active_wallets: null,
           pending_transactions: null,
           financial_fields_redacted: true,
         },
-        count: totalCount,
         rows: rowsNoBal,
       };
     }
@@ -570,17 +505,17 @@ export default class WalletService {
     let summary = getCachedWalletSummary(summaryCacheKey);
     if (!summary) {
       summary = {
-        total_wallets: totalCount,
+        total_wallets: null,
         // Disabled: full-dataset balance rollups are too expensive.
         total_value: "0.00",
-        active_wallets: totalCount,
+        active_wallets: null,
         // Disabled: expensive cross-table pending scans.
         pending_transactions: 0,
       };
       setCachedWalletSummary(summaryCacheKey, summary);
     }
 
-    return { summary, count: totalCount, rows };
+    return { summary, rows };
   }
 
   async getMerchantWallets(accountKey, { limit, offset, revealFinancial = true }) {
@@ -595,19 +530,16 @@ export default class WalletService {
     }
 
     const where = eq(merchantLedgers.account_key, accountKey);
-    const [rows, [{ total }]] = await Promise.all([
-      db
-        .select()
-        .from(merchantLedgers)
-        .where(where)
-        .limit(limit)
-        .offset(offset)
-        .orderBy(desc(merchantLedgers.date_created)),
-      db.select({ total: count() }).from(merchantLedgers).where(where),
-    ]);
+    const rows = await db
+      .select()
+      .from(merchantLedgers)
+      .where(where)
+      .limit(limit)
+      .offset(offset)
+      .orderBy(desc(merchantLedgers.date_created));
 
     const enrichedRows = await enrichMerchantWallets(rows, accountKey, revealFinancial);
-    return { count: Number(total), rows: enrichedRows };
+    return { rows: enrichedRows };
   }
 
   async getMerchantWallet(accountKey, walletKey, revealFinancial = true) {
@@ -698,22 +630,18 @@ export default class WalletService {
         )
       : eq(customerWallets.identifier, identifier);
 
-    const [rows, [{ total }]] = await Promise.all([
-      db
-        .select()
-        .from(customerWallets)
-        .where(where)
-        .limit(limit)
-        .offset(offset)
-        .orderBy(desc(customerWallets.date_created)),
-      db.select({ total: count() }).from(customerWallets).where(where),
-    ]);
+    const rows = await db
+      .select()
+      .from(customerWallets)
+      .where(where)
+      .limit(limit)
+      .offset(offset)
+      .orderBy(desc(customerWallets.date_created));
 
     const enrichedRows = await enrichWalletsByWalletKey(rows);
 
     if (!revealFinancial) {
       return {
-        count: Number(total),
         rows: enrichedRows.map((w) =>
           redactWalletBalanceFields({
             ...w,
@@ -736,7 +664,7 @@ export default class WalletService {
       return revealFinancial ? withBal : redactWalletBalanceFields(withBal);
     });
 
-    return { count: Number(total), rows: rowsWithBalance };
+    return { rows: rowsWithBalance };
   }
 
   async getCustomerWalletDetail(identifier, walletKey, revealFinancial = true) {

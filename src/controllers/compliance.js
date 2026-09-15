@@ -19,7 +19,7 @@ export const getComplianceRiskTrends = async (request, reply) => {
 };
 
 export const getComplianceAlerts = async (request, reply) => {
-  const { page, limit, offset } = parsePagination(request.query);
+  const { page, limit, offset, fetchLimit } = parsePagination(request.query);
   const filters = {
     status: request.query.status,
     severity: request.query.severity,
@@ -28,18 +28,18 @@ export const getComplianceAlerts = async (request, reply) => {
     from_date: request.query.from_date,
     to_date: request.query.to_date,
   };
-  const data = await complianceService.getAlerts({ limit, offset, filters });
+  const data = await complianceService.getAlerts({ limit: fetchLimit, offset, filters });
   return reply.code(200).send({ success: true, ...paginatedResponse(data, page, limit) });
 };
 
 export const getComplianceActivity = async (request, reply) => {
-  const { page, limit, offset } = parsePagination(request.query);
-  const data = await complianceService.getActivity({ limit, offset });
+  const { page, limit, offset, fetchLimit } = parsePagination(request.query);
+  const data = await complianceService.getActivity({ limit: fetchLimit, offset });
   return reply.code(200).send({ success: true, ...paginatedResponse(data, page, limit) });
 };
 
 export const getComplianceReports = async (request, reply) => {
-  const { page, limit, offset } = parsePagination(request.query);
-  const data = await complianceService.getReports({ limit, offset });
+  const { page, limit, offset, fetchLimit } = parsePagination(request.query);
+  const data = await complianceService.getReports({ limit: fetchLimit, offset });
   return reply.code(200).send({ success: true, ...paginatedResponse(data, page, limit) });
 };

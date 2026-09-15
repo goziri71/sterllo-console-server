@@ -5,12 +5,12 @@ import { userCanReadFinancial, redactFinancialDeep } from "../utils/financialAcc
 const overdraftService = new OverdraftService();
 
 export const getAllOverdrafts = async (request, reply) => {
-  const { page, limit, offset } = parsePagination(request.query);
+  const { page, limit, offset, fetchLimit } = parsePagination(request.query);
   const filters = {
     status: request.query.status,
     account_key: request.query.account_key,
   };
-  const raw = await overdraftService.getAll({ limit, offset, filters });
+  const raw = await overdraftService.getAll({ limit: fetchLimit, offset, filters });
   const data = userCanReadFinancial(request.user)
     ? raw
     : { ...raw, rows: raw.rows.map((row) => redactFinancialDeep(row)) };
