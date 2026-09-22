@@ -98,4 +98,7 @@ export const env = {
   MFA_RECOVERY_CODE_COUNT: Number(process.env.MFA_RECOVERY_CODE_COUNT || 10),
   AUTH_SESSION_TTL_HOURS: Number(process.env.AUTH_SESSION_TTL_HOURS || 24),
   MFA_RECENT_WINDOW_MINUTES: Number(process.env.MFA_RECENT_WINDOW_MINUTES || 10),
+
+  /** Alpha Account Auth login (encrypted values in env; decrypted at request time). */
+  ACCOUNT_AUTH_TIMEOUT_MS: Number(process.env.ACCOUNT_AUTH_TIMEOUT_MS || 20000),
 };

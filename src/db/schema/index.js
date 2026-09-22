@@ -5,6 +5,7 @@ export {
   authLoginChallenges,
   authSessions,
   authSecurityEvents,
+  authEmailOtps,
 } from "./authSecurity.js";
 export { merchants, merchantLedgers, settlementLedgers } from "./merchants.js";
 export { customers, customerWallets } from "./customers.js";

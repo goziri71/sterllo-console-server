@@ -19,6 +19,9 @@
 
 - `NODE_ENV=production`
 - `DB_MODE=production`
+- Alpha Account Auth (encrypted env):
+  - `ACCOUNT_AUTH_PRODUCT_KEY` + `ACCOUNT_AUTH_PRODUCT_KEYCHAIN`
+  - `ACCOUNT_AUTH_API_BASE_URL` + `ACCOUNT_AUTH_API_BASE_URL_KEYCHAIN`
 - `PORT` (as required by host)
 - `JWT_SECRET`
 - `JWT_EXPIRES_IN`

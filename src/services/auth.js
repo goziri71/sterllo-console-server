@@ -1,4 +1,4 @@
-import { eq, or } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { authDb } from "../db/index.js";
 import { users } from "../db/schema/users.js";
 import { ErrorClass } from "../utils/errorClass/index.js";
@@ -6,11 +6,13 @@ import { generateToken } from "../utils/jwt/index.js";
 import { clearUserCache } from "../utils/userCache.js";
 import { loadUserAccess } from "./rbac.js";
 import { pickPrimaryRoleSlug } from "../config/roles.js";
-import {
-  validateCrosslinkToken,
-  extractCrosslinkIdentifiers,
-} from "./redbillerCrosslink.js";
 import MfaSecurityService from "./mfaSecurity.js";
+import {
+  alphaClientBasicLogin,
+  extractAlphaLoginContext,
+} from "./alphaAccountAuth.js";
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default class AuthService {
   constructor() {
@@ -62,10 +64,10 @@ export default class AuthService {
   async _issueVerifiedSession(userId, authMethod, context, metadata) {
     const user = await this._userById(userId);
     const access = await loadUserAccess(user.id);
-    const isCrosslink = context?.source === "crosslink";
+    const isAlpha = context?.source === "alpha";
     const session = await this.mfa.createSingleDeviceSession(
       user.id,
-      isCrosslink ? `crosslink_${authMethod}` : authMethod,
+      isAlpha ? `alpha_${authMethod}` : authMethod,
       metadata,
     );
     await authDb
@@ -74,6 +76,8 @@ export default class AuthService {
       .where(eq(users.id, user.id));
     clearUserCache(user.user_key);
 
+    const amr = isAlpha ? ["alpha", "mfa", authMethod] : ["mfa", authMethod];
+
     const token = generateToken({
       sub: String(user.id),
       id: user.id,
@@ -81,9 +85,7 @@ export default class AuthService {
       token_version: user.token_version || 0,
       roles: access.roleSlugs,
       sid: session.id,
-      amr: isCrosslink
-        ? ["crosslink", "mfa", authMethod]
-        : ["mfa", authMethod],
+      amr,
       mfa_verified_at: Math.floor(session.mfaVerifiedAt.getTime() / 1000),
     });
 
@@ -99,88 +101,49 @@ export default class AuthService {
     };
     if (context?.sessionID) response.sessionID = context.sessionID;
     if (context?.userKey) response.userKey = context.userKey;
-    if (context?.source === "crosslink") {
-      response.authToken = token;
-    }
     return response;
   }
 
-  async _findUserByCrosslinkIdentifiers({ billerId, email }) {
-    const matchConditions = [];
-    if (billerId) matchConditions.push(eq(users.biller_id, billerId));
-    if (email) matchConditions.push(eq(users.email, email));
-
-    if (matchConditions.length === 0) {
-      return null;
+  /**
+   * Login: local Users check → Alpha Basic (email/password) → MFA.
+   * Crosslink and email-OTP are removed.
+   */
+  async loginWithPassword({ email, password, metadata }) {
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+    if (!EMAIL_RE.test(normalizedEmail)) {
+      throw new ErrorClass("A valid email is required", 400);
+    }
+    if (!password || typeof password !== "string" || !password.trim()) {
+      throw new ErrorClass("password is required", 400);
     }
 
-    const whereClause =
-      matchConditions.length === 1 ? matchConditions[0] : or(...matchConditions);
-
-    const matches = await authDb
+    const [user] = await authDb
       .select()
       .from(users)
-      .where(whereClause)
-      .limit(2);
-
-    if (matches.length > 1) {
-      throw new ErrorClass("Crosslink identity is ambiguous. Contact admin", 409);
-    }
-    const user = matches[0] ?? null;
-    if (
-      user &&
-      billerId &&
-      email &&
-      user.biller_id &&
-      user.email &&
-      (String(user.biller_id) !== String(billerId) ||
-        String(user.email).toLowerCase() !== String(email).toLowerCase())
-    ) {
-      throw new ErrorClass("Crosslink identity does not match the provisioned user", 401);
-    }
-    return user;
-  }
-
-  /**
-   * Login via Redbiller crosslink token (SSO).
-   * User must already exist in the auth DB (matched by biller_id or email).
-   */
-  async loginCrosslink({ token, metadata }) {
-    const result = await validateCrosslinkToken(token);
-    const data = result.data;
-
-    if (!data) {
-      throw new ErrorClass("Service temporarily down", 500);
-    }
-
-    const responseCode = data.code ?? data.data?.code;
-    if (responseCode === 7010) {
-      throw new ErrorClass("Crosslink has been used", 401);
-    }
-
-    if (result.success === false) {
-      throw new ErrorClass(
-        result.message || "Crosslink validation failed",
-        result.status >= 400 && result.status < 600 ? result.status : 502,
-      );
-    }
-
-    const { billerId, email, sessionID, userKey } =
-      extractCrosslinkIdentifiers(data);
-
-    if (!billerId && !email) {
-      throw new ErrorClass("missing identifier", 422);
-    }
-
-    const user = await this._findUserByCrosslinkIdentifiers({ billerId, email });
+      .where(eq(users.email, normalizedEmail))
+      .limit(1);
 
     if (!user) {
       throw new ErrorClass("User not provisioned. Contact admin", 404);
     }
 
+    const alpha = await alphaClientBasicLogin({
+      email: normalizedEmail,
+      password,
+    });
+    const { sessionID, userKey } = extractAlphaLoginContext(alpha.decrypted);
+
+    if (user.auth_provider !== "alpha") {
+      await authDb
+        .update(users)
+        .set({ auth_provider: "alpha", date_modified: new Date() })
+        .where(eq(users.id, user.id));
+      user.auth_provider = "alpha";
+    }
+
     return this._beginMandatoryMfa(
       user,
-      { source: "crosslink", sessionID, userKey },
+      { source: "alpha", sessionID, userKey },
       metadata,
     );
   }
@@ -220,9 +183,6 @@ export default class AuthService {
     );
   }
 
-  /**
-   * Logout only the current device session.
-   */
   async logout(userId, sessionId, metadata) {
     await this.mfa.revokeSession(sessionId, userId, metadata);
     return { message: "Logged out successfully" };
@@ -254,21 +214,9 @@ export default class AuthService {
     return this.mfa.verifyStepUp(userId, sessionId, code, metadata);
   }
 
-  /**
-   * Get current user profile
-   */
   async getProfile(userId) {
-    const [user] = await authDb
-      .select()
-      .from(users)
-      .where(eq(users.id, userId))
-      .limit(1);
-
-    if (!user) {
-      throw new ErrorClass("User not found", 404);
-    }
-
-    const access = await loadUserAccess(userId);
+    const user = await this._userById(userId);
+    const access = await loadUserAccess(user.id);
     return this._userWithAccess(user, access);
   }
 }

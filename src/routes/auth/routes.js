@@ -1,5 +1,5 @@
 import {
-  loginCrosslink,
+  loginWithPassword,
   confirmMfaEnrollment,
   completeMfaLogin,
   logout,
@@ -12,26 +12,17 @@ import {
 import { authenticate } from "../../middleware/auth.js";
 
 export default async function authRoutes(fastify) {
-  // Public routes
+  // Login: Alpha email/password → MFA only (Crosslink removed)
   fastify.post(
-    "/login/crosslink",
+    "/login",
     {
       config: {
-        rateLimit: { max: 30, timeWindow: "15 minutes" },
+        rateLimit: { max: 20, timeWindow: "15 minutes" },
       },
     },
-    loginCrosslink,
+    loginWithPassword,
   );
-  // Alias matching the other Crosslink product path name.
-  fastify.post(
-    "/login-user",
-    {
-      config: {
-        rateLimit: { max: 30, timeWindow: "15 minutes" },
-      },
-    },
-    loginCrosslink,
-  );
+
   fastify.post(
     "/mfa/enroll/confirm",
     {
@@ -51,7 +42,6 @@ export default async function authRoutes(fastify) {
     completeMfaLogin,
   );
 
-  // Protected routes (require valid JWT)
   fastify.post(
     "/logout",
     {

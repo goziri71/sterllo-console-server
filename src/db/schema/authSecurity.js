@@ -112,3 +112,25 @@ export const authSecurityEvents = mysqlTable(
     index("auth_security_event_date_idx").on(table.date_created),
   ],
 );
+
+/** Passwordless email OTP (first factor before MFA). */
+export const authEmailOtps = mysqlTable(
+  "auth_email_otps",
+  {
+    id: varchar("id", { length: 36 }).primaryKey(),
+    email: varchar("email", { length: 255 }).notNull(),
+    user_id: int("user_id"),
+    code_hash: varchar("code_hash", { length: 64 }).notNull(),
+    attempts: int("attempts").notNull().default(0),
+    max_attempts: int("max_attempts").notNull().default(5),
+    expires_at: datetime("expires_at").notNull(),
+    consumed_at: datetime("consumed_at"),
+    ip_address: varchar("ip_address", { length: 64 }),
+    date_created: datetime("date_created").notNull(),
+  },
+  (table) => [
+    index("auth_email_otp_email_idx").on(table.email),
+    index("auth_email_otp_expiry_idx").on(table.expires_at),
+    index("auth_email_otp_user_idx").on(table.user_id),
+  ],
+);

@@ -40,8 +40,7 @@ Requires JWT + **`console.read`**. Full FE guide: `docs/frontend-command-center.
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| POST | `/1.202602.0/auth/login/crosslink` | None | Validate Crosslink and begin MFA |
-| POST | `/1.202602.0/auth/login-user` | None | Alias of Crosslink login |
+| POST | `/1.202602.0/auth/login` | None | Alpha email/password login → begin MFA |
 | POST | `/1.202602.0/auth/mfa/enroll/confirm` | Challenge | Confirm TOTP enrollment |
 | POST | `/1.202602.0/auth/mfa/challenge/verify` | Challenge | Complete login with TOTP or recovery code |
 | POST | `/1.202602.0/auth/logout` | JWT | Revoke the current device session |
@@ -51,12 +50,11 @@ Requires JWT + **`console.read`**. Full FE guide: `docs/frontend-command-center.
 | POST | `/1.202602.0/auth/mfa/recovery-codes/regenerate` | JWT + TOTP | Replace recovery codes |
 | GET | `/1.202602.0/auth/profile` | JWT | Get current user profile |
 
-Console authentication is Crosslink-only. There are no password login,
-registration, or password-change endpoints. An administrator provisions each
-local Console user through `POST /rbac/users` before that user signs in through
-Redbiller Echo.
+Primary authentication is **Alpha email/password → MFA**. See `docs/frontend-alpha-login.md`.
+Crosslink and email-OTP login are removed.
+An administrator provisions each local Console user through `POST /rbac/users` before that user can sign in.
 
-Crosslink authentication does not return a dashboard JWT immediately. It
+Login does not return a dashboard JWT immediately. After Alpha succeeds the API
 returns either:
 
 - `mfa_enrollment_required`: display `factor.otpauth_uri` as a QR code and

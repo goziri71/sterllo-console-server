@@ -2,26 +2,29 @@ import AuthService from "../services/auth.js";
 import { requestSecurityMetadata } from "../services/mfaSecurity.js";
 import { ErrorClass } from "../utils/errorClass/index.js";
 
-export const loginCrosslink = async (request, reply) => {
-  const authService = new AuthService();
+export const loginWithPassword = async (request, reply) => {
   if (!request.body || Object.keys(request.body).length === 0) {
     throw new ErrorClass("Request body is required", 400);
   }
 
-  const { token, device_label } = request.body;
-  if (!token || typeof token !== "string" || !token.trim()) {
-    // Match the other Crosslink backend: missing token → 422
-    throw new ErrorClass("token is required", 422);
+  const { email, password, device_label } = request.body;
+  if (!email || typeof email !== "string") {
+    throw new ErrorClass("email is required", 400);
+  }
+  if (!password || typeof password !== "string") {
+    throw new ErrorClass("password is required", 400);
   }
 
-  const result = await authService.loginCrosslink({
-    token: token.trim(),
+  const result = await new AuthService().loginWithPassword({
+    email,
+    password,
     metadata: requestSecurityMetadata(request, device_label),
   });
 
   return reply.code(200).send({
     status: true,
     code: 200,
+    success: true,
     message:
       result.state === "mfa_enrollment_required"
         ? "MFA enrollment required"

@@ -18,6 +18,7 @@
     "migrate:auth-rbac": "node scripts/run-auth-rbac-migration.js",
     "migrate:biller-id": "node scripts/run-biller-id-migration.js",
     "migrate:mfa-security": "node scripts/run-mfa-security-migration.js",
+    "migrate:email-otp": "node scripts/run-email-otp-migration.js",
     "migrate:crosslink-only-users": "node scripts/run-crosslink-only-users-migration.js",
     "migrate:pricing-permissions": "node scripts/run-pricing-permissions-migration.js",
     "migrate:baas-pricing": "node scripts/run-baas-pricing-migration.js",
