@@ -33,21 +33,15 @@ function requireEnv(name, value) {
 }
 
 function resolveAccountAuthSecrets() {
-  const productKeyEnc = requireEnv(
-    "ACCOUNT_AUTH_PRODUCT_KEY",
-    process.env.ACCOUNT_AUTH_PRODUCT_KEY,
-  );
+  const productKeyEnc = requireEnv("ACCOUNT_AUTH_PRODUCT_KEY", env.ACCOUNT_AUTH_PRODUCT_KEY);
   const productKeychain = requireEnv(
     "ACCOUNT_AUTH_PRODUCT_KEYCHAIN",
-    process.env.ACCOUNT_AUTH_PRODUCT_KEYCHAIN || process.env.ACCOUNT_AUTH_PRODUCT_KEY_KEYCHAIN,
+    env.ACCOUNT_AUTH_PRODUCT_KEYCHAIN,
   );
-  const baseEnc = requireEnv(
-    "ACCOUNT_AUTH_API_BASE_URL",
-    process.env.ACCOUNT_AUTH_API_BASE_URL,
-  );
+  const baseEnc = requireEnv("ACCOUNT_AUTH_API_BASE_URL", env.ACCOUNT_AUTH_API_BASE_URL);
   const baseKeychain = requireEnv(
     "ACCOUNT_AUTH_API_BASE_URL_KEYCHAIN",
-    process.env.ACCOUNT_AUTH_API_BASE_URL_KEYCHAIN,
+    env.ACCOUNT_AUTH_API_BASE_URL_KEYCHAIN,
   );
 
   const productKey = stripWrappingQuotes(

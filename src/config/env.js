@@ -100,5 +100,15 @@ export const env = {
   MFA_RECENT_WINDOW_MINUTES: Number(process.env.MFA_RECENT_WINDOW_MINUTES || 10),
 
   /** Alpha Account Auth login (encrypted values in env; decrypted at request time). */
+  ACCOUNT_AUTH_PRODUCT_KEY: stripWrappingQuotes(process.env.ACCOUNT_AUTH_PRODUCT_KEY || ""),
+  ACCOUNT_AUTH_PRODUCT_KEYCHAIN: stripWrappingQuotes(
+    process.env.ACCOUNT_AUTH_PRODUCT_KEYCHAIN ||
+      process.env.ACCOUNT_AUTH_PRODUCT_KEY_KEYCHAIN ||
+      "",
+  ),
+  ACCOUNT_AUTH_API_BASE_URL: stripWrappingQuotes(process.env.ACCOUNT_AUTH_API_BASE_URL || ""),
+  ACCOUNT_AUTH_API_BASE_URL_KEYCHAIN: stripWrappingQuotes(
+    process.env.ACCOUNT_AUTH_API_BASE_URL_KEYCHAIN || "",
+  ),
   ACCOUNT_AUTH_TIMEOUT_MS: Number(process.env.ACCOUNT_AUTH_TIMEOUT_MS || 20000),
 };
