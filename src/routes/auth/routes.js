@@ -1,5 +1,5 @@
 import {
-  loginWithPassword,
+  login,
   confirmMfaEnrollment,
   completeMfaLogin,
   logout,
@@ -12,7 +12,7 @@ import {
 import { authenticate } from "../../middleware/auth.js";
 
 export default async function authRoutes(fastify) {
-  // Login: Alpha email/password → MFA only (Crosslink removed)
+  // Login: provisioned email → MFA only
   fastify.post(
     "/login",
     {
@@ -20,7 +20,7 @@ export default async function authRoutes(fastify) {
         rateLimit: { max: 20, timeWindow: "15 minutes" },
       },
     },
-    loginWithPassword,
+    login,
   );
 
   fastify.post(

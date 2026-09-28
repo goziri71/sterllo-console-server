@@ -43,3 +43,16 @@ export const getComplianceReports = async (request, reply) => {
   const data = await complianceService.getReports({ limit: fetchLimit, offset });
   return reply.code(200).send({ success: true, ...paginatedResponse(data, page, limit) });
 };
+
+export const getComplianceTransactionAnomalies = async (request, reply) => {
+  const filters = {
+    from_date: request.query.from_date,
+    to_date: request.query.to_date,
+    identifier: request.query.identifier,
+    window_ms: request.query.window_ms,
+    min_amount: request.query.min_amount,
+    limit: request.query.limit,
+  };
+  const data = await complianceService.getTransactionAnomalies(filters);
+  return reply.code(200).send({ success: true, data });
+};

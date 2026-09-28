@@ -40,7 +40,7 @@ Requires JWT + **`console.read`**. Full FE guide: `docs/frontend-command-center.
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| POST | `/1.202602.0/auth/login` | None | Alpha email/password login → begin MFA |
+| POST | `/1.202602.0/auth/login` | None | Provisioned email login → begin MFA |
 | POST | `/1.202602.0/auth/mfa/enroll/confirm` | Challenge | Confirm TOTP enrollment |
 | POST | `/1.202602.0/auth/mfa/challenge/verify` | Challenge | Complete login with TOTP or recovery code |
 | POST | `/1.202602.0/auth/logout` | JWT | Revoke the current device session |
@@ -50,11 +50,11 @@ Requires JWT + **`console.read`**. Full FE guide: `docs/frontend-command-center.
 | POST | `/1.202602.0/auth/mfa/recovery-codes/regenerate` | JWT + TOTP | Replace recovery codes |
 | GET | `/1.202602.0/auth/profile` | JWT | Get current user profile |
 
-Primary authentication is **Alpha email/password → MFA**. See `docs/frontend-alpha-login.md`.
-Crosslink and email-OTP login are removed.
+Primary authentication is **email → MFA** for provisioned users. See `docs/frontend-console-login.md`.
+Crosslink, email-OTP, and password on `/auth/login` are removed.
 An administrator provisions each local Console user through `POST /rbac/users` before that user can sign in.
 
-Login does not return a dashboard JWT immediately. After Alpha succeeds the API
+Login does not return a dashboard JWT immediately. After the email check the API
 returns either:
 
 - `mfa_enrollment_required`: display `factor.otpauth_uri` as a QR code and
@@ -119,6 +119,22 @@ With a recovery code:
 
 Success returns `state: "authenticated"` and a JWT. Creating this session
 immediately revokes the user's previous device session.
+
+## Reports & growth exports
+
+See `docs/frontend-reports.md`. Base: `/1.202602.0/reports` (JWT). Money reports require **`financial.read`**. Append `format=csv` for download.
+
+| GET | Path | Permission |
+|-----|------|------------|
+| `/reports/settlements` | Settlement batches + summary | `financial.read` |
+| `/reports/transactions` | Unified statement export | `financial.read` |
+| `/reports/deposits`, `/reports/transfers` | Movement lists | `financial.read` |
+| `/reports/customer-balances`, `/reports/opening-closing-balances`, `/reports/balance-snapshot` | Balances | `financial.read` |
+| `/reports/vat`, `/reports/vendors`, `/reports/revenue` | Aggregates | `financial.read` |
+| `/reports/growth/revenue-by-merchant` | Revenue by merchant | `financial.read` |
+| `/reports/growth/customers` | Customer export (`scope=all\|active`) | `console.read` |
+
+Compliance transaction monitoring: `GET /1.202602.0/compliance/transaction-anomalies` (`financial.read`) — same-amount transfers within `window_ms`, plus high-ticket rows (`min_amount`).
 
 ### POST `/1.202602.0/auth/login/crosslink`
 ### POST `/1.202602.0/auth/login-user` (alias)

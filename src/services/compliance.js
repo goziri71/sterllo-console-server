@@ -372,4 +372,115 @@ export default class ComplianceService {
     const rows = reports.slice(offset, offset + limit);
     return { rows };
   }
+
+  async getTransactionAnomalies(filters) {
+    const fromDate = parseDate(filters.from_date, "from_date");
+    const toDate = parseDate(filters.to_date, "to_date");
+    const identifier = filters.identifier ? String(filters.identifier) : null;
+    const windowMs = Number.isFinite(Number(filters.window_ms))
+      ? Math.min(Math.max(1, Number(filters.window_ms)), 60_000)
+      : 1000;
+    const minAmount = Number.isFinite(Number(filters.min_amount))
+      ? Number(filters.min_amount)
+      : 1_000_000;
+    const rowLimit = Number.isFinite(Number(filters.limit))
+      ? Math.min(Math.max(1, Number(filters.limit)), 5000)
+      : 500;
+
+    const dateParts = [];
+    if (fromDate) dateParts.push(sql`a.date_created >= ${fromDate}`);
+    if (toDate) dateParts.push(sql`a.date_created <= ${toDate}`);
+    if (identifier) dateParts.push(sql`a.source_identifier = ${identifier}`);
+    const dateWhere =
+      dateParts.length > 0 ? sql`${sql.join(dateParts, sql` AND `)}` : sql`1=1`;
+
+    const [duplicatePairs] = await db.execute(sql`
+      SELECT
+        a.source_identifier AS identifier,
+        a.account_key,
+        a.currency_code,
+        a.amount,
+        a.source_reference AS reference_a,
+        b.source_reference AS reference_b,
+        a.date_created AS first_at,
+        b.date_created AS second_at,
+        TIMESTAMPDIFF(MICROSECOND, a.date_created, b.date_created) AS delta_microseconds
+      FROM Transfers a
+      INNER JOIN Transfers b
+        ON a.id < b.id
+        AND a.source_identifier = b.source_identifier
+        AND a.amount = b.amount
+        AND a.currency_code = b.currency_code
+        AND ABS(TIMESTAMPDIFF(MICROSECOND, a.date_created, b.date_created)) <= ${windowMs * 1000}
+      WHERE ${dateWhere}
+      ORDER BY a.date_created DESC
+      LIMIT ${rowLimit}
+    `);
+
+    const highTicketConditions = [
+      sql`CAST(amount AS DECIMAL(30,8)) >= ${minAmount}`,
+    ];
+    if (fromDate) highTicketConditions.push(sql`date_created >= ${fromDate}`);
+    if (toDate) highTicketConditions.push(sql`date_created <= ${toDate}`);
+    const transferHighWhereParts = [...highTicketConditions];
+    const depositHighWhereParts = [
+      sql`CAST(amount AS DECIMAL(30,8)) >= ${minAmount}`,
+    ];
+    if (fromDate) depositHighWhereParts.push(sql`date_created >= ${fromDate}`);
+    if (toDate) depositHighWhereParts.push(sql`date_created <= ${toDate}`);
+    if (identifier) {
+      transferHighWhereParts.push(
+        sql`(source_identifier = ${identifier} OR target_identifier = ${identifier})`,
+      );
+      depositHighWhereParts.push(sql`target_identifier = ${identifier}`);
+    }
+    const transferHighWhere = sql`${sql.join(transferHighWhereParts, sql` AND `)}`;
+    const depositHighWhere = sql`${sql.join(depositHighWhereParts, sql` AND `)}`;
+
+    const [highTickets] = await db.execute(sql`
+      SELECT 'transfer' AS movement_type, source_identifier AS identifier, account_key,
+        currency_code, amount, source_reference AS reference, date_created, 'high_ticket' AS anomaly_type
+      FROM Transfers
+      WHERE ${transferHighWhere}
+      UNION ALL
+      SELECT 'deposit', target_identifier, account_key, currency_code, amount, source_reference, date_created, 'high_ticket'
+      FROM Deposits
+      WHERE ${depositHighWhere}
+      ORDER BY date_created DESC
+      LIMIT ${rowLimit}
+    `);
+
+    const duplicateRows = (duplicatePairs || []).map((row) => ({
+      anomaly_type: "same_ticket_millisecond",
+      identifier: row.identifier,
+      account_key: row.account_key,
+      currency_code: row.currency_code,
+      amount: row.amount,
+      reference_a: row.reference_a,
+      reference_b: row.reference_b,
+      first_at: row.first_at,
+      second_at: row.second_at,
+      delta_microseconds: Number(row.delta_microseconds || 0),
+    }));
+
+    const highRows = (highTickets || []).map((row) => ({
+      anomaly_type: row.anomaly_type,
+      movement_type: row.movement_type,
+      identifier: row.identifier,
+      account_key: row.account_key,
+      currency_code: row.currency_code,
+      amount: row.amount,
+      reference: row.reference,
+      date_created: row.date_created,
+    }));
+
+    return {
+      from_date: filters.from_date || null,
+      to_date: filters.to_date || null,
+      identifier,
+      window_ms: windowMs,
+      min_amount: minAmount,
+      rows: [...duplicateRows, ...highRows].slice(0, rowLimit),
+    };
+  }
 }

@@ -5,6 +5,7 @@ import {
   getComplianceReports,
   getComplianceRiskTrends,
   getComplianceVerificationStatus,
+  getComplianceTransactionAnomalies,
 } from "../../controllers/compliance.js";
 import { authenticate, requirePermission } from "../../middleware/auth.js";
 import { PERMISSIONS } from "../../config/permissions.js";
@@ -18,4 +19,9 @@ export default async function complianceRoutes(fastify) {
   fastify.get("/alerts", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getComplianceAlerts);
   fastify.get("/activity", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getComplianceActivity);
   fastify.get("/reports", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getComplianceReports);
+  fastify.get(
+    "/transaction-anomalies",
+    { preHandler: requirePermission(PERMISSIONS.FINANCIAL_READ) },
+    getComplianceTransactionAnomalies,
+  );
 }
