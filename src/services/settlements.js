@@ -134,7 +134,7 @@ export default class SettlementService {
 
   async getBatches({ limit, offset, filters }) {
     const where = buildWhere(filters);
-    const [dataResult] = await db.execute(sql`
+    const [dataRows] = await db.execute(sql`
       SELECT
         COALESCE(t.source_reference, t.target_reference, CAST(t.id AS CHAR)) AS batch_id,
         ${settlementTypeExpr} AS settlement_type,
@@ -153,9 +153,7 @@ export default class SettlementService {
       LIMIT ${limit} OFFSET ${offset}
     `);
 
-    const dataRows = dataResult[0] || [];
-
-    const rows = dataRows.map((row) => ({
+    const rows = (dataRows || []).map((row) => ({
       ...row,
       status: normalizeStatus(row.status),
       gross_amount: Number(row.gross_amount || 0),
