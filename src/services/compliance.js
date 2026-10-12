@@ -394,7 +394,57 @@ export default class ComplianceService {
     const dateWhere =
       dateParts.length > 0 ? sql`${sql.join(dateParts, sql` AND `)}` : sql`1=1`;
 
-    const [duplicatePairs] = await db.execute(sql`
+    const windowMicros = windowMs * 1000;
+
+    const [sameTicketPairs] = await db.execute(sql`
+      SELECT
+        a.source_identifier AS identifier,
+        a.account_key,
+        a.currency_code,
+        a.amount,
+        a.session_id,
+        a.ip_address,
+        a.source_reference AS reference_a,
+        b.source_reference AS reference_b,
+        a.date_created AS first_at,
+        b.date_created AS second_at,
+        TIMESTAMPDIFF(MICROSECOND, a.date_created, b.date_created) AS delta_microseconds,
+        CASE
+          WHEN NULLIF(TRIM(a.session_id), '') IS NOT NULL AND a.session_id = b.session_id THEN 'session_id'
+          WHEN NULLIF(TRIM(a.message), '') IS NOT NULL AND a.message = b.message THEN 'message'
+          WHEN NULLIF(TRIM(a.ip_address), '') IS NOT NULL
+            AND a.ip_address = b.ip_address
+            AND a.account_key = b.account_key THEN 'ip_address'
+          ELSE 'unknown'
+        END AS ticket_match
+      FROM Transfers a
+      INNER JOIN Transfers b
+        ON a.id < b.id
+        AND a.source_identifier = b.source_identifier
+        AND a.amount = b.amount
+        AND a.currency_code = b.currency_code
+        AND ABS(TIMESTAMPDIFF(MICROSECOND, a.date_created, b.date_created)) <= ${windowMicros}
+        AND (
+          (
+            NULLIF(TRIM(a.session_id), '') IS NOT NULL
+            AND a.session_id = b.session_id
+          )
+          OR (
+            NULLIF(TRIM(a.message), '') IS NOT NULL
+            AND a.message = b.message
+          )
+          OR (
+            NULLIF(TRIM(a.ip_address), '') IS NOT NULL
+            AND a.ip_address = b.ip_address
+            AND a.account_key = b.account_key
+          )
+        )
+      WHERE ${dateWhere}
+      ORDER BY a.date_created DESC
+      LIMIT ${rowLimit}
+    `);
+
+    const [duplicateAmountPairs] = await db.execute(sql`
       SELECT
         a.source_identifier AS identifier,
         a.account_key,
@@ -411,7 +461,7 @@ export default class ComplianceService {
         AND a.source_identifier = b.source_identifier
         AND a.amount = b.amount
         AND a.currency_code = b.currency_code
-        AND ABS(TIMESTAMPDIFF(MICROSECOND, a.date_created, b.date_created)) <= ${windowMs * 1000}
+        AND ABS(TIMESTAMPDIFF(MICROSECOND, a.date_created, b.date_created)) <= ${windowMicros}
       WHERE ${dateWhere}
       ORDER BY a.date_created DESC
       LIMIT ${rowLimit}
@@ -450,18 +500,45 @@ export default class ComplianceService {
       LIMIT ${rowLimit}
     `);
 
-    const duplicateRows = (duplicatePairs || []).map((row) => ({
+    const sameTicketRows = (sameTicketPairs || []).map((row) => ({
       anomaly_type: "same_ticket_millisecond",
+      ticket_match: row.ticket_match,
       identifier: row.identifier,
       account_key: row.account_key,
       currency_code: row.currency_code,
       amount: row.amount,
+      session_id: row.session_id ?? null,
+      ip_address: row.ip_address ?? null,
       reference_a: row.reference_a,
       reference_b: row.reference_b,
       first_at: row.first_at,
       second_at: row.second_at,
       delta_microseconds: Number(row.delta_microseconds || 0),
     }));
+
+    const strictKeys = new Set(
+      sameTicketRows.map(
+        (r) => `${r.reference_a}|${r.reference_b}|${r.first_at}|${r.second_at}`,
+      ),
+    );
+
+    const duplicateAmountRows = (duplicateAmountPairs || [])
+      .filter((row) => {
+        const key = `${row.reference_a}|${row.reference_b}|${row.first_at}|${row.second_at}`;
+        return !strictKeys.has(key);
+      })
+      .map((row) => ({
+        anomaly_type: "duplicate_amount_millisecond",
+        identifier: row.identifier,
+        account_key: row.account_key,
+        currency_code: row.currency_code,
+        amount: row.amount,
+        reference_a: row.reference_a,
+        reference_b: row.reference_b,
+        first_at: row.first_at,
+        second_at: row.second_at,
+        delta_microseconds: Number(row.delta_microseconds || 0),
+      }));
 
     const highRows = (highTickets || []).map((row) => ({
       anomaly_type: row.anomaly_type,
@@ -480,7 +557,7 @@ export default class ComplianceService {
       identifier,
       window_ms: windowMs,
       min_amount: minAmount,
-      rows: [...duplicateRows, ...highRows].slice(0, rowLimit),
+      rows: [...sameTicketRows, ...duplicateAmountRows, ...highRows].slice(0, rowLimit),
     };
   }
 }

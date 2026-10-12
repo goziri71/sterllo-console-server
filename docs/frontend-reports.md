@@ -46,7 +46,13 @@ Most money reports require **`financial.read`**. Customer growth export requires
 | `min_amount` | `1000000` | High-ticket threshold |
 | `from_date`, `to_date`, `limit` | — | Range and row cap |
 
-Response `data.rows` includes `anomaly_type`: `same_ticket_millisecond` or `high_ticket`.
+Response `data.rows` includes:
+
+- `same_ticket_millisecond` — same customer, amount, currency, within `window_ms`, **and** shared **session_id**, **message** (ticket text), or **ip_address + account**
+- `duplicate_amount_millisecond` — same as the old broad rule (same customer/amount/currency/ms) when no ticket anchor matched
+- `high_ticket` — amount ≥ `min_amount` on transfers/deposits
+
+Strict rows may include `ticket_match`: `session_id` | `message` | `ip_address`.
 
 ## CSV
 

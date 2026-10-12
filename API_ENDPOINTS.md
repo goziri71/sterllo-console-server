@@ -134,7 +134,7 @@ See `docs/frontend-reports.md`. Base: `/1.202602.0/reports` (JWT). Money reports
 | `/reports/growth/revenue-by-merchant` | Revenue by merchant | `financial.read` |
 | `/reports/growth/customers` | Customer export (`scope=all\|active`) | `console.read` |
 
-Compliance transaction monitoring: `GET /1.202602.0/compliance/transaction-anomalies` (`financial.read`) — same-amount transfers within `window_ms`, plus high-ticket rows (`min_amount`).
+Compliance transaction monitoring: `GET /1.202602.0/compliance/transaction-anomalies` (`financial.read`) — strict same-ticket pairs (shared session/message/IP) within `window_ms`, optional broad `duplicate_amount_millisecond`, plus high-ticket rows (`min_amount`).
 
 ### POST `/1.202602.0/auth/login/crosslink`
 ### POST `/1.202602.0/auth/login-user` (alias)
