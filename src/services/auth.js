@@ -7,6 +7,10 @@ import { clearUserCache } from "../utils/userCache.js";
 import { loadUserAccess } from "./rbac.js";
 import { pickPrimaryRoleSlug } from "../config/roles.js";
 import MfaSecurityService from "./mfaSecurity.js";
+import {
+  alphaClientBasicLogin,
+  extractAlphaLoginContext,
+} from "./alphaAccountAuth.js";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -106,12 +110,15 @@ export default class AuthService {
   }
 
   /**
-   * Login: provisioned Users check → MFA (no external password provider).
+   * Login: provisioned Users check → Alpha Basic (email/password) → MFA.
    */
-  async loginWithEmail({ email, metadata }) {
+  async loginWithPassword({ email, password, metadata }) {
     const normalizedEmail = String(email || "").trim().toLowerCase();
     if (!EMAIL_RE.test(normalizedEmail)) {
       throw new ErrorClass("A valid email is required", 400);
+    }
+    if (!password || typeof password !== "string" || !password.trim()) {
+      throw new ErrorClass("password is required", 400);
     }
 
     const [user] = await authDb
@@ -124,17 +131,23 @@ export default class AuthService {
       throw new ErrorClass("User not provisioned. Contact admin", 404);
     }
 
-    if (user.auth_provider !== "console") {
+    const alpha = await alphaClientBasicLogin({
+      email: normalizedEmail,
+      password,
+    });
+    const { sessionID, userKey } = extractAlphaLoginContext(alpha.decrypted);
+
+    if (user.auth_provider !== "alpha") {
       await authDb
         .update(users)
-        .set({ auth_provider: "console", date_modified: new Date() })
+        .set({ auth_provider: "alpha", date_modified: new Date() })
         .where(eq(users.id, user.id));
-      user.auth_provider = "console";
+      user.auth_provider = "alpha";
     }
 
     return this._beginMandatoryMfa(
       user,
-      { source: "console" },
+      { source: "alpha", sessionID, userKey },
       metadata,
     );
   }

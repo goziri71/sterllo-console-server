@@ -40,7 +40,7 @@ Requires JWT + **`console.read`**. Full FE guide: `docs/frontend-command-center.
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| POST | `/1.202602.0/auth/login` | None | Provisioned email login → begin MFA |
+| POST | `/1.202602.0/auth/login` | None | Provisioned user → Alpha email/password → begin MFA |
 | POST | `/1.202602.0/auth/mfa/enroll/confirm` | Challenge | Confirm TOTP enrollment |
 | POST | `/1.202602.0/auth/mfa/challenge/verify` | Challenge | Complete login with TOTP or recovery code |
 | POST | `/1.202602.0/auth/logout` | JWT | Revoke the current device session |
@@ -50,11 +50,11 @@ Requires JWT + **`console.read`**. Full FE guide: `docs/frontend-command-center.
 | POST | `/1.202602.0/auth/mfa/recovery-codes/regenerate` | JWT + TOTP | Replace recovery codes |
 | GET | `/1.202602.0/auth/profile` | JWT | Get current user profile |
 
-Primary authentication is **email → MFA** for provisioned users. See `docs/frontend-console-login.md`.
-Crosslink, email-OTP, and password on `/auth/login` are removed.
+Primary authentication is **Alpha email/password → MFA** for provisioned users. See `docs/frontend-alpha-login.md`.
+Crosslink and email-OTP login are removed.
 An administrator provisions each local Console user through `POST /rbac/users` before that user can sign in.
 
-Login does not return a dashboard JWT immediately. After the email check the API
+Login does not return a dashboard JWT immediately. After Alpha succeeds the API
 returns either:
 
 - `mfa_enrollment_required`: display `factor.otpauth_uri` as a QR code and

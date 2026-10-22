@@ -12,7 +12,7 @@ import {
 import { authenticate } from "../../middleware/auth.js";
 
 export default async function authRoutes(fastify) {
-  // Login: provisioned email → MFA only
+  // Login: provisioned user → Alpha email/password → MFA
   fastify.post(
     "/login",
     {

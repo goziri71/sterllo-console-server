@@ -7,13 +7,17 @@ export const login = async (request, reply) => {
     throw new ErrorClass("Request body is required", 400);
   }
 
-  const { email, device_label } = request.body;
+  const { email, password, device_label } = request.body;
   if (!email || typeof email !== "string") {
     throw new ErrorClass("email is required", 400);
   }
+  if (!password || typeof password !== "string") {
+    throw new ErrorClass("password is required", 400);
+  }
 
-  const result = await new AuthService().loginWithEmail({
+  const result = await new AuthService().loginWithPassword({
     email,
+    password,
     metadata: requestSecurityMetadata(request, device_label),
   });
 
