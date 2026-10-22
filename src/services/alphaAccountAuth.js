@@ -101,11 +101,48 @@ function pickFirst(...values) {
   return null;
 }
 
+function normalizeMfaFlag(value) {
+  if (value === true || value === 1) return true;
+  if (value === false || value === 0) return false;
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (["y", "yes", "true", "1", "enabled", "on"].includes(normalized)) return true;
+  if (["n", "no", "false", "0", "disabled", "off"].includes(normalized)) return false;
+  return null;
+}
+
+/** True only when Alpha payload explicitly marks MFA enabled on the account. */
+export function alphaAccountMfaEnabled(decrypted) {
+  const root = unwrapAlpha(decrypted);
+  const account = root.account || root.user || {};
+  const candidates = [
+    account.mfa,
+    account.mfa_enabled,
+    account.is_mfa_enabled,
+    account.has_mfa,
+    root.mfa,
+    root.mfa_enabled,
+  ];
+  for (const candidate of candidates) {
+    const parsed = normalizeMfaFlag(candidate);
+    if (parsed !== null) return parsed;
+  }
+  return false;
+}
+
+export function assertAlphaAccountMfaEnabled(decrypted) {
+  if (alphaAccountMfaEnabled(decrypted)) return;
+  throw new ErrorClass(
+    "Multi-factor authentication must be enabled on your Redbiller account before using Console. Set up MFA in Alpha account settings, then sign in again.",
+    403,
+  );
+}
+
 function extractAlphaContext(decrypted) {
   const root = unwrapAlpha(decrypted);
   const account = root.account || root.user || {};
   const session = root.session || account.session || {};
   return {
+    mfaEnabled: alphaAccountMfaEnabled(decrypted),
     sessionID: pickFirst(
       root.sessionID,
       root.session_id,

@@ -12,6 +12,7 @@ import {
   alphaClientBasicLogin,
   alphaClientMfaEnrollConfirm,
   alphaClientMfaVerify,
+  assertAlphaAccountMfaEnabled,
 } from "./alphaAccountAuth.js";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -104,6 +105,8 @@ export default class AuthService {
   }
 
   async _finishLoginAfterAlpha({ email, alphaResult, metadata }) {
+    assertAlphaAccountMfaEnabled(alphaResult.decrypted);
+
     const normalizedEmail = String(email || "").trim().toLowerCase();
     const user = await this._provisionedUserByEmail(normalizedEmail);
     const ctx = alphaResult.context || {};

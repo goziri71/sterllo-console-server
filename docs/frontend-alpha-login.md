@@ -42,8 +42,11 @@ Errors:
 
 - `400` missing/invalid email or password
 - `401` Alpha rejected credentials or MFA
+- `403` Alpha login succeeded but `account.mfa` is not enabled — user must set up MFA on Redbiller/Alpha before Console access
 - `404` Alpha OK but user not on console Users list
 - `502` Alpha unreachable / misconfigured env
+
+Every completed login checks Alpha **`account.mfa`** (and equivalent fields). Console JWT is issued only when MFA is enabled on the Alpha account **and** the user is provisioned locally.
 
 ### MFA (Alpha-backed)
 
