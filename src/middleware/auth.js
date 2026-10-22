@@ -65,7 +65,8 @@ async function attachAuthenticatedUser(request, token) {
   }
 
   const methods = Array.isArray(decoded.amr) ? decoded.amr : [];
-  if (!decoded.sid || !methods.includes("mfa")) {
+  const authOk = methods.includes("alpha") || methods.includes("mfa");
+  if (!decoded.sid || !authOk) {
     throw new ErrorClass("Authenticated session required", 401);
   }
 

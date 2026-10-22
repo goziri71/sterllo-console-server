@@ -50,11 +50,11 @@ Requires JWT + **`console.read`**. Full FE guide: `docs/frontend-command-center.
 | POST | `/1.202602.0/auth/mfa/recovery-codes/regenerate` | JWT + TOTP | Replace recovery codes |
 | GET | `/1.202602.0/auth/profile` | JWT | Get current user profile |
 
-Primary authentication is **Alpha email/password → MFA** for provisioned users. See `docs/frontend-alpha-login.md`.
+Primary authentication is **Alpha email/password → Alpha MFA** (console TOTP is not used on login). See `docs/frontend-alpha-login.md`.
 Crosslink and email-OTP login are removed.
-An administrator provisions each local Console user through `POST /rbac/users` before that user can sign in.
+After Alpha authentication succeeds, the API checks the local **Users** list (`POST /rbac/users` provisioning). Unprovisioned emails return **404**.
 
-Login does not return a dashboard JWT immediately. After Alpha succeeds the API
+Login usually does not return a JWT immediately. After Alpha Basic (and Alpha MFA when required) the API
 returns either:
 
 - `mfa_enrollment_required`: display `factor.otpauth_uri` as a QR code and

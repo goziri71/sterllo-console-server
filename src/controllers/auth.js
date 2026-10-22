@@ -21,14 +21,18 @@ export const login = async (request, reply) => {
     metadata: requestSecurityMetadata(request, device_label),
   });
 
+  const message =
+    result.state === "authenticated"
+      ? "Login successful"
+      : result.state === "mfa_enrollment_required"
+        ? "Alpha MFA enrollment required"
+        : "Alpha MFA verification required";
+
   return reply.code(200).send({
     status: true,
     code: 200,
     success: true,
-    message:
-      result.state === "mfa_enrollment_required"
-        ? "MFA enrollment required"
-        : "MFA verification required",
+    message,
     data: result,
   });
 };

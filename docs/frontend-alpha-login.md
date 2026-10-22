@@ -1,22 +1,22 @@
-# Frontend: Alpha email/password login → MFA
+# Frontend: Alpha email/password login → Alpha MFA
 
-Primary console login is **email + password** against Alpha Account Auth, then the existing MFA flow.
+Console login uses **Alpha Account Auth only** (no console TOTP/recovery on login).
 
-**Removed (do not call):**
-- Crosslink `/auth/login/crosslink` and `/auth/login-user`
-- Email OTP `/auth/login/email/*`
+**Removed from login path:** console MFA enrollment, console recovery codes on `/auth/login` and `/auth/mfa/challenge/verify`.
 
 ## Flow
 
 ```
 1. POST /auth/login   { email, password, device_label? }
-2a. First time → mfa_enrollment_required (QR) → POST /auth/mfa/enroll/confirm
-2b. Returning  → mfa_required → POST /auth/mfa/challenge/verify
-3. Store JWT from authenticated response
+   → Alpha Basic; no local Users check yet
+2a. Alpha MFA enroll → data.state mfa_enrollment_required, provider alpha
+     → POST /auth/mfa/enroll/confirm { challenge_token, code }
+2b. Alpha MFA verify → data.state mfa_required, provider alpha, methods ["totp"]
+     → POST /auth/mfa/challenge/verify { challenge_token, code }
+3. After Alpha succeeds → server checks Users list → JWT if provisioned
 ```
 
-Users must be **admin-provisioned** (`POST /rbac/users`) first.  
-Unknown emails → `404` “User not provisioned. Contact admin” (Alpha is not called).
+Unknown / unprovisioned email → **404** “User not provisioned. Contact admin” **after** Alpha succeeds.
 
 ## Endpoint
 
@@ -32,28 +32,38 @@ Base prefix: `/1.202602.0/auth`
 }
 ```
 
-Success → same MFA shapes as before:
+Responses:
 
-- `data.state: "mfa_enrollment_required"` + `challenge_token` + `factor.otpauth_uri`
-- `data.state: "mfa_required"` + `challenge_token` + `methods: ["totp","recovery_code"]`
+- `data.state: "mfa_enrollment_required"` — Alpha enrollment; optional `data.factor.otpauth_uri`
+- `data.state: "mfa_required"` — Alpha TOTP; `data.provider: "alpha"`
+- `data.state: "authenticated"` — Alpha + provisioned user (no Alpha MFA step)
 
 Errors:
+
 - `400` missing/invalid email or password
-- `404` user not on console Users list
-- `401` Alpha rejected credentials
-- `502` Alpha unreachable / upstream failure
+- `401` Alpha rejected credentials or MFA
+- `404` Alpha OK but user not on console Users list
+- `502` Alpha unreachable / misconfigured env
 
-### MFA (unchanged)
+### MFA (Alpha-backed)
 
-| Step | Endpoint |
-|------|----------|
-| Confirm enrollment | `POST /mfa/enroll/confirm` `{ challenge_token, code }` |
-| Verify login | `POST /mfa/challenge/verify` `{ challenge_token, code }` or `recovery_code` |
+| Step | Endpoint | Body |
+|------|----------|------|
+| Confirm Alpha enrollment | `POST /mfa/enroll/confirm` | `{ challenge_token, code }` |
+| Verify Alpha login | `POST /mfa/challenge/verify` | `{ challenge_token, code }` |
 
-After MFA: `data.state: "authenticated"`, `data.token` (JWT), `data.session`.
+`recovery_code` is **not** supported on console login (use Alpha account security).
+
+After success: `data.token` (JWT), `data.user`, `data.session`.
+
+## Env (ops)
+
+Optional override if Alpha path differs:
+
+- `ACCOUNT_AUTH_MFA_VERIFY_PATH` (default `.../Login/Client/Mfa/Verify`)
+- `ACCOUNT_AUTH_MFA_ENROLL_PATH` (default `.../Login/Client/Mfa/Enroll/Confirm`)
 
 ## UI notes
 
-- Email + password form (no Crosslink, no email OTP).
-- Console `Users.email` must match the Alpha account email used at login.
-- First-time users still get MFA QR enrollment.
+- Email + password → Alpha MFA screens (same URLs as before; `provider: "alpha"`).
+- Do not show console MFA QR unless `factor.otpauth_uri` is present from Alpha.

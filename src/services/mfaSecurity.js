@@ -15,7 +15,12 @@ import { ErrorClass } from "../utils/errorClass/index.js";
 const CHALLENGE_PURPOSE = Object.freeze({
   ENROLL: "mfa_enroll",
   LOGIN: "mfa_login",
+  ALPHA_MFA: "alpha_mfa",
+  ALPHA_ENROLL: "alpha_mfa_enroll",
 });
+
+/** Console-local MFA challenges use user_id 0 until Alpha completes. */
+export const ALPHA_PREAUTH_USER_ID = 0;
 
 const SECURITY_EVENT = Object.freeze({
   CHALLENGE_CREATED: "mfa_challenge_created",
@@ -225,6 +230,53 @@ export default class MfaSecurityService {
     });
 
     return challengeToken;
+  }
+
+  async createAlphaMfaChallenge(email, alphaContext, purpose, metadata = {}) {
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+    const timestamp = now();
+    const challengeToken = crypto.randomBytes(32).toString("base64url");
+
+    await authDb.insert(authLoginChallenges).values({
+      id: crypto.randomUUID(),
+      user_id: ALPHA_PREAUTH_USER_ID,
+      purpose,
+      token_hash: hashOpaqueToken(challengeToken),
+      attempts: 0,
+      max_attempts: env.MFA_MAX_ATTEMPTS,
+      expires_at: addSeconds(timestamp, env.MFA_CHALLENGE_TTL_SECONDS),
+      context_json: JSON.stringify({
+        email: normalizedEmail,
+        alphaContext: alphaContext || {},
+      }),
+      date_created: timestamp,
+    });
+
+    await this._audit(SECURITY_EVENT.CHALLENGE_CREATED, {
+      userId: null,
+      metadata,
+      context: { purpose, email: normalizedEmail },
+    });
+
+    return challengeToken;
+  }
+
+  async consumeAlphaMfaChallenge(challengeToken, expectedPurpose) {
+    const challenge = await this._activeChallenge(challengeToken, expectedPurpose);
+    if (challenge.user_id !== ALPHA_PREAUTH_USER_ID) {
+      throw new ErrorClass("Invalid Alpha MFA challenge", 401);
+    }
+    let parsed = {};
+    try {
+      parsed = JSON.parse(challenge.context_json || "{}");
+    } catch {
+      parsed = {};
+    }
+    await this._consumeChallenge(challenge);
+    return {
+      email: parsed.email,
+      alphaContext: parsed.alphaContext || {},
+    };
   }
 
   async beginAuthentication(user, { context = {}, metadata = {} } = {}) {

@@ -6,10 +6,12 @@ import { generateToken } from "../utils/jwt/index.js";
 import { clearUserCache } from "../utils/userCache.js";
 import { loadUserAccess } from "./rbac.js";
 import { pickPrimaryRoleSlug } from "../config/roles.js";
+import { env } from "../config/env.js";
 import MfaSecurityService from "./mfaSecurity.js";
 import {
   alphaClientBasicLogin,
-  extractAlphaLoginContext,
+  alphaClientMfaEnrollConfirm,
+  alphaClientMfaVerify,
 } from "./alphaAccountAuth.js";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -45,30 +47,13 @@ export default class AuthService {
     return user;
   }
 
-  async _beginMandatoryMfa(user, context, metadata) {
-    const mfaState = await this.mfa.beginAuthentication(user, {
-      context,
-      metadata,
-    });
-    return {
-      ...mfaState,
-      user: {
-        id: user.id,
-        email: user.email,
-        first_name: user.first_name,
-        last_name: user.last_name,
-      },
-    };
-  }
-
   async _issueVerifiedSession(userId, authMethod, context, metadata) {
     const user = await this._userById(userId);
     const access = await loadUserAccess(user.id);
     const isAlpha = context?.source === "alpha";
-    const isConsole = context?.source === "console";
     const session = await this.mfa.createSingleDeviceSession(
       user.id,
-      isAlpha ? `alpha_${authMethod}` : isConsole ? `console_${authMethod}` : authMethod,
+      isAlpha ? "alpha" : authMethod,
       metadata,
     );
     await authDb
@@ -77,11 +62,7 @@ export default class AuthService {
       .where(eq(users.id, user.id));
     clearUserCache(user.user_key);
 
-    const amr = isAlpha
-      ? ["alpha", "mfa", authMethod]
-      : isConsole
-        ? ["console", "mfa", authMethod]
-        : ["mfa", authMethod];
+    const amr = isAlpha ? ["alpha"] : ["mfa", authMethod];
 
     const token = generateToken({
       sub: String(user.id),
@@ -109,8 +90,70 @@ export default class AuthService {
     return response;
   }
 
+  async _provisionedUserByEmail(normalizedEmail) {
+    const [user] = await authDb
+      .select()
+      .from(users)
+      .where(eq(users.email, normalizedEmail))
+      .limit(1);
+
+    if (!user) {
+      throw new ErrorClass("User not provisioned. Contact admin", 404);
+    }
+    return user;
+  }
+
+  async _finishLoginAfterAlpha({ email, alphaResult, metadata }) {
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+    const user = await this._provisionedUserByEmail(normalizedEmail);
+    const ctx = alphaResult.context || {};
+
+    if (user.auth_provider !== "alpha") {
+      await authDb
+        .update(users)
+        .set({ auth_provider: "alpha", date_modified: new Date() })
+        .where(eq(users.id, user.id));
+    }
+
+    return this._issueVerifiedSession(
+      user.id,
+      "alpha",
+      {
+        source: "alpha",
+        sessionID: ctx.sessionID,
+        userKey: ctx.userKey,
+      },
+      metadata,
+    );
+  }
+
+  _alphaMfaChallengeResponse({ phase, challengeToken, alphaContext }) {
+    const expiresIn = env.MFA_CHALLENGE_TTL_SECONDS;
+    if (phase === "mfa_enroll") {
+      return {
+        state: "mfa_enrollment_required",
+        challenge_token: challengeToken,
+        expires_in: expiresIn,
+        provider: "alpha",
+        factor: alphaContext?.otpauthUri
+          ? {
+              type: "totp",
+              otpauth_uri: alphaContext.otpauthUri,
+            }
+          : { type: "totp" },
+      };
+    }
+    return {
+      state: "mfa_required",
+      challenge_token: challengeToken,
+      expires_in: expiresIn,
+      provider: "alpha",
+      methods: ["totp"],
+    };
+  }
+
   /**
-   * Login: provisioned Users check → Alpha Basic (email/password) → MFA.
+   * Login: Alpha Basic (email/password) → Alpha MFA if required → local Users check → JWT.
    */
   async loginWithPassword({ email, password, metadata }) {
     const normalizedEmail = String(email || "").trim().toLowerCase();
@@ -121,70 +164,82 @@ export default class AuthService {
       throw new ErrorClass("password is required", 400);
     }
 
-    const [user] = await authDb
-      .select()
-      .from(users)
-      .where(eq(users.email, normalizedEmail))
-      .limit(1);
-
-    if (!user) {
-      throw new ErrorClass("User not provisioned. Contact admin", 404);
-    }
-
     const alpha = await alphaClientBasicLogin({
       email: normalizedEmail,
       password,
     });
-    const { sessionID, userKey } = extractAlphaLoginContext(alpha.decrypted);
 
-    if (user.auth_provider !== "alpha") {
-      await authDb
-        .update(users)
-        .set({ auth_provider: "alpha", date_modified: new Date() })
-        .where(eq(users.id, user.id));
-      user.auth_provider = "alpha";
+    if (alpha.phase === "authenticated") {
+      return this._finishLoginAfterAlpha({
+        email: normalizedEmail,
+        alphaResult: alpha,
+        metadata,
+      });
     }
 
-    return this._beginMandatoryMfa(
-      user,
-      { source: "alpha", sessionID, userKey },
+    const purpose =
+      alpha.phase === "mfa_enroll"
+        ? "alpha_mfa_enroll"
+        : "alpha_mfa";
+
+    const challengeToken = await this.mfa.createAlphaMfaChallenge(
+      normalizedEmail,
+      alpha.context,
+      purpose,
       metadata,
     );
+
+    return this._alphaMfaChallengeResponse({
+      phase: alpha.phase,
+      challengeToken,
+      alphaContext: alpha.context,
+    });
   }
 
   async confirmMfaEnrollment({ challengeToken, code, metadata }) {
-    const result = await this.mfa.confirmEnrollment({
+    const { email, alphaContext } = await this.mfa.consumeAlphaMfaChallenge(
       challengeToken,
+      "alpha_mfa_enroll",
+    );
+    const alpha = await alphaClientMfaEnrollConfirm({
+      email,
       code,
+      alphaContext,
+    });
+    if (alpha.phase !== "authenticated") {
+      throw new ErrorClass("Alpha MFA enrollment not completed", 401);
+    }
+    return this._finishLoginAfterAlpha({
+      email,
+      alphaResult: alpha,
       metadata,
     });
-    const authenticated = await this._issueVerifiedSession(
-      result.userId,
-      result.authMethod,
-      result.context,
-      metadata,
-    );
-    return { ...authenticated, recovery_codes: result.recoveryCodes };
   }
 
-  async completeMfaLogin({
-    challengeToken,
-    code,
-    recoveryCode,
-    metadata,
-  }) {
-    const result = await this.mfa.completeLoginChallenge({
+  async completeMfaLogin({ challengeToken, code, recoveryCode, metadata }) {
+    if (recoveryCode) {
+      throw new ErrorClass(
+        "Recovery codes are managed in Alpha account security, not on console login",
+        400,
+      );
+    }
+    const { email, alphaContext } = await this.mfa.consumeAlphaMfaChallenge(
       challengeToken,
+      "alpha_mfa",
+    );
+    const alpha = await alphaClientMfaVerify({
+      email,
       code,
-      recoveryCode,
+      alphaContext,
+    });
+    if (alpha.phase !== "authenticated") {
+      throw new ErrorClass("Alpha MFA verification failed", 401);
+    }
+    return this._finishLoginAfterAlpha({
+      email,
+      alphaResult: alpha,
       metadata,
     });
-    return this._issueVerifiedSession(
-      result.userId,
-      result.authMethod,
-      result.context,
-      metadata,
-    );
   }
 
   async logout(userId, sessionId, metadata) {

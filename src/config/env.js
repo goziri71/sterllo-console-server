@@ -111,4 +111,10 @@ export const env = {
     process.env.ACCOUNT_AUTH_API_BASE_URL_KEYCHAIN || "",
   ),
   ACCOUNT_AUTH_TIMEOUT_MS: Number(process.env.ACCOUNT_AUTH_TIMEOUT_MS || 20000),
+  ACCOUNT_AUTH_MFA_VERIFY_PATH: stripWrappingQuotes(
+    process.env.ACCOUNT_AUTH_MFA_VERIFY_PATH || "",
+  ),
+  ACCOUNT_AUTH_MFA_ENROLL_PATH: stripWrappingQuotes(
+    process.env.ACCOUNT_AUTH_MFA_ENROLL_PATH || "",
+  ),
 };
