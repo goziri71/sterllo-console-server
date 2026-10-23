@@ -123,7 +123,7 @@ function parseContext(value) {
   }
 }
 
-export function requestSecurityMetadata(request, deviceLabel) {
+export function requestSecurityMetadata(request, deviceLabel, deviceId) {
   const forwarded = request.headers["x-forwarded-for"];
   const ip = Array.isArray(forwarded)
     ? forwarded[0]
@@ -132,6 +132,7 @@ export function requestSecurityMetadata(request, deviceLabel) {
     ipAddress: ip || null,
     userAgent: String(request.headers["user-agent"] || "").slice(0, 512) || null,
     deviceLabel: deviceLabel ? String(deviceLabel).trim().slice(0, 150) : null,
+    deviceId: deviceId ? String(deviceId).trim().slice(0, 250) : null,
   };
 }
 
@@ -248,6 +249,11 @@ export default class MfaSecurityService {
       context_json: JSON.stringify({
         email: normalizedEmail,
         alphaContext: alphaContext || {},
+        clientContext: {
+          ipAddress: metadata?.ipAddress ?? null,
+          deviceId: metadata?.deviceId ?? null,
+          userAgent: metadata?.userAgent ?? null,
+        },
       }),
       date_created: timestamp,
     });
@@ -276,6 +282,7 @@ export default class MfaSecurityService {
     return {
       email: parsed.email,
       alphaContext: parsed.alphaContext || {},
+      clientContext: parsed.clientContext || {},
     };
   }
 

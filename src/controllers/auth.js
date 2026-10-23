@@ -7,7 +7,7 @@ export const login = async (request, reply) => {
     throw new ErrorClass("Request body is required", 400);
   }
 
-  const { email, password, device_label } = request.body;
+  const { email, password, device_label, device_id } = request.body;
   if (!email || typeof email !== "string") {
     throw new ErrorClass("email is required", 400);
   }
@@ -18,7 +18,7 @@ export const login = async (request, reply) => {
   const result = await new AuthService().loginWithPassword({
     email,
     password,
-    metadata: requestSecurityMetadata(request, device_label),
+    metadata: requestSecurityMetadata(request, device_label, device_id),
   });
 
   const message =
@@ -41,7 +41,7 @@ export const confirmMfaEnrollment = async (request, reply) => {
   if (!request.body || Object.keys(request.body).length === 0) {
     throw new ErrorClass("Request body is required", 400);
   }
-  const { challenge_token, code, device_label } = request.body;
+  const { challenge_token, code, device_label, device_id } = request.body;
   if (!challenge_token || !code) {
     throw new ErrorClass("challenge_token and code are required", 400);
   }
@@ -52,7 +52,7 @@ export const confirmMfaEnrollment = async (request, reply) => {
   const result = await new AuthService().confirmMfaEnrollment({
     challengeToken: challenge_token,
     code: String(code),
-    metadata: requestSecurityMetadata(request, device_label),
+    metadata: requestSecurityMetadata(request, device_label, device_id),
   });
   return reply.code(200).send({
     code: 200,
@@ -71,7 +71,7 @@ export const completeMfaLogin = async (request, reply) => {
   if (!request.body || Object.keys(request.body).length === 0) {
     throw new ErrorClass("Request body is required", 400);
   }
-  const { challenge_token, code, recovery_code, device_label } = request.body;
+  const { challenge_token, code, recovery_code, device_label, device_id } = request.body;
   if (!challenge_token || (!code && !recovery_code)) {
     throw new ErrorClass(
       "challenge_token and either code or recovery_code are required",
@@ -86,7 +86,7 @@ export const completeMfaLogin = async (request, reply) => {
     challengeToken: challenge_token,
     code: code ? String(code) : undefined,
     recoveryCode: recovery_code,
-    metadata: requestSecurityMetadata(request, device_label),
+    metadata: requestSecurityMetadata(request, device_label, device_id),
   });
   return reply.code(200).send({
     code: 200,

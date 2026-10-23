@@ -117,4 +117,7 @@ export const env = {
   ACCOUNT_AUTH_MFA_ENROLL_PATH: stripWrappingQuotes(
     process.env.ACCOUNT_AUTH_MFA_ENROLL_PATH || "",
   ),
+  ACCOUNT_AUTH_STERLLO_PRODUCT: stripWrappingQuotes(
+    process.env.ACCOUNT_AUTH_STERLLO_PRODUCT || "",
+  ),
 };

@@ -170,6 +170,7 @@ export default class AuthService {
     const alpha = await alphaClientBasicLogin({
       email: normalizedEmail,
       password,
+      clientContext: metadata,
     });
 
     if (alpha.phase === "authenticated") {
@@ -200,7 +201,7 @@ export default class AuthService {
   }
 
   async confirmMfaEnrollment({ challengeToken, code, metadata }) {
-    const { email, alphaContext } = await this.mfa.consumeAlphaMfaChallenge(
+    const { email, alphaContext, clientContext } = await this.mfa.consumeAlphaMfaChallenge(
       challengeToken,
       "alpha_mfa_enroll",
     );
@@ -208,6 +209,7 @@ export default class AuthService {
       email,
       code,
       alphaContext,
+      clientContext: { ...clientContext, ...metadata },
     });
     if (alpha.phase !== "authenticated") {
       throw new ErrorClass("Alpha MFA enrollment not completed", 401);
@@ -226,7 +228,7 @@ export default class AuthService {
         400,
       );
     }
-    const { email, alphaContext } = await this.mfa.consumeAlphaMfaChallenge(
+    const { email, alphaContext, clientContext } = await this.mfa.consumeAlphaMfaChallenge(
       challengeToken,
       "alpha_mfa",
     );
@@ -234,6 +236,7 @@ export default class AuthService {
       email,
       code,
       alphaContext,
+      clientContext: { ...clientContext, ...metadata },
     });
     if (alpha.phase !== "authenticated") {
       throw new ErrorClass("Alpha MFA verification failed", 401);

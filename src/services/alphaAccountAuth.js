@@ -11,6 +11,10 @@ import {
   buildIsvsCredentialsHeader,
   decryptIsvsApiResponse,
 } from "../utils/isvsCryptoJs.js";
+import {
+  buildAlphaDeviceSignature,
+  buildAlphaRequestSignature,
+} from "../utils/alphaRequestSigning.js";
 
 const LOGIN_BASIC_PATH = "/2.202504.0/Account/Auth/Login/Client/Basic";
 const DEFAULT_MFA_VERIFY_PATH = "/2.202504.0/Account/Auth/Login/Client/Mfa/Verify";
@@ -61,7 +65,63 @@ function resolveAccountAuthSecrets() {
     throw new ErrorClass("ACCOUNT_AUTH_API_BASE_URL did not decrypt to a valid URL", 500);
   }
 
-  return { productKey, baseUrl };
+  const sterlloMode =
+    stripWrappingQuotes(env.ACCOUNT_AUTH_STERLLO_PRODUCT || "").toLowerCase() === "true";
+
+  if (!sterlloMode) {
+    return { productKey, baseUrl, sourceProductKey: productKey, targetProductKey: productKey };
+  }
+
+  const sourceEnc = requireEnv("SOURCE_PRODUCT_KEY", process.env.SOURCE_PRODUCT_KEY);
+  const sourceKc = requireEnv(
+    "SOURCE_PRODUCT_KEYCHAIN",
+    process.env.SOURCE_PRODUCT_KEY_KEYCHAIN || process.env.SOURCE_PRODUCT_KEYCHAIN,
+  );
+  const targetEnc = requireEnv("TARGET_PRODUCT_KEY", process.env.TARGET_PRODUCT_KEY);
+  const targetKc = requireEnv(
+    "TARGET_PRODUCT_KEYCHAIN",
+    process.env.TARGET_PRODUCT_KEY_KEYCHAIN || process.env.TARGET_PRODUCT_KEYCHAIN,
+  );
+
+  const sourceProductKey = stripWrappingQuotes(
+    decryptIsvsProductKeyFromEnv(sourceEnc, sourceKc, { valueName: "SOURCE_PRODUCT_KEY" }),
+  );
+  const targetProductKey = stripWrappingQuotes(
+    decryptIsvsProductKeyFromEnv(targetEnc, targetKc, { valueName: "TARGET_PRODUCT_KEY" }),
+  );
+
+  return {
+    productKey,
+    baseUrl,
+    sourceProductKey,
+    targetProductKey,
+  };
+}
+
+export function normalizeAlphaClientContext(clientContext = {}) {
+  const ipAddress =
+    String(clientContext.ipAddress || clientContext.ip_address || "").trim() || "0.0.0.0";
+  let deviceId = String(clientContext.deviceId || clientContext.device_id || "").trim();
+  if (!deviceId) {
+    const seed = `${clientContext.userAgent || ""}|${ipAddress}|console-dashboard`;
+    deviceId = crypto.createHash("sha256").update(seed).digest("hex").slice(0, 32);
+  }
+  return { ipAddress, deviceId };
+}
+
+function buildLoginPayload({ email, password, clientContext, extra = {} }) {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const client = normalizeAlphaClientContext(clientContext);
+  return {
+    email_address: normalizedEmail,
+    password: String(password || ""),
+    client: {
+      ip_address: client.ipAddress,
+      device: { id: client.deviceId },
+    },
+    mailer: DEFAULT_MAILER,
+    ...extra,
+  };
 }
 
 function unwrapAlpha(decrypted) {
@@ -220,27 +280,49 @@ export function parseAlphaAuthPhase(decrypted) {
   };
 }
 
-async function alphaEncryptedPost(path, payload, { extraCredentials = {} } = {}) {
-  const { productKey, baseUrl } = resolveAccountAuthSecrets();
+async function alphaEncryptedPost(path, payload, { extraCredentials = {}, clientContext = {} } = {}) {
+  const { productKey, baseUrl, sourceProductKey, targetProductKey } = resolveAccountAuthSecrets();
   const encryptionKey = resolveIsvsEncryptionKey(productKey, {
     secretName: "ACCOUNT_AUTH_PRODUCT_KEY",
   });
   const iv = generateIsvsIv();
   const requestId = crypto.randomUUID();
+  const client = normalizeAlphaClientContext(clientContext);
+
+  const deviceSignature = buildAlphaDeviceSignature(
+    client.deviceId,
+    requestId,
+    encryptionKey,
+  );
 
   const credentialsObject = {
-    "Source-Product-Key": productKey,
-    "Target-Product-Key": productKey,
+    "Source-Product-Key": sourceProductKey,
+    "Target-Product-Key": targetProductKey,
     "Request-Id": requestId,
+    "Device-Signature": deviceSignature,
+    "Request-IP-Address": client.ipAddress,
     ...extraCredentials,
   };
 
+  const encryptedPayload = encryptIsvsJson(payload, encryptionKey, iv);
+  const credentialsHeader = buildIsvsCredentialsHeader(credentialsObject, encryptionKey, iv);
+  const requestSignature = buildAlphaRequestSignature({
+    requestId,
+    encryptedPayload,
+    deviceId: client.deviceId,
+    encryptionKey,
+    iv,
+  });
+
   const endpoint = `${baseUrl}${path}`;
   const headers = {
+    Accept: "application/json",
     "Content-Type": "application/json",
-    Credentials: buildIsvsCredentialsHeader(credentialsObject, encryptionKey, iv),
+    Credentials: credentialsHeader,
+    "Request-Id": requestId,
+    "X-Request-Signature": requestSignature,
   };
-  const body = { payload: encryptIsvsJson(payload, encryptionKey, iv) };
+  const body = { payload: encryptedPayload };
 
   let response;
   try {
@@ -286,7 +368,7 @@ async function alphaEncryptedPost(path, payload, { extraCredentials = {} } = {})
   };
 }
 
-function buildMfaPayload(email, code, alphaContext = {}) {
+function buildMfaPayload(email, code, alphaContext = {}, clientContext = {}) {
   const ctx = alphaContext?.raw ? { ...alphaContext, ...alphaContext.raw } : alphaContext;
   const challenge = pickFirst(
     alphaContext.challengeToken,
@@ -295,9 +377,11 @@ function buildMfaPayload(email, code, alphaContext = {}) {
     ctx?.token,
   );
   const sessionID = pickFirst(alphaContext.sessionID, ctx?.sessionID, ctx?.session_id);
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const client = normalizeAlphaClientContext(clientContext);
 
   const payload = {
-    email: String(email || "").trim().toLowerCase(),
+    email_address: normalizedEmail,
     code: String(code || ""),
     otp: String(code || ""),
     token: challenge,
@@ -305,6 +389,10 @@ function buildMfaPayload(email, code, alphaContext = {}) {
     mfa_token: challenge,
     sessionID,
     session_id: sessionID,
+    client: {
+      ip_address: client.ipAddress,
+      device: { id: client.deviceId },
+    },
     mailer: DEFAULT_MAILER,
   };
 
@@ -319,31 +407,27 @@ function buildMfaPayload(email, code, alphaContext = {}) {
 /**
  * Alpha Account Auth — Login/Client/Basic
  */
-export async function alphaClientBasicLogin({ email, password }) {
-  const payload = {
-    email: String(email || "").trim().toLowerCase(),
-    password: String(password || ""),
-    mailer: DEFAULT_MAILER,
-  };
-  return alphaEncryptedPost(LOGIN_BASIC_PATH, payload);
+export async function alphaClientBasicLogin({ email, password, clientContext }) {
+  const payload = buildLoginPayload({ email, password, clientContext });
+  return alphaEncryptedPost(LOGIN_BASIC_PATH, payload, { clientContext });
 }
 
-export async function alphaClientMfaVerify({ email, code, alphaContext }) {
+export async function alphaClientMfaVerify({ email, code, alphaContext, clientContext }) {
   const path =
     stripWrappingQuotes(env.ACCOUNT_AUTH_MFA_VERIFY_PATH || "") || DEFAULT_MFA_VERIFY_PATH;
-  const payload = buildMfaPayload(email, code, alphaContext);
+  const payload = buildMfaPayload(email, code, alphaContext, clientContext);
   const extra = {};
   if (alphaContext?.userKey) extra["User-Key"] = alphaContext.userKey;
-  return alphaEncryptedPost(path, payload, { extraCredentials: extra });
+  return alphaEncryptedPost(path, payload, { extraCredentials: extra, clientContext });
 }
 
-export async function alphaClientMfaEnrollConfirm({ email, code, alphaContext }) {
+export async function alphaClientMfaEnrollConfirm({ email, code, alphaContext, clientContext }) {
   const path =
     stripWrappingQuotes(env.ACCOUNT_AUTH_MFA_ENROLL_PATH || "") || DEFAULT_MFA_ENROLL_PATH;
-  const payload = buildMfaPayload(email, code, alphaContext);
+  const payload = buildMfaPayload(email, code, alphaContext, clientContext);
   const extra = {};
   if (alphaContext?.userKey) extra["User-Key"] = alphaContext.userKey;
-  return alphaEncryptedPost(path, payload, { extraCredentials: extra });
+  return alphaEncryptedPost(path, payload, { extraCredentials: extra, clientContext });
 }
 
 /** @deprecated use extractAlphaContext via parseAlphaAuthPhase */

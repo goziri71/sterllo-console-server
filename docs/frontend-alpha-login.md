@@ -28,9 +28,12 @@ Base prefix: `/1.202602.0/auth`
 {
   "email": "user@example.com",
   "password": "••••••••",
-  "device_label": "Chrome on Mac"
+  "device_label": "Chrome on Mac",
+  "device_id": "stable-browser-device-uuid"
 }
 ```
+
+`device_id` is sent to Alpha inside encrypted `client.device.id` (required for client login). If omitted, the API derives a fallback from IP + User-Agent — prefer sending a persistent id from the browser.
 
 Responses:
 
