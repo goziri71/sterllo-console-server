@@ -59,3 +59,16 @@ export class RedbillerPassthroughError extends Error {
     Error.captureStackTrace(this, this.constructor);
   }
 }
+
+/** Return decrypted Alpha Account Auth JSON unchanged (ISVS business codes stay in body). */
+export class AlphaPassthroughError extends Error {
+  constructor(alphaBody, httpStatus) {
+    const body = normalizeUpstreamBody(alphaBody);
+    super(upstreamBodyMessage(body));
+    const status = Number(httpStatus);
+    this.statusCode =
+      Number.isFinite(status) && status >= 100 && status < 600 ? status : 401;
+    this.alphaBody = body;
+    Error.captureStackTrace(this, this.constructor);
+  }
+}

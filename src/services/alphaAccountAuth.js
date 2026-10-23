@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import axios from "axios";
 import { env } from "../config/env.js";
-import { ErrorClass } from "../utils/errorClass/index.js";
+import { AlphaPassthroughError, ErrorClass } from "../utils/errorClass/index.js";
 import { stripWrappingQuotes } from "../utils/decryptProdSecret.js";
 import {
   decryptIsvsProductKeyFromEnv,
@@ -15,6 +15,10 @@ import {
   buildAlphaDeviceSignature,
   buildAlphaRequestSignature,
 } from "../utils/alphaRequestSigning.js";
+import {
+  extractSourceProductIdFromKey,
+  isSterlloSourceProductKeyConfigured,
+} from "../utils/sterlloProductKey.js";
 
 const LOGIN_BASIC_PATH = "/2.202504.0/Account/Auth/Login/Client/Basic";
 const DEFAULT_MFA_VERIFY_PATH = "/2.202504.0/Account/Auth/Login/Client/Mfa/Verify";
@@ -65,11 +69,16 @@ function resolveAccountAuthSecrets() {
     throw new ErrorClass("ACCOUNT_AUTH_API_BASE_URL did not decrypt to a valid URL", 500);
   }
 
-  const sterlloMode =
-    stripWrappingQuotes(env.ACCOUNT_AUTH_STERLLO_PRODUCT || "").toLowerCase() === "true";
+  const sterlloPair = shouldUseSterlloSourceToAlphaPair();
 
-  if (!sterlloMode) {
-    return { productKey, baseUrl, sourceProductKey: productKey, targetProductKey: productKey };
+  if (!sterlloPair) {
+    return {
+      productKey,
+      baseUrl,
+      sourceProductKey: productKey,
+      targetProductKey: productKey,
+      sourceProductId: resolveSourceProductId(productKey),
+    };
   }
 
   const sourceEnc = requireEnv("SOURCE_PRODUCT_KEY", process.env.SOURCE_PRODUCT_KEY);
@@ -77,25 +86,92 @@ function resolveAccountAuthSecrets() {
     "SOURCE_PRODUCT_KEYCHAIN",
     process.env.SOURCE_PRODUCT_KEY_KEYCHAIN || process.env.SOURCE_PRODUCT_KEYCHAIN,
   );
-  const targetEnc = requireEnv("TARGET_PRODUCT_KEY", process.env.TARGET_PRODUCT_KEY);
-  const targetKc = requireEnv(
-    "TARGET_PRODUCT_KEYCHAIN",
-    process.env.TARGET_PRODUCT_KEY_KEYCHAIN || process.env.TARGET_PRODUCT_KEYCHAIN,
-  );
 
   const sourceProductKey = stripWrappingQuotes(
     decryptIsvsProductKeyFromEnv(sourceEnc, sourceKc, { valueName: "SOURCE_PRODUCT_KEY" }),
-  );
-  const targetProductKey = stripWrappingQuotes(
-    decryptIsvsProductKeyFromEnv(targetEnc, targetKc, { valueName: "TARGET_PRODUCT_KEY" }),
   );
 
   return {
     productKey,
     baseUrl,
     sourceProductKey,
-    targetProductKey,
+    targetProductKey: productKey,
+    sourceProductId: resolveSourceProductId(sourceProductKey),
   };
+}
+
+/** Console uses Beamer SOURCE → Alpha ACCOUNT_AUTH when SOURCE_* env is present (no flag required). */
+function shouldUseSterlloSourceToAlphaPair() {
+  const override = stripWrappingQuotes(
+    env.ACCOUNT_AUTH_STERLLO_PRODUCT || process.env.ACCOUNT_AUTH_STERLLO_PRODUCT || "",
+  ).toLowerCase();
+  if (override === "false" || override === "0") return false;
+  if (override === "true" || override === "1") return true;
+  return isSterlloSourceProductKeyConfigured();
+}
+
+function resolveSourceProductId(sourceProductKey) {
+  const fromEnv = stripWrappingQuotes(
+    process.env.SOURCE_PRODUCT_ID ||
+      process.env.ACCOUNT_AUTH_SOURCE_PRODUCT_ID ||
+      env.SOURCE_PRODUCT_ID ||
+      "",
+  );
+  if (fromEnv) return fromEnv;
+
+  const derived = extractSourceProductIdFromKey(sourceProductKey);
+  if (!derived) {
+    throw new ErrorClass(
+      "Could not derive Source-Product-Id from SOURCE product key; set SOURCE_PRODUCT_ID if keys use a non-standard format",
+      500,
+    );
+  }
+  return derived;
+}
+
+function alphaWireFormat() {
+  const format = stripWrappingQuotes(env.ACCOUNT_AUTH_WIRE_FORMAT || "schema").toLowerCase();
+  if (format === "legacy" || format === "credentials" || format === "mobile") {
+    return "legacy";
+  }
+  return "schema";
+}
+
+function buildAlphaSchemaWireHeaders({
+  sourceProductKey,
+  targetProductKey,
+  sourceProductId,
+  deviceSignature,
+  encryptionKey,
+  iv,
+  extraCredentials = {},
+}) {
+  const credentialsObject = {
+    "Source-Product-Key": sourceProductKey,
+    "Target-Product-Key": targetProductKey,
+    "Source-Product-Id": sourceProductId,
+    "Device-Signature": deviceSignature,
+    ...extraCredentials,
+  };
+
+  const headers = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    "Source-Product-Key": sourceProductKey,
+    "Target-Product-Key": targetProductKey,
+    "Source-Product-Id": sourceProductId,
+    "Device-Signature": deviceSignature,
+    Credentials: buildIsvsCredentialsHeader(credentialsObject, encryptionKey, iv),
+  };
+
+  const rateLimiterKey = stripWrappingQuotes(
+    env.ACCOUNT_AUTH_RATE_LIMITER_KEY || process.env.ACCOUNT_AUTH_RATE_LIMITER_KEY || "",
+  );
+  if (rateLimiterKey) {
+    headers["Rate-Limiter-Key"] = rateLimiterKey;
+  }
+
+  return headers;
 }
 
 export function normalizeAlphaClientContext(clientContext = {}) {
@@ -150,6 +226,30 @@ function alphaErrorMessage(body, fallback) {
     body?.data?.error ||
     fallback
   );
+}
+
+/** Prefer decrypted Alpha JSON for passthrough; fall back to raw axios body. */
+function alphaPassthroughBody(decrypted, raw) {
+  if (decrypted && typeof decrypted === "object" && !Array.isArray(decrypted)) {
+    const keys = Object.keys(decrypted);
+    if (keys.length === 1 && typeof decrypted.response === "string") {
+      return raw;
+    }
+    return decrypted;
+  }
+  return raw;
+}
+
+function resolveAlphaPassthroughHttpStatus(axiosStatus, alphaBody) {
+  const http = Number(axiosStatus);
+  if (Number.isFinite(http) && http >= 400 && http < 600) {
+    return http;
+  }
+  const businessCode = Number(alphaBody?.code ?? alphaBody?.data?.code);
+  if (Number.isFinite(businessCode) && businessCode >= 4000) {
+    return 401;
+  }
+  return 401;
 }
 
 function pickFirst(...values) {
@@ -281,7 +381,13 @@ export function parseAlphaAuthPhase(decrypted) {
 }
 
 async function alphaEncryptedPost(path, payload, { extraCredentials = {}, clientContext = {} } = {}) {
-  const { productKey, baseUrl, sourceProductKey, targetProductKey } = resolveAccountAuthSecrets();
+  const {
+    productKey,
+    baseUrl,
+    sourceProductKey,
+    targetProductKey,
+    sourceProductId,
+  } = resolveAccountAuthSecrets();
   const encryptionKey = resolveIsvsEncryptionKey(productKey, {
     secretName: "ACCOUNT_AUTH_PRODUCT_KEY",
   });
@@ -295,33 +401,47 @@ async function alphaEncryptedPost(path, payload, { extraCredentials = {}, client
     encryptionKey,
   );
 
-  const credentialsObject = {
-    "Source-Product-Key": sourceProductKey,
-    "Target-Product-Key": targetProductKey,
-    "Request-Id": requestId,
-    "Device-Signature": deviceSignature,
-    "Request-IP-Address": client.ipAddress,
-    ...extraCredentials,
-  };
-
   const encryptedPayload = encryptIsvsJson(payload, encryptionKey, iv);
-  const credentialsHeader = buildIsvsCredentialsHeader(credentialsObject, encryptionKey, iv);
-  const requestSignature = buildAlphaRequestSignature({
-    requestId,
-    encryptedPayload,
-    deviceId: client.deviceId,
-    encryptionKey,
-    iv,
-  });
 
   const endpoint = `${baseUrl}${path}`;
-  const headers = {
-    Accept: "application/json",
-    "Content-Type": "application/json",
-    Credentials: credentialsHeader,
-    "Request-Id": requestId,
-    "X-Request-Signature": requestSignature,
-  };
+  let headers;
+
+  if (alphaWireFormat() === "legacy") {
+    const credentialsObject = {
+      "Source-Product-Key": sourceProductKey,
+      "Target-Product-Key": targetProductKey,
+      "Request-Id": requestId,
+      "Device-Signature": deviceSignature,
+      "Request-IP-Address": client.ipAddress,
+      ...extraCredentials,
+    };
+    const credentialsHeader = buildIsvsCredentialsHeader(credentialsObject, encryptionKey, iv);
+    const requestSignature = buildAlphaRequestSignature({
+      requestId,
+      encryptedPayload,
+      deviceId: client.deviceId,
+      encryptionKey,
+      iv,
+    });
+    headers = {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      Credentials: credentialsHeader,
+      "Request-Id": requestId,
+      "X-Request-Signature": requestSignature,
+    };
+  } else {
+    headers = buildAlphaSchemaWireHeaders({
+      sourceProductKey,
+      targetProductKey,
+      sourceProductId,
+      deviceSignature,
+      encryptionKey,
+      iv,
+      extraCredentials,
+    });
+  }
+
   const body = { payload: encryptedPayload };
 
   let response;
@@ -351,11 +471,28 @@ async function alphaEncryptedPost(path, payload, { extraCredentials = {}, client
   }
 
   const phaseResult = parseAlphaAuthPhase(decrypted);
-  if (phaseResult.phase === "failed" && response.status >= 400) {
-    throw new ErrorClass(phaseResult.message || "Alpha request failed", response.status);
+  const alphaCode =
+    decrypted?.code ?? decrypted?.data?.code ?? phaseResult.context?.raw?.code ?? null;
+
+  if (env.ACCOUNT_AUTH_DEBUG === "true" || env.ACCOUNT_AUTH_DEBUG === true) {
+    console.warn(
+      "[alpha-account-auth]",
+      JSON.stringify({
+        path,
+        httpStatus: response.status,
+        phase: phaseResult.phase,
+        alphaCode,
+        message: phaseResult.message,
+      }),
+    );
   }
+
   if (phaseResult.phase === "failed") {
-    throw new ErrorClass(phaseResult.message || "Alpha request failed", 401);
+    const alphaBody = alphaPassthroughBody(decrypted, raw);
+    throw new AlphaPassthroughError(
+      alphaBody,
+      resolveAlphaPassthroughHttpStatus(response.status, alphaBody),
+    );
   }
 
   return {

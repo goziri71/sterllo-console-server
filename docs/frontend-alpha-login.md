@@ -44,7 +44,7 @@ Responses:
 Errors:
 
 - `400` missing/invalid email or password
-- `401` Alpha rejected credentials or MFA
+- `401` Alpha rejected credentials or MFA — **body is Alpha’s JSON unchanged** (e.g. `{ "code": 4013, "state": false, "message": "Request denied." }`), not the console `{ code: 4010, … }` envelope
 - `403` Alpha login succeeded but `account.mfa` is not enabled — user must set up MFA on Redbiller/Alpha before Console access
 - `404` Alpha OK but user not on console Users list
 - `502` Alpha unreachable / misconfigured env
@@ -68,6 +68,11 @@ Optional override if Alpha path differs:
 
 - `ACCOUNT_AUTH_MFA_VERIFY_PATH` (default `.../Login/Client/Mfa/Verify`)
 - `ACCOUNT_AUTH_MFA_ENROLL_PATH` (default `.../Login/Client/Mfa/Enroll/Confirm`)
+- When `SOURCE_PRODUCT_KEY` + keychain are in env (same as Beamer), login **automatically** uses Sterllo source → Alpha `ACCOUNT_AUTH` target — no `ACCOUNT_AUTH_STERLLO_PRODUCT=true` needed.
+- `Source-Product-Id` is **derived from the decrypted SOURCE product key** (optional override: `SOURCE_PRODUCT_ID`).
+- `ACCOUNT_AUTH_DEBUG=true` — log phase / Alpha business code server-side
+- `ACCOUNT_AUTH_WIRE_FORMAT=schema` (default) — plain `Source/Target-Product-Key`, `Source-Product-Id`, matching encrypted `Credentials`, encrypted `{ payload }` (no `Request-Id` header)
+- `ACCOUNT_AUTH_WIRE_FORMAT=legacy` — older mobile-style `Credentials` + `X-Request-Signature`
 
 ## UI notes
 

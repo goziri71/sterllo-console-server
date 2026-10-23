@@ -117,7 +117,18 @@ export const env = {
   ACCOUNT_AUTH_MFA_ENROLL_PATH: stripWrappingQuotes(
     process.env.ACCOUNT_AUTH_MFA_ENROLL_PATH || "",
   ),
+  /** Optional override; default is auto SOURCE→Alpha when SOURCE_PRODUCT_KEY is set. */
   ACCOUNT_AUTH_STERLLO_PRODUCT: stripWrappingQuotes(
     process.env.ACCOUNT_AUTH_STERLLO_PRODUCT || "",
   ),
+  ACCOUNT_AUTH_DEBUG: stripWrappingQuotes(process.env.ACCOUNT_AUTH_DEBUG || ""),
+  /** Optional override; default derived from decrypted SOURCE product key. */
+  SOURCE_PRODUCT_ID: stripWrappingQuotes(
+    process.env.SOURCE_PRODUCT_ID || process.env.ACCOUNT_AUTH_SOURCE_PRODUCT_ID || "",
+  ),
+  /**
+   * `schema` (default) = plain Source/Target/Id headers + matching Credentials + `{ payload }`;
+   * `legacy` = mobile-style Credentials + Request-Id + X-Request-Signature
+   */
+  ACCOUNT_AUTH_WIRE_FORMAT: stripWrappingQuotes(process.env.ACCOUNT_AUTH_WIRE_FORMAT || "schema"),
 };

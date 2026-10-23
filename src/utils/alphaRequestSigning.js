@@ -10,6 +10,9 @@ export function buildAlphaDeviceSignature(deviceId, requestId, encryptionKey) {
   return crypto.createHmac("sha256", encryptionKey).update(material).digest("base64");
 }
 
+/**
+ * Encrypted request attestation header (same IV suffix convention as `Credentials`).
+ */
 export function buildAlphaRequestSignature({
   requestId,
   encryptedPayload,
@@ -17,7 +20,7 @@ export function buildAlphaRequestSignature({
   encryptionKey,
   iv,
 }) {
-  return encryptIsvsJson(
+  const ciphertext = encryptIsvsJson(
     {
       request_id: requestId,
       payload: encryptedPayload,
@@ -26,4 +29,5 @@ export function buildAlphaRequestSignature({
     encryptionKey,
     iv,
   );
+  return `${ciphertext}${iv}`;
 }

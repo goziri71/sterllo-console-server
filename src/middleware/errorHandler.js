@@ -13,7 +13,11 @@ function resolveHttpAndBodyCode(raw) {
   return { httpStatus: 500, bodyCode: 5000 };
 }
 
-import { IsvsPassthroughError, RedbillerPassthroughError } from "../utils/errorClass/index.js";
+import {
+  AlphaPassthroughError,
+  IsvsPassthroughError,
+  RedbillerPassthroughError,
+} from "../utils/errorClass/index.js";
 
 export const errorHandler = (error, request, reply) => {
   request.log.error(error);
@@ -24,6 +28,10 @@ export const errorHandler = (error, request, reply) => {
 
   if (error instanceof RedbillerPassthroughError) {
     return reply.code(error.statusCode).send(error.redbillerBody);
+  }
+
+  if (error instanceof AlphaPassthroughError) {
+    return reply.code(error.statusCode).send(error.alphaBody);
   }
 
   const raw =
