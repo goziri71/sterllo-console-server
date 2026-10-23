@@ -68,8 +68,9 @@ Optional override if Alpha path differs:
 
 - `ACCOUNT_AUTH_MFA_VERIFY_PATH` (default `.../Login/Client/Mfa/Verify`)
 - `ACCOUNT_AUTH_MFA_ENROLL_PATH` (default `.../Login/Client/Mfa/Enroll/Confirm`)
-- When `SOURCE_PRODUCT_KEY` + keychain are in env (same as Beamer), login **automatically** uses Sterllo source → Alpha `ACCOUNT_AUTH` target — no `ACCOUNT_AUTH_STERLLO_PRODUCT=true` needed.
-- `Source-Product-Id` is **derived from the decrypted SOURCE product key** (optional override: `SOURCE_PRODUCT_ID`).
+- Default: **`productId` mode** — `Source-Product-Key` and `Target-Product-Key` are both `ACCOUNT_AUTH`; `Source-Product-Id` is parsed from that key (trailing pipe segment or `<ALPHA>.` prefix).
+- Optional: `ACCOUNT_AUTH_STERLLO_PRODUCT=true` only if Alpha registered your Beamer `SOURCE_*` key for Account Login (otherwise you may see **7010**).
+- Optional override: `SOURCE_PRODUCT_ID`.
 - `ACCOUNT_AUTH_DEBUG=true` — log phase / Alpha business code server-side
 - `ACCOUNT_AUTH_WIRE_FORMAT=schema` (default) — plain `Source/Target-Product-Key`, `Source-Product-Id`, matching encrypted `Credentials`, encrypted `{ payload }` (no `Request-Id` header)
 - `ACCOUNT_AUTH_WIRE_FORMAT=legacy` — older mobile-style `Credentials` + `X-Request-Signature`

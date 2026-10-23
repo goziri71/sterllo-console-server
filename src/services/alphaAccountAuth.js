@@ -72,12 +72,13 @@ function resolveAccountAuthSecrets() {
   const sterlloPair = shouldUseSterlloSourceToAlphaPair();
 
   if (!sterlloPair) {
+    const sourceProductId = resolveSourceProductId(productKey);
     return {
       productKey,
       baseUrl,
       sourceProductKey: productKey,
       targetProductKey: productKey,
-      sourceProductId: resolveSourceProductId(productKey),
+      sourceProductId,
     };
   }
 
@@ -100,14 +101,18 @@ function resolveAccountAuthSecrets() {
   };
 }
 
-/** Console uses Beamer SOURCE → Alpha ACCOUNT_AUTH when SOURCE_* env is present (no flag required). */
+/**
+ * Account Login uses `productId: true` (ACCOUNT_AUTH for source + target) by default.
+ * Beamer SOURCE_* is for ISVS — opt in with ACCOUNT_AUTH_STERLLO_PRODUCT=true when Alpha registered that pair.
+ */
 function shouldUseSterlloSourceToAlphaPair() {
   const override = stripWrappingQuotes(
     env.ACCOUNT_AUTH_STERLLO_PRODUCT || process.env.ACCOUNT_AUTH_STERLLO_PRODUCT || "",
   ).toLowerCase();
-  if (override === "false" || override === "0") return false;
-  if (override === "true" || override === "1") return true;
-  return isSterlloSourceProductKeyConfigured();
+  if (override === "true" || override === "1") {
+    return isSterlloSourceProductKeyConfigured();
+  }
+  return false;
 }
 
 function resolveSourceProductId(sourceProductKey) {

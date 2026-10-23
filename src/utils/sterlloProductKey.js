@@ -15,16 +15,25 @@ export function extractSourceProductIdFromKey(decryptedProductKey) {
   const afterTag = head.match(/^<[^>]+>(.+)$/)?.[1]?.trim() || "";
   const tagName = head.match(/^<([^>]+)>/)?.[1]?.trim() || "";
 
-  for (let i = 1; i < parts.length; i += 1) {
-    const candidate = parts[i];
-    if (!candidate || candidate.includes("<")) continue;
-    if (candidate.length >= 8 && candidate.length <= 128) {
-      return candidate;
+  // Sterllo console keys: `<STERLLO_CONSOLE>…|public|…|<product_id>` — Alpha expects the trailing id.
+  if (parts.length >= 3) {
+    const last = parts[parts.length - 1];
+    if (last && !last.includes("<") && last.length >= 6 && last.length <= 32) {
+      return last;
     }
   }
 
-  if (afterTag.length >= 8 && afterTag.length <= 128) {
+  // Alpha account keys: `<ALPHA>.<product_id>|…`
+  if (afterTag.length >= 6 && afterTag.length <= 32) {
     return afterTag;
+  }
+
+  for (let i = 1; i < parts.length; i += 1) {
+    const candidate = parts[i];
+    if (!candidate || candidate.includes("<")) continue;
+    if (candidate.length >= 6 && candidate.length <= 32) {
+      return candidate;
+    }
   }
 
   if (tagName) {
