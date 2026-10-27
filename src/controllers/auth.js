@@ -26,8 +26,8 @@ export const login = async (request, reply) => {
       ? "Login successful"
       : result.state === "mfa_enrollment_required"
         ? "Alpha MFA enrollment required"
-        : result.state === "account_locked_otp_required"
-          ? "Account locked. Email OTP verification required"
+        : result.state === "email_otp_required"
+          ? "Email OTP verification required"
           : "Alpha MFA verification required";
 
   return reply.code(200).send({

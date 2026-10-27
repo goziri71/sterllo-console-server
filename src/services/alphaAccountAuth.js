@@ -357,13 +357,13 @@ export function parseAlphaAuthPhase(decrypted) {
   const code = decrypted?.code ?? root?.code;
   const message = String(decrypted?.message ?? root?.message ?? "").trim();
 
-  // Alpha locks the account after too many failed attempts and emails a one-time
-  // code; "reference" below ties the code the user enters back to that email.
-  const isAccountLockedOtp =
-    (code === 7001 || code === "7001") &&
-    message === "Account locked." &&
-    Boolean(extractAlphaContext(decrypted).reference);
-  if (isAccountLockedOtp) {
+  // Alpha routes two distinct business codes to the same emailed one-time code:
+  // 7001 "Account locked." (too many failed attempts) and 7015 (OTP required/sent
+  // as a normal second factor). Both carry a "reference" tying the code the user
+  // enters back to that email.
+  const isAccountLockedOtp = (code === 7001 || code === "7001") && message === "Account locked.";
+  const isOtpSentCode = code === 7015 || code === "7015";
+  if ((isAccountLockedOtp || isOtpSentCode) && extractAlphaContext(decrypted).reference) {
     return { phase: "otp_required", context: extractAlphaContext(decrypted) };
   }
 

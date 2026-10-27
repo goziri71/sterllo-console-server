@@ -149,7 +149,7 @@ export default class AuthService {
     }
     if (phase === "otp_required") {
       return {
-        state: "account_locked_otp_required",
+        state: "email_otp_required",
         challenge_token: challengeToken,
         expires_in: expiresIn,
         provider: "alpha",
