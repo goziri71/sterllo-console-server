@@ -280,7 +280,11 @@ function normalizeMfaFlag(value) {
 export function alphaAccountMfaEnabled(decrypted) {
   const root = unwrapAlpha(decrypted);
   const account = root.account || root.user || {};
+  const configuration = account.configuration || root.configuration || {};
   const candidates = [
+    configuration.mfa,
+    configuration.mfa_enabled,
+    configuration.is_mfa_enabled,
     account.mfa,
     account.mfa_enabled,
     account.is_mfa_enabled,
@@ -297,6 +301,23 @@ export function alphaAccountMfaEnabled(decrypted) {
 
 export function assertAlphaAccountMfaEnabled(decrypted) {
   if (alphaAccountMfaEnabled(decrypted)) return;
+
+  if (env.ACCOUNT_AUTH_DEBUG === "true" || env.ACCOUNT_AUTH_DEBUG === true) {
+    const root = unwrapAlpha(decrypted);
+    const account = root.account || root.user || {};
+    const configuration = account.configuration || root.configuration || {};
+    // Key names only (never values) — lets us spot the real MFA flag's location
+    // without logging account data.
+    console.warn(
+      "[alpha-account-auth] MFA flag not found; checked keys:",
+      JSON.stringify({
+        rootKeys: Object.keys(root),
+        accountKeys: Object.keys(account),
+        configurationKeys: Object.keys(configuration),
+      }),
+    );
+  }
+
   throw new ErrorClass(
     "Multi-factor authentication must be enabled on your Redbiller account before using Console. Set up MFA in Alpha account settings, then sign in again.",
     403,
