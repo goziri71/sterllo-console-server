@@ -117,6 +117,10 @@ export const env = {
   ACCOUNT_AUTH_MFA_ENROLL_PATH: stripWrappingQuotes(
     process.env.ACCOUNT_AUTH_MFA_ENROLL_PATH || "",
   ),
+  /** Alpha account-locked email OTP step (Login/Client/Code). */
+  ACCOUNT_AUTH_LOGIN_CODE_PATH: stripWrappingQuotes(
+    process.env.ACCOUNT_AUTH_LOGIN_CODE_PATH || "",
+  ),
   /** Optional override; default is auto SOURCE→Alpha when SOURCE_PRODUCT_KEY is set. */
   ACCOUNT_AUTH_STERLLO_PRODUCT: stripWrappingQuotes(
     process.env.ACCOUNT_AUTH_STERLLO_PRODUCT || "",

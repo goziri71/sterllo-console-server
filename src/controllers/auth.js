@@ -26,7 +26,9 @@ export const login = async (request, reply) => {
       ? "Login successful"
       : result.state === "mfa_enrollment_required"
         ? "Alpha MFA enrollment required"
-        : "Alpha MFA verification required";
+        : result.state === "account_locked_otp_required"
+          ? "Account locked. Email OTP verification required"
+          : "Alpha MFA verification required";
 
   return reply.code(200).send({
     status: true,
@@ -93,6 +95,40 @@ export const completeMfaLogin = async (request, reply) => {
     success: true,
     status: true,
     message: "Login successful",
+    data: {
+      ...result,
+      authToken: result.authToken || result.token,
+      token: result.token,
+    },
+  });
+};
+
+export const completeLockoutOtpLogin = async (request, reply) => {
+  if (!request.body || Object.keys(request.body).length === 0) {
+    throw new ErrorClass("Request body is required", 400);
+  }
+  const { challenge_token, code, device_label, device_id } = request.body;
+  if (!challenge_token || !code) {
+    throw new ErrorClass("challenge_token and code are required", 400);
+  }
+  if (!/^\d{6}$/.test(String(code))) {
+    throw new ErrorClass("code must be a 6-digit OTP", 400);
+  }
+
+  const result = await new AuthService().completeLockoutOtpLogin({
+    challengeToken: challenge_token,
+    code: String(code),
+    metadata: requestSecurityMetadata(request, device_label, device_id),
+  });
+
+  const message =
+    result.state === "authenticated" ? "Login successful" : "Alpha MFA verification required";
+
+  return reply.code(200).send({
+    code: 200,
+    success: true,
+    status: true,
+    message,
     data: {
       ...result,
       authToken: result.authToken || result.token,

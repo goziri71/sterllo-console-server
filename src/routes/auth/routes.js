@@ -2,6 +2,7 @@ import {
   login,
   confirmMfaEnrollment,
   completeMfaLogin,
+  completeLockoutOtpLogin,
   logout,
   logoutAll,
   listSessions,
@@ -40,6 +41,15 @@ export default async function authRoutes(fastify) {
       },
     },
     completeMfaLogin,
+  );
+  fastify.post(
+    "/login/otp/verify",
+    {
+      config: {
+        rateLimit: { max: 10, timeWindow: "15 minutes" },
+      },
+    },
+    completeLockoutOtpLogin,
   );
 
   fastify.post(

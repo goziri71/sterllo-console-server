@@ -10,6 +10,7 @@ import { env } from "../config/env.js";
 import MfaSecurityService from "./mfaSecurity.js";
 import {
   alphaClientBasicLogin,
+  alphaClientLoginCodeVerify,
   alphaClientMfaEnrollConfirm,
   alphaClientMfaVerify,
   assertAlphaAccountMfaEnabled,
@@ -146,6 +147,15 @@ export default class AuthService {
           : { type: "totp" },
       };
     }
+    if (phase === "otp_required") {
+      return {
+        state: "account_locked_otp_required",
+        challenge_token: challengeToken,
+        expires_in: expiresIn,
+        provider: "alpha",
+        methods: ["email_otp"],
+      };
+    }
     return {
       state: "mfa_required",
       challenge_token: challengeToken,
@@ -155,8 +165,35 @@ export default class AuthService {
     };
   }
 
+  /** Finish login on "authenticated", otherwise park the Alpha phase behind a new challenge. */
+  async _continueOrFinish({ email, alpha, metadata }) {
+    if (alpha.phase === "authenticated") {
+      return this._finishLoginAfterAlpha({ email, alphaResult: alpha, metadata });
+    }
+
+    const purpose =
+      alpha.phase === "mfa_enroll"
+        ? "alpha_mfa_enroll"
+        : alpha.phase === "otp_required"
+          ? "alpha_login_otp"
+          : "alpha_mfa";
+
+    const challengeToken = await this.mfa.createAlphaMfaChallenge(
+      email,
+      alpha.context,
+      purpose,
+      metadata,
+    );
+
+    return this._alphaMfaChallengeResponse({
+      phase: alpha.phase,
+      challengeToken,
+      alphaContext: alpha.context,
+    });
+  }
+
   /**
-   * Login: Alpha Basic (email/password) → Alpha MFA if required → local Users check → JWT.
+   * Login: Alpha Basic (email/password) → Alpha MFA/lockout-OTP if required → local Users check → JWT.
    */
   async loginWithPassword({ email, password, metadata }) {
     const normalizedEmail = String(email || "").trim().toLowerCase();
@@ -173,31 +210,27 @@ export default class AuthService {
       clientContext: metadata,
     });
 
-    if (alpha.phase === "authenticated") {
-      return this._finishLoginAfterAlpha({
-        email: normalizedEmail,
-        alphaResult: alpha,
-        metadata,
-      });
-    }
+    return this._continueOrFinish({ email: normalizedEmail, alpha, metadata });
+  }
 
-    const purpose =
-      alpha.phase === "mfa_enroll"
-        ? "alpha_mfa_enroll"
-        : "alpha_mfa";
-
-    const challengeToken = await this.mfa.createAlphaMfaChallenge(
-      normalizedEmail,
-      alpha.context,
-      purpose,
-      metadata,
-    );
-
-    return this._alphaMfaChallengeResponse({
-      phase: alpha.phase,
+  /**
+   * Account-locked flow: verifies the emailed OTP (`reference` + `code`) against
+   * Alpha's Login/Client/Code. May itself chain into another Alpha factor (e.g.
+   * an authenticator step) before the console session is finally issued.
+   */
+  async completeLockoutOtpLogin({ challengeToken, code, metadata }) {
+    const { email, alphaContext, clientContext } = await this.mfa.consumeAlphaMfaChallenge(
       challengeToken,
-      alphaContext: alpha.context,
+      "alpha_login_otp",
+    );
+    const alpha = await alphaClientLoginCodeVerify({
+      email,
+      code,
+      alphaContext,
+      clientContext: { ...clientContext, ...metadata },
     });
+
+    return this._continueOrFinish({ email, alpha, metadata });
   }
 
   async confirmMfaEnrollment({ challengeToken, code, metadata }) {

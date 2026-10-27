@@ -23,6 +23,7 @@ import {
 const LOGIN_BASIC_PATH = "/2.202504.0/Account/Auth/Login/Client/Basic";
 const DEFAULT_MFA_VERIFY_PATH = "/2.202504.0/Account/Auth/Login/Client/Mfa/Verify";
 const DEFAULT_MFA_ENROLL_PATH = "/2.202504.0/Account/Auth/Login/Client/Mfa/Enroll/Confirm";
+const DEFAULT_LOGIN_CODE_PATH = "/2.202504.0/Account/Auth/Login/Client/Code";
 
 const DEFAULT_MAILER = Object.freeze({
   client: {
@@ -337,13 +338,14 @@ function extractAlphaContext(decrypted) {
       root.factor?.otpauth_uri,
       account.otpauth_uri,
     ),
+    reference: pickFirst(root.reference, account.reference),
     email: pickFirst(root.email, account.email, account.email_address),
     raw: root,
   };
 }
 
 /**
- * @returns {'authenticated'|'mfa_verify'|'mfa_enroll'|'failed'}
+ * @returns {'authenticated'|'mfa_verify'|'mfa_enroll'|'otp_required'|'failed'}
  */
 export function parseAlphaAuthPhase(decrypted) {
   if (isAlphaSuccess(decrypted)) {
@@ -353,6 +355,17 @@ export function parseAlphaAuthPhase(decrypted) {
   const root = unwrapAlpha(decrypted);
   const state = String(root?.state ?? root?.status ?? "").toLowerCase();
   const code = decrypted?.code ?? root?.code;
+  const message = String(decrypted?.message ?? root?.message ?? "").trim();
+
+  // Alpha locks the account after too many failed attempts and emails a one-time
+  // code; "reference" below ties the code the user enters back to that email.
+  const isAccountLockedOtp =
+    (code === 7001 || code === "7001") &&
+    message === "Account locked." &&
+    Boolean(extractAlphaContext(decrypted).reference);
+  if (isAccountLockedOtp) {
+    return { phase: "otp_required", context: extractAlphaContext(decrypted) };
+  }
 
   const looksLikeMfa =
     /mfa|2fa|otp|verify|challenge|authenticator/.test(state) ||
@@ -546,12 +559,42 @@ function buildMfaPayload(email, code, alphaContext = {}, clientContext = {}) {
   return payload;
 }
 
+function buildLoginCodePayload(email, code, alphaContext = {}, clientContext = {}) {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const reference = pickFirst(alphaContext.reference, alphaContext?.raw?.reference);
+  const client = normalizeAlphaClientContext(clientContext);
+
+  return {
+    email_address: normalizedEmail,
+    authorization: {
+      code: String(code || ""),
+      reference,
+    },
+    client: {
+      ip_address: client.ipAddress,
+      device: { id: client.deviceId },
+    },
+    mailer: DEFAULT_MAILER,
+  };
+}
+
 /**
  * Alpha Account Auth — Login/Client/Basic
  */
 export async function alphaClientBasicLogin({ email, password, clientContext }) {
   const payload = buildLoginPayload({ email, password, clientContext });
   return alphaEncryptedPost(LOGIN_BASIC_PATH, payload, { clientContext });
+}
+
+/**
+ * Alpha Account Auth — Login/Client/Code: verifies the emailed OTP (`reference` +
+ * `code`) issued when Login/Client/Basic reports the account locked.
+ */
+export async function alphaClientLoginCodeVerify({ email, code, alphaContext, clientContext }) {
+  const path =
+    stripWrappingQuotes(env.ACCOUNT_AUTH_LOGIN_CODE_PATH || "") || DEFAULT_LOGIN_CODE_PATH;
+  const payload = buildLoginCodePayload(email, code, alphaContext, clientContext);
+  return alphaEncryptedPost(path, payload, { clientContext });
 }
 
 export async function alphaClientMfaVerify({ email, code, alphaContext, clientContext }) {
