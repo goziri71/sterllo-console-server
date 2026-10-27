@@ -302,12 +302,16 @@ export function alphaAccountMfaEnabled(decrypted) {
 export function assertAlphaAccountMfaEnabled(decrypted) {
   if (alphaAccountMfaEnabled(decrypted)) return;
 
-  if (env.ACCOUNT_AUTH_DEBUG === "true" || env.ACCOUNT_AUTH_DEBUG === true) {
+  const debugOn = env.ACCOUNT_AUTH_DEBUG === "true" || env.ACCOUNT_AUTH_DEBUG === true;
+  let debugData;
+
+  if (debugOn) {
     const root = unwrapAlpha(decrypted);
     const account = root.account || root.user || {};
     const configuration = account.configuration || root.configuration || {};
-    // Key names only (never values) — lets us spot the real MFA flag's location
-    // without logging account data.
+    // This is the requesting user's own login response — safe to echo back to them
+    // while ACCOUNT_AUTH_DEBUG is on, to find the real location of the MFA flag.
+    debugData = { account, configuration, root };
     console.warn(
       "[alpha-account-auth] MFA flag not found; checked keys:",
       JSON.stringify({
@@ -321,6 +325,7 @@ export function assertAlphaAccountMfaEnabled(decrypted) {
   throw new ErrorClass(
     "Multi-factor authentication must be enabled on your Redbiller account before using Console. Set up MFA in Alpha account settings, then sign in again.",
     403,
+    debugData,
   );
 }
 
