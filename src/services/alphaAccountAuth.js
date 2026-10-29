@@ -302,26 +302,25 @@ export function alphaAccountMfaEnabled(decrypted) {
 export function assertAlphaAccountMfaEnabled(decrypted) {
   if (alphaAccountMfaEnabled(decrypted)) return;
 
-  const root = unwrapAlpha(decrypted);
-  const account = root.account || root.user || {};
-  const configuration = account.configuration || root.configuration || {};
-  // TEMPORARY: unconditional (not gated by ACCOUNT_AUTH_DEBUG) so this is visible
-  // on the deployment without platform env access. This is the requesting user's
-  // own login response. Remove `debugData` once the real MFA flag is confirmed.
-  const debugData = { account, configuration, root };
-  console.warn(
-    "[alpha-account-auth] MFA flag not found; checked keys:",
-    JSON.stringify({
-      rootKeys: Object.keys(root),
-      accountKeys: Object.keys(account),
-      configurationKeys: Object.keys(configuration),
-    }),
-  );
+  if (env.ACCOUNT_AUTH_DEBUG === "true" || env.ACCOUNT_AUTH_DEBUG === true) {
+    const root = unwrapAlpha(decrypted);
+    const account = root.account || root.user || {};
+    const configuration = account.configuration || root.configuration || {};
+    // Key names only (never values) — lets us spot the real MFA flag's location
+    // without logging account data.
+    console.warn(
+      "[alpha-account-auth] MFA flag not found; checked keys:",
+      JSON.stringify({
+        rootKeys: Object.keys(root),
+        accountKeys: Object.keys(account),
+        configurationKeys: Object.keys(configuration),
+      }),
+    );
+  }
 
   throw new ErrorClass(
     "Multi-factor authentication must be enabled on your Redbiller account before using Console. Set up MFA in Alpha account settings, then sign in again.",
     403,
-    debugData,
   );
 }
 

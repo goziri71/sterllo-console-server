@@ -22,12 +22,14 @@ import { authenticate, requirePermission } from "../../middleware/auth.js";
 import { PERMISSIONS } from "../../config/permissions.js";
 
 export default async function customerRoutes(fastify) {
-  // No JWT: lookup via x-user-key + x-account-key headers only
-  fastify.get("/detail", getCustomerByHeaders);
-  fastify.patch("/update", updateCustomerByHeaders);
-
   await fastify.register(async function securedRoutes(f) {
     f.addHook("preHandler", authenticate);
+
+    // Lookup is still by x-user-key + x-account-key headers (not :identifier),
+    // but this now requires the same staff Bearer token + RBAC as every other
+    // customer route — it previously had neither.
+    f.get("/detail", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getCustomerByHeaders);
+    f.patch("/update", { preHandler: requirePermission(PERMISSIONS.CUSTOMER_UPDATE) }, updateCustomerByHeaders);
 
     // Stats must be registered before /:identifier to avoid route conflict
     f.get("/stats", { preHandler: requirePermission(PERMISSIONS.CONSOLE_READ) }, getCustomerStats);
