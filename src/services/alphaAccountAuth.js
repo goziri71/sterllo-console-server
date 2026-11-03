@@ -25,6 +25,12 @@ const DEFAULT_MFA_VERIFY_PATH = "/2.202504.0/Account/Auth/Login/Client/Mfa/Verif
 const DEFAULT_MFA_ENROLL_PATH = "/2.202504.0/Account/Auth/Login/Client/Mfa/Enroll/Confirm";
 const DEFAULT_LOGIN_CODE_PATH = "/2.202504.0/Account/Auth/Login/Client/Code";
 
+// Alpha login-handshake session TTL. Short-lived on purpose: we don't explicitly
+// kill a previous device's Alpha session on new login (Console's own single-device
+// enforcement already handles that locally/immediately) — this just caps how long
+// an abandoned/stale login attempt (e.g. an unused emailed OTP) stays usable.
+const LOGIN_SESSION_LIFESPAN_SECONDS = 1800;
+
 const DEFAULT_MAILER = Object.freeze({
   client: {
     name: "Redbiller",
@@ -197,6 +203,7 @@ function buildLoginPayload({ email, password, clientContext, extra = {} }) {
   return {
     email_address: normalizedEmail,
     password: String(password || ""),
+    lifespan: LOGIN_SESSION_LIFESPAN_SECONDS,
     client: {
       ip_address: client.ipAddress,
       device: { id: client.deviceId },
@@ -591,6 +598,7 @@ function buildLoginCodePayload(email, code, alphaContext = {}, clientContext = {
       code: String(code || ""),
       reference,
     },
+    lifespan: LOGIN_SESSION_LIFESPAN_SECONDS,
     client: {
       ip_address: client.ipAddress,
       device: { id: client.deviceId },
