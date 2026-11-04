@@ -157,12 +157,13 @@ function buildAlphaSchemaWireHeaders({
   encryptionKey,
   iv,
   extraCredentials = {},
+  includeDeviceSignature = true,
 }) {
   const credentialsObject = {
     "Source-Product-Key": sourceProductKey,
     "Target-Product-Key": targetProductKey,
     "Source-Product-Id": sourceProductId,
-    "Device-Signature": deviceSignature,
+    ...(includeDeviceSignature ? { "Device-Signature": deviceSignature } : {}),
     ...extraCredentials,
   };
 
@@ -172,7 +173,7 @@ function buildAlphaSchemaWireHeaders({
     "Source-Product-Key": sourceProductKey,
     "Target-Product-Key": targetProductKey,
     "Source-Product-Id": sourceProductId,
-    "Device-Signature": deviceSignature,
+    ...(includeDeviceSignature ? { "Device-Signature": deviceSignature } : {}),
     Credentials: buildIsvsCredentialsHeader(credentialsObject, encryptionKey, iv),
   };
 
@@ -426,7 +427,11 @@ export function parseAlphaAuthPhase(decrypted) {
   };
 }
 
-async function alphaEncryptedPost(path, payload, { extraCredentials = {}, clientContext = {} } = {}) {
+async function alphaEncryptedPost(
+  path,
+  payload,
+  { extraCredentials = {}, clientContext = {}, includeDeviceSignature = true } = {},
+) {
   const {
     productKey,
     baseUrl,
@@ -457,7 +462,7 @@ async function alphaEncryptedPost(path, payload, { extraCredentials = {}, client
       "Source-Product-Key": sourceProductKey,
       "Target-Product-Key": targetProductKey,
       "Request-Id": requestId,
-      "Device-Signature": deviceSignature,
+      ...(includeDeviceSignature ? { "Device-Signature": deviceSignature } : {}),
       "Request-IP-Address": client.ipAddress,
       ...extraCredentials,
     };
@@ -485,6 +490,7 @@ async function alphaEncryptedPost(path, payload, { extraCredentials = {}, client
       encryptionKey,
       iv,
       extraCredentials,
+      includeDeviceSignature,
     });
   }
 
@@ -623,7 +629,11 @@ export async function alphaClientLoginCodeVerify({ email, code, alphaContext, cl
   const path =
     stripWrappingQuotes(env.ACCOUNT_AUTH_LOGIN_CODE_PATH || "") || DEFAULT_LOGIN_CODE_PATH;
   const payload = buildLoginCodePayload(email, code, alphaContext, clientContext);
-  return alphaEncryptedPost(path, payload, { clientContext });
+  // Alpha's schema for this endpoint only allows Target/Source-Product-Key,
+  // Source-Product-Id (+ optional Rate-Limiter-Key) — "Device-Signature" is
+  // rejected here with 4013 "not required in header" (confirmed against a live
+  // Alpha error response), unlike Basic login and the MFA endpoints.
+  return alphaEncryptedPost(path, payload, { clientContext, includeDeviceSignature: false });
 }
 
 export async function alphaClientMfaVerify({ email, code, alphaContext, clientContext }) {
