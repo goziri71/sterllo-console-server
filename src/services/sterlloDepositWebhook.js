@@ -24,6 +24,7 @@ async function resolveDepositContext(reference) {
       user_key: deposits.user_key,
       account_key: deposits.account_key,
       source_reference: deposits.source_reference,
+      session_id: deposits.session_id,
     })
     .from(deposits)
     .where(or(eq(deposits.source_reference, ref), eq(deposits.target_reference, ref)))
@@ -34,6 +35,7 @@ async function resolveDepositContext(reference) {
       currency_code: ledger.currency_code,
       user_key: ledger.user_key,
       account_key: ledger.account_key,
+      session_id: ledger.session_id,
       reference: ledger.source_reference || ref,
     };
   }
@@ -42,6 +44,7 @@ async function resolveDepositContext(reference) {
     .select({
       deposit_reference: ngnDeposits.deposit_reference,
       wallet_key: ngnDeposits.wallet_key,
+      session_id: ngnDeposits.session_id,
     })
     .from(ngnDeposits)
     .where(eq(ngnDeposits.deposit_reference, ref))
@@ -53,6 +56,7 @@ async function resolveDepositContext(reference) {
     currency_code: "NGN",
     user_key: null,
     account_key: null,
+    session_id: ngn.session_id,
     reference: ngn.deposit_reference || ref,
   };
 }
@@ -100,7 +104,9 @@ export async function replayDepositWebhook(payload = {}) {
     let userKey = trimStr(body.user_key || body.userKey) || trimStr(deposit?.user_key);
     let accountKey =
       trimStr(body.account_key || body.accountKey) || trimStr(deposit?.account_key);
-    const sessionId = trimStr(body.session_id || body.sessionID || body.sessionId);
+    const sessionId =
+      trimStr(body.session_id || body.sessionID || body.sessionId) ||
+      trimStr(deposit?.session_id);
 
     if (!userKey || !accountKey) {
       const merchant = await resolveMerchantKeys(accountKey || body.account_key);
