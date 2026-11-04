@@ -327,7 +327,7 @@ export function assertAlphaAccountMfaEnabled(decrypted) {
   }
 
   throw new ErrorClass(
-    "Multi-factor authentication must be enabled on your Redbiller account before using Console. Set up MFA in Alpha account settings, then sign in again.",
+    "Enable MFA on your account and try again.",
     403,
   );
 }

@@ -52,7 +52,7 @@ Errors:
 
 - `400` missing/invalid email or password
 - `401` Alpha rejected credentials (bad password, unknown account, etc.) — **body is Alpha’s JSON unchanged** (e.g. `{ "code": 4013, "state": false, "message": "Request denied." }`), not the console `{ code: 4010, … }` envelope. `7001` with message `"Account locked."` and `7015` are **not** in this bucket — both are caught server-side and turned into the `200` / `email_otp_required` response above instead of a thrown error.
-- `403` Alpha login succeeded but `account.mfa` is not enabled — user must set up MFA on Redbiller/Alpha before Console access
+- `403` Alpha login succeeded but `account.mfa` is not enabled — `"Enable MFA on your account and try again."`
 - `404` Alpha OK but user not on console Users list
 - `502` Alpha unreachable / misconfigured env
 
