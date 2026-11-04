@@ -906,10 +906,16 @@ function buildPlainBeamerUpdateHeaders(requestHeaders) {
 }
 
 function buildIsvsEncryptedCredentialsObjectTsq(productKeys, plainHeadersObject) {
+  // ISVS schema for this endpoint rejects "Request-Id" and instead requires
+  // "Source-Request-Id", plus "Source-Signature" and "Source-Client-Id" which
+  // this integration has no source material for yet (no signing key or client-id
+  // concept exists anywhere in the Beamer product-key material) — confirmed via
+  // a live 4013 schema-mismatch response. Those two are intentionally omitted
+  // rather than guessed; this call will still fail until that spec is known.
   return {
     "Source-Product-Key": productKeys.sourceProductKey,
     "Target-Product-Key": productKeys.targetProductKey,
-    "Request-Id": beamerHeaderValue(plainHeadersObject["Request-Id"]),
+    "Source-Request-Id": beamerHeaderValue(plainHeadersObject["Request-Id"]),
   };
 }
 
