@@ -27,8 +27,9 @@ Product keys use the **same transport as account-link**: decrypted `SOURCE_PRODU
 ### Notes
 
 - Backend injects product keys the same way as link (`Credentials` cryptojs wire).
-- Inside Credentials: `Target-Product-Key`, `Source-Product-Key`, `Request-Id` (no `User-Key` / `Accout-Key` for TSQ).
-- `Request-Id` is optional in the body — server generates one if omitted.
+- Inside Credentials (and matching HTTP headers): `Source-Product-Key`, `Target-Product-Key`, `Source-Signature`, `Source-Request-Id`, `Source-Client-Id`. Optional `X-Request-Id`.
+- `Request-Id` in the FE envelope is used as `Source-Request-Id` — server generates one if omitted.
+- `Source-Client-Id` is derived from the decrypted SOURCE product key (override with `headers.Source-Client-Id` if needed).
 - `data.reference` is required.
 - Body to ISVS is encrypted `{ payload }` containing `{ reference }`, same pattern as link.
 

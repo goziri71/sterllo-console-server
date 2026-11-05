@@ -30,6 +30,7 @@ import { customers } from "../db/schema/customers.js";
 import { kycs } from "../db/schema/kycs.js";
 import { ErrorClass } from "../utils/errorClass/index.js";
 import { isMissingMysqlTableError } from "../utils/mysqlErrors.js";
+import { extractSourceProductIdFromKey } from "../utils/sterlloProductKey.js";
 
 const SORTABLE_COLUMNS = {
   name: merchants.name,
@@ -303,18 +304,54 @@ function buildPlainIsvsTsqBody(plainDataObject) {
   };
 }
 
+function resolveBeamerSourceClientId(productKeys, plainHeadersObject) {
+  return pickFirstNonEmpty(
+    beamerHeaderValue(plainHeadersObject["Source-Client-Id"]),
+    extractSourceProductIdFromKey(productKeys.sourceProductKey),
+  );
+}
+
+function buildBeamerSourceSignature(sourceClientId, sourceRequestId, hmacKey) {
+  const material = `${String(sourceClientId || "").trim()}:${String(sourceRequestId || "").trim()}`;
+  return crypto.createHmac("sha256", hmacKey).update(material).digest("base64");
+}
+
 /** Colleague makeEncryptedApiCall: Credentials + IV; body `{ payload }` with `{ reference }`. */
 function buildIsvsCryptoJsWireTsq(productKeys, plainHeadersObject, plainDataObject) {
   const encryptionKey = resolveIsvsEncryptionKeyFromProductKeys(productKeys);
+  const sourceHmacKey = resolveIsvsEncryptionKey(productKeys.sourceProductKey, {
+    secretName: "SOURCE_PRODUCT_KEY",
+  });
   const iv = generateIsvsIv();
-  const credentialsObject = buildIsvsEncryptedCredentialsObjectTsq(productKeys, plainHeadersObject);
+  const sourceRequestId = pickFirstNonEmpty(
+    beamerHeaderValue(plainHeadersObject["Source-Request-Id"]),
+    beamerHeaderValue(plainHeadersObject["Request-Id"]),
+    crypto.randomUUID(),
+  );
+  const sourceClientId = resolveBeamerSourceClientId(productKeys, plainHeadersObject);
+  const sourceSignature = pickFirstNonEmpty(
+    beamerHeaderValue(plainHeadersObject["Source-Signature"]),
+    buildBeamerSourceSignature(sourceClientId, sourceRequestId, sourceHmacKey),
+  );
+  const credentialsObject = buildIsvsEncryptedCredentialsObjectTsq(productKeys, {
+    ...plainHeadersObject,
+    "Source-Request-Id": sourceRequestId,
+    "Source-Client-Id": sourceClientId,
+    "Source-Signature": sourceSignature,
+  });
   const payload = buildPlainIsvsTsqBody(plainDataObject);
   const encryptedPayload = encryptIsvsJson(payload, encryptionKey, iv);
 
   return {
     axiosHeaders: {
-      Credentials: buildIsvsCredentialsHeader(credentialsObject, encryptionKey, iv),
       "Content-Type": "application/json",
+      "Source-Product-Key": productKeys.sourceProductKey,
+      "Target-Product-Key": productKeys.targetProductKey,
+      "Source-Signature": sourceSignature,
+      "Source-Request-Id": sourceRequestId,
+      "Source-Client-Id": sourceClientId,
+      "X-Request-Id": sourceRequestId,
+      Credentials: buildIsvsCredentialsHeader(credentialsObject, encryptionKey, iv),
     },
     isvsBody: { payload: encryptedPayload },
     _isvsPlain: {
@@ -906,16 +943,15 @@ function buildPlainBeamerUpdateHeaders(requestHeaders) {
 }
 
 function buildIsvsEncryptedCredentialsObjectTsq(productKeys, plainHeadersObject) {
-  // ISVS schema for this endpoint rejects "Request-Id" and instead requires
-  // "Source-Request-Id", plus "Source-Signature" and "Source-Client-Id" which
-  // this integration has no source material for yet (no signing key or client-id
-  // concept exists anywhere in the Beamer product-key material) — confirmed via
-  // a live 4013 schema-mismatch response. Those two are intentionally omitted
-  // rather than guessed; this call will still fail until that spec is known.
   return {
     "Source-Product-Key": productKeys.sourceProductKey,
     "Target-Product-Key": productKeys.targetProductKey,
-    "Source-Request-Id": beamerHeaderValue(plainHeadersObject["Request-Id"]),
+    "Source-Signature": beamerHeaderValue(plainHeadersObject["Source-Signature"]),
+    "Source-Request-Id": pickFirstNonEmpty(
+      beamerHeaderValue(plainHeadersObject["Source-Request-Id"]),
+      beamerHeaderValue(plainHeadersObject["Request-Id"]),
+    ),
+    "Source-Client-Id": beamerHeaderValue(plainHeadersObject["Source-Client-Id"]),
   };
 }
 
