@@ -30,7 +30,6 @@ import { customers } from "../db/schema/customers.js";
 import { kycs } from "../db/schema/kycs.js";
 import { ErrorClass } from "../utils/errorClass/index.js";
 import { isMissingMysqlTableError } from "../utils/mysqlErrors.js";
-import { extractSourceProductIdFromKey } from "../utils/sterlloProductKey.js";
 
 const SORTABLE_COLUMNS = {
   name: merchants.name,
@@ -304,35 +303,77 @@ function buildPlainIsvsTsqBody(plainDataObject) {
   };
 }
 
-function resolveBeamerSourceClientId(productKeys, plainHeadersObject) {
-  return pickFirstNonEmpty(
-    beamerHeaderValue(plainHeadersObject["Source-Client-Id"]),
-    extractSourceProductIdFromKey(productKeys.sourceProductKey),
+// Fixed per-integration id (confirmed from the counterpart PHP implementation —
+// not derived from our product keys).
+const BEAMER_SOURCE_CLIENT_ID = "c65ddc44-5b9b-4aa6-80cc-9143cea481a2";
+
+/** Port of the counterpart's `generateChecksum`: a Luhn check digit over a numeric string. */
+function beamerLuhnCheckDigit(value) {
+  const str = String(value);
+  const length = str.length;
+  const parity = length % 2;
+  let sum = 0;
+  for (let i = length - 1; i >= 0; i -= 1) {
+    let digit = Number(str[i]);
+    if (i % 2 !== parity) {
+      digit *= 2;
+      if (digit > 9) digit -= 9;
+    }
+    sum += digit;
+  }
+  return (sum * 9) % 10;
+}
+
+/** Port of the counterpart's `$requestId` build: YmdHis + 10 random digits + 1 Luhn check digit. */
+function buildBeamerSourceRequestId() {
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const ymdhis =
+    `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}` +
+    `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  const randomDigits = Array.from({ length: 10 }, () => Math.floor(Math.random() * 10)).join("");
+  const base = ymdhis + randomDigits;
+  return base + String(beamerLuhnCheckDigit(base));
+}
+
+/**
+ * Decrypt the RSA signing key: same AES/base64 scheme as every other product key
+ * in this file, keyed with SOURCE_PRODUCT_KEY_KEYCHAIN (confirmed by successful
+ * decrypt — this is the "Source" side's own signing key, not a shared secret).
+ */
+function resolveBeamerSourceSignaturePrivateKey() {
+  const encrypted = stripWrappingQuotes(process.env.BEAMER_ISVS_SOURCE_SIGNATURE_PRIVATE_KEY || "")
+    .replace(/^`+|`+$/g, "")
+    .trim();
+  if (!encrypted) {
+    throw new ErrorClass("BEAMER_ISVS_SOURCE_SIGNATURE_PRIVATE_KEY is not configured", 500);
+  }
+  const keychain = stripWrappingQuotes(
+    process.env.SOURCE_PRODUCT_KEY_KEYCHAIN || process.env.SOURCE_PRODUCT_KEYCHAIN || "",
+  );
+  return stripWrappingQuotes(
+    decryptIsvsProductKeyFromEnv(encrypted, keychain, {
+      valueName: "BEAMER_ISVS_SOURCE_SIGNATURE_PRIVATE_KEY",
+    }),
   );
 }
 
-function buildBeamerSourceSignature(sourceClientId, sourceRequestId, hmacKey) {
-  const material = `${String(sourceClientId || "").trim()}:${String(sourceRequestId || "").trim()}`;
-  return crypto.createHmac("sha256", hmacKey).update(material).digest("base64");
+/** Port of the counterpart's `create_sign`: RSA-SHA256 over the request id, base64-encoded. */
+function signBeamerSourceRequestId(sourceRequestId) {
+  const privateKeyPem = resolveBeamerSourceSignaturePrivateKey();
+  return crypto.sign("RSA-SHA256", Buffer.from(sourceRequestId), privateKeyPem).toString("base64");
 }
 
 /** Colleague makeEncryptedApiCall: Credentials + IV; body `{ payload }` with `{ reference }`. */
 function buildIsvsCryptoJsWireTsq(productKeys, plainHeadersObject, plainDataObject) {
   const encryptionKey = resolveIsvsEncryptionKeyFromProductKeys(productKeys);
-  const sourceHmacKey = resolveIsvsEncryptionKey(productKeys.sourceProductKey, {
-    secretName: "SOURCE_PRODUCT_KEY",
-  });
   const iv = generateIsvsIv();
-  const sourceRequestId = pickFirstNonEmpty(
-    beamerHeaderValue(plainHeadersObject["Source-Request-Id"]),
-    beamerHeaderValue(plainHeadersObject["Request-Id"]),
-    crypto.randomUUID(),
-  );
-  const sourceClientId = resolveBeamerSourceClientId(productKeys, plainHeadersObject);
-  const sourceSignature = pickFirstNonEmpty(
-    beamerHeaderValue(plainHeadersObject["Source-Signature"]),
-    buildBeamerSourceSignature(sourceClientId, sourceRequestId, sourceHmacKey),
-  );
+  // Always freshly generated server-side — never caller-supplied. The signature
+  // is only valid for the exact request id it was computed over, so letting a
+  // caller override one without the other would silently break verification.
+  const sourceRequestId = buildBeamerSourceRequestId();
+  const sourceClientId = BEAMER_SOURCE_CLIENT_ID;
+  const sourceSignature = signBeamerSourceRequestId(sourceRequestId);
   const credentialsObject = buildIsvsEncryptedCredentialsObjectTsq(productKeys, {
     ...plainHeadersObject,
     "Source-Request-Id": sourceRequestId,
