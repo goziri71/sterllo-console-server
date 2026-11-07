@@ -17,6 +17,10 @@ Console login uses **Alpha Account Auth only** (no console TOTP/recovery on logi
      data.state email_otp_required, provider alpha, methods ["email_otp"]
      → POST /auth/login/otp/verify { challenge_token, code }
      → may itself return 2a or 2b if Alpha asks for another factor after the OTP
+2d. Alpha reports success directly (no challenge raised this attempt) but the
+     account has configuration.mfa enabled → data.state mfa_activation_required,
+     provider alpha, methods ["totp"]
+     → POST /auth/mfa/activate { challenge_token, code }
 3. After Alpha succeeds → server checks Users list → JWT if provisioned
 ```
 
@@ -46,7 +50,8 @@ Responses:
 - `data.state: "email_otp_required"` — Alpha emailed a 6-digit code and needs it to continue; `data.provider: "alpha"`, `data.methods: ["email_otp"]`. This covers **two** underlying Alpha business codes — both land on the same screen/endpoint:
   - `7001` + message `"Account locked."` — too many failed attempts
   - `7015` — OTP required as a normal second factor (not a lockout; e.g. `"Authentication Code required."`)
-- `data.state: "authenticated"` — Alpha + provisioned user (no Alpha MFA step)
+- `data.state: "mfa_activation_required"` — Alpha's response already looked like success, but the account has `configuration.mfa === true` and no MFA challenge was raised this attempt. Console forces one more step (Alpha `Session/Activate`) before a session is issued, so an MFA-enabled admin can never log in without entering their code; `data.provider: "alpha"`, `data.methods: ["totp"]`
+- `data.state: "authenticated"` — Alpha + provisioned user (no Alpha MFA step needed, or it was already satisfied earlier this attempt)
 
 Errors:
 
@@ -65,6 +70,7 @@ Every completed login checks Alpha **`account.mfa`** (and equivalent fields). Co
 | Confirm Alpha enrollment | `POST /mfa/enroll/confirm` | `{ challenge_token, code }` |
 | Verify Alpha login | `POST /mfa/challenge/verify` | `{ challenge_token, code }` |
 | Verify emailed OTP (`email_otp_required`) | `POST /login/otp/verify` | `{ challenge_token, code }` |
+| Session activation step-up (`mfa_activation_required`) | `POST /mfa/activate` | `{ challenge_token, code }` |
 
 `recovery_code` is **not** supported on console login (use Alpha account security).
 
@@ -81,6 +87,7 @@ Optional override if Alpha path differs:
 - `ACCOUNT_AUTH_MFA_VERIFY_PATH` (default `.../Login/Client/Mfa/Verify`)
 - `ACCOUNT_AUTH_MFA_ENROLL_PATH` (default `.../Login/Client/Mfa/Enroll/Confirm`)
 - `ACCOUNT_AUTH_LOGIN_CODE_PATH` (default `.../Login/Client/Code`) — emailed OTP verify (`email_otp_required`)
+- `ACCOUNT_AUTH_SESSION_ACTIVATE_PATH` (default `.../Session/Activate`) — post-login MFA step-up (`mfa_activation_required`)
 - Default: **`productId` mode** — `Source-Product-Key` and `Target-Product-Key` are both `ACCOUNT_AUTH`; `Source-Product-Id` is parsed from that key (trailing pipe segment or `<ALPHA>.` prefix).
 - Optional: `ACCOUNT_AUTH_STERLLO_PRODUCT=true` only if Alpha registered your Beamer `SOURCE_*` key for Account Login (otherwise you may see **7010**).
 - Optional override: `SOURCE_PRODUCT_ID`.
@@ -94,3 +101,4 @@ Optional override if Alpha path differs:
 - Do not show console MFA QR unless `factor.otpauth_uri` is present from Alpha.
 - On `email_otp_required`, show the same kind of 6-digit code screen as the authenticator step, but mention it was emailed (`methods: ["email_otp"]`). Do not treat this as a hard login failure — it is a normal `200` with a `challenge_token` to continue from, exactly like `mfa_required`. This fires both for an actual lockout and for accounts where Alpha just requires email OTP as a normal second factor — the UI copy shouldn't assume "locked" (don't show a lockout-specific message; a generic "Enter the code we emailed you" works for both).
 - `challenge_token` expires after `data.expires_in` seconds (same TTL as the other MFA challenges); on expiry the user must resubmit email/password on `/login` to get a fresh one. There is **no separate resend endpoint** for this OTP yet — whether resubmitting `/login` while still locked re-emails a new code (vs. just repeating the same lockout) hasn't been confirmed against the live Alpha API yet; verify this before building a "resend" UI affordance.
+- On `mfa_activation_required`, show the same authenticator code screen as `mfa_required` — same UX, different endpoint (`/mfa/activate` instead of `/mfa/challenge/verify`). This can show up even when the password step alone returned what looked like a normal success; don't assume `authenticated` always means logged in — always check `data.state` first.

@@ -24,6 +24,7 @@ const LOGIN_BASIC_PATH = "/2.202504.0/Account/Auth/Login/Client/Basic";
 const DEFAULT_MFA_VERIFY_PATH = "/2.202504.0/Account/Auth/Login/Client/Mfa/Verify";
 const DEFAULT_MFA_ENROLL_PATH = "/2.202504.0/Account/Auth/Login/Client/Mfa/Enroll/Confirm";
 const DEFAULT_LOGIN_CODE_PATH = "/2.202504.0/Account/Auth/Login/Client/Code";
+const DEFAULT_SESSION_ACTIVATE_PATH = "/2.202504.0/Account/Auth/Session/Activate";
 
 // Alpha login-handshake session TTL. Short-lived on purpose: we don't explicitly
 // kill a previous device's Alpha session on new login (Console's own single-device
@@ -648,6 +649,22 @@ export async function alphaClientMfaVerify({ email, code, alphaContext, clientCo
 export async function alphaClientMfaEnrollConfirm({ email, code, alphaContext, clientContext }) {
   const path =
     stripWrappingQuotes(env.ACCOUNT_AUTH_MFA_ENROLL_PATH || "") || DEFAULT_MFA_ENROLL_PATH;
+  const payload = buildMfaPayload(email, code, alphaContext, clientContext);
+  const extra = {};
+  if (alphaContext?.userKey) extra["User-Key"] = alphaContext.userKey;
+  return alphaEncryptedPost(path, payload, { extraCredentials: extra, clientContext });
+}
+
+/**
+ * Alpha Account Auth — Session/Activate: post-login step-up for accounts with
+ * `configuration.mfa === true` whose Basic/Code login came back already
+ * "authenticated" (no pre-session MFA challenge was raised). Uses the pending
+ * userKey/sessionID from that login, same payload shape as the other MFA calls.
+ */
+export async function alphaClientSessionActivate({ email, code, alphaContext, clientContext }) {
+  const path =
+    stripWrappingQuotes(env.ACCOUNT_AUTH_SESSION_ACTIVATE_PATH || "") ||
+    DEFAULT_SESSION_ACTIVATE_PATH;
   const payload = buildMfaPayload(email, code, alphaContext, clientContext);
   const extra = {};
   if (alphaContext?.userKey) extra["User-Key"] = alphaContext.userKey;

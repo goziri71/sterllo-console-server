@@ -3,6 +3,7 @@ import {
   confirmMfaEnrollment,
   completeMfaLogin,
   completeLockoutOtpLogin,
+  completeSessionActivation,
   logout,
   logoutAll,
   listSessions,
@@ -50,6 +51,15 @@ export default async function authRoutes(fastify) {
       },
     },
     completeLockoutOtpLogin,
+  );
+  fastify.post(
+    "/mfa/activate",
+    {
+      config: {
+        rateLimit: { max: 10, timeWindow: "15 minutes" },
+      },
+    },
+    completeSessionActivation,
   );
 
   fastify.post(

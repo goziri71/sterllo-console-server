@@ -9,10 +9,12 @@ import { pickPrimaryRoleSlug } from "../config/roles.js";
 import { env } from "../config/env.js";
 import MfaSecurityService from "./mfaSecurity.js";
 import {
+  alphaAccountMfaEnabled,
   alphaClientBasicLogin,
   alphaClientLoginCodeVerify,
   alphaClientMfaEnrollConfirm,
   alphaClientMfaVerify,
+  alphaClientSessionActivate,
   assertAlphaAccountMfaEnabled,
 } from "./alphaAccountAuth.js";
 
@@ -156,6 +158,15 @@ export default class AuthService {
         methods: ["email_otp"],
       };
     }
+    if (phase === "session_activate") {
+      return {
+        state: "mfa_activation_required",
+        challenge_token: challengeToken,
+        expires_in: expiresIn,
+        provider: "alpha",
+        methods: ["totp"],
+      };
+    }
     return {
       state: "mfa_required",
       challenge_token: challengeToken,
@@ -165,9 +176,30 @@ export default class AuthService {
     };
   }
 
-  /** Finish login on "authenticated", otherwise park the Alpha phase behind a new challenge. */
+  /**
+   * Finish login on "authenticated", otherwise park the Alpha phase behind a new
+   * challenge. "authenticated" itself still needs one more check: Alpha can report
+   * success without ever having raised an MFA challenge on this attempt (e.g. a
+   * plain Basic/Code login). If the account has `configuration.mfa` enabled and
+   * no challenge was taken this attempt, force a Session/Activate step-up before
+   * a session is issued — otherwise an MFA-enabled admin could log in without
+   * ever entering their code.
+   */
   async _continueOrFinish({ email, alpha, metadata }) {
     if (alpha.phase === "authenticated") {
+      if (alphaAccountMfaEnabled(alpha.decrypted)) {
+        const challengeToken = await this.mfa.createAlphaMfaChallenge(
+          email,
+          alpha.context,
+          "alpha_session_activate",
+          metadata,
+        );
+        return this._alphaMfaChallengeResponse({
+          phase: "session_activate",
+          challengeToken,
+          alphaContext: alpha.context,
+        });
+      }
       return this._finishLoginAfterAlpha({ email, alphaResult: alpha, metadata });
     }
 
@@ -273,6 +305,32 @@ export default class AuthService {
     });
     if (alpha.phase !== "authenticated") {
       throw new ErrorClass("Alpha MFA verification failed", 401);
+    }
+    return this._finishLoginAfterAlpha({
+      email,
+      alphaResult: alpha,
+      metadata,
+    });
+  }
+
+  /**
+   * Post-login MFA step-up: Alpha already reported "authenticated" (no challenge
+   * was raised this attempt), but the account has `configuration.mfa` enabled, so
+   * Console forced this extra step before issuing a session.
+   */
+  async completeSessionActivation({ challengeToken, code, metadata }) {
+    const { email, alphaContext, clientContext } = await this.mfa.consumeAlphaMfaChallenge(
+      challengeToken,
+      "alpha_session_activate",
+    );
+    const alpha = await alphaClientSessionActivate({
+      email,
+      code,
+      alphaContext,
+      clientContext: { ...clientContext, ...metadata },
+    });
+    if (alpha.phase !== "authenticated") {
+      throw new ErrorClass("Alpha session activation failed", 401);
     }
     return this._finishLoginAfterAlpha({
       email,

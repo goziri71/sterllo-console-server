@@ -121,6 +121,10 @@ export const env = {
   ACCOUNT_AUTH_LOGIN_CODE_PATH: stripWrappingQuotes(
     process.env.ACCOUNT_AUTH_LOGIN_CODE_PATH || "",
   ),
+  /** Post-login MFA step-up for configuration.mfa accounts (Session/Activate). */
+  ACCOUNT_AUTH_SESSION_ACTIVATE_PATH: stripWrappingQuotes(
+    process.env.ACCOUNT_AUTH_SESSION_ACTIVATE_PATH || "",
+  ),
   /** Optional override; default is auto SOURCE→Alpha when SOURCE_PRODUCT_KEY is set. */
   ACCOUNT_AUTH_STERLLO_PRODUCT: stripWrappingQuotes(
     process.env.ACCOUNT_AUTH_STERLLO_PRODUCT || "",
