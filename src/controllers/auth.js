@@ -2,6 +2,19 @@ import AuthService from "../services/auth.js";
 import { requestSecurityMetadata } from "../services/mfaSecurity.js";
 import { ErrorClass } from "../utils/errorClass/index.js";
 
+/** Shared across every endpoint that can return a login `state` (including chained ones). */
+const LOGIN_STATE_MESSAGES = {
+  authenticated: "Login successful",
+  mfa_enrollment_required: "Alpha MFA enrollment required",
+  email_otp_required: "Email OTP verification required",
+  mfa_activation_required: "Authenticator verification required",
+  mfa_required: "Alpha MFA verification required",
+};
+
+function loginStateMessage(state) {
+  return LOGIN_STATE_MESSAGES[state] || "Alpha MFA verification required";
+}
+
 export const login = async (request, reply) => {
   if (!request.body || Object.keys(request.body).length === 0) {
     throw new ErrorClass("Request body is required", 400);
@@ -21,22 +34,11 @@ export const login = async (request, reply) => {
     metadata: requestSecurityMetadata(request, device_label, device_id),
   });
 
-  const message =
-    result.state === "authenticated"
-      ? "Login successful"
-      : result.state === "mfa_enrollment_required"
-        ? "Alpha MFA enrollment required"
-        : result.state === "email_otp_required"
-          ? "Email OTP verification required"
-          : result.state === "mfa_activation_required"
-            ? "Authenticator verification required"
-            : "Alpha MFA verification required";
-
   return reply.code(200).send({
     status: true,
     code: 200,
     success: true,
-    message,
+    message: loginStateMessage(result.state),
     data: result,
   });
 };
@@ -123,14 +125,11 @@ export const completeLockoutOtpLogin = async (request, reply) => {
     metadata: requestSecurityMetadata(request, device_label, device_id),
   });
 
-  const message =
-    result.state === "authenticated" ? "Login successful" : "Alpha MFA verification required";
-
   return reply.code(200).send({
     code: 200,
     success: true,
     status: true,
-    message,
+    message: loginStateMessage(result.state),
     data: {
       ...result,
       authToken: result.authToken || result.token,
